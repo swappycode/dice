@@ -15,7 +15,8 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 sqlx = { workspace = true }
-dashmap = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }
 tracing = { workspace = true }
 
 [lints]

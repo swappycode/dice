@@ -3,9 +3,14 @@
 //! The [`Auth`] trait below is the BINDING contract consumed by api-gateway's
 //! REST layer and by the monolith. Implementations must not change signatures.
 
+mod service;
+pub mod validate;
+
 use std::net::IpAddr;
 
 use dice_protocol::v1::AuthSuccess;
+
+pub use service::AuthService;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {

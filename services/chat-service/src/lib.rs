@@ -10,6 +10,10 @@ use dice_common::{ChannelId, GuildId, MessageId, UserId};
 use dice_permissions::MissingPermissions;
 use dice_protocol::v1;
 
+mod service;
+
+pub use service::ChatService;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ChatError {
     #[error("not found")]

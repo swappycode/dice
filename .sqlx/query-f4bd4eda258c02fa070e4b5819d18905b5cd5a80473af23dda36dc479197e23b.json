@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT g.id AS \"id!\", g.name AS \"name!\", g.owner_id AS \"owner_id!\",\n                      g.invite_code AS \"invite_code!\"\n               FROM guilds g\n               JOIN guild_members gm ON gm.guild_id = g.id\n               WHERE gm.user_id = $1\n               ORDER BY g.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "invite_code!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f4bd4eda258c02fa070e4b5819d18905b5cd5a80473af23dda36dc479197e23b"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO guild_members (guild_id, user_id, permissions) VALUES ($1, $2, $3) RETURNING joined_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "392a08933a43d76e435f1c7ac6c7765c3c2bc8f750070e08ba50da1b5e3d94fd"
+}

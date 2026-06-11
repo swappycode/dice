@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO guild_members (guild_id, user_id, permissions) VALUES ($1, $2, $3) ON CONFLICT (guild_id, user_id) DO NOTHING RETURNING joined_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6dcbb0193081f641610fbc6ce146f7b5d2aff585305bf51b498ee2e85ce6d784"
+}

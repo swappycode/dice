@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM guilds WHERE owner_id = ANY($1::bigint[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bbfe4e088c0898357105c9052d91ca7f5469cfdc2b38db89ae343f6047138cc7"
+}

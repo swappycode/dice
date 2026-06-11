@@ -7,6 +7,63 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-11 — Phase 2: WSS backend vertical slice (DONE) + retro frontend scaffold
+
+**Branch:** `main`
+
+**Done (backend — 6 workflow agents in 3 waves, all verified independently after):**
+- network-core server half: shared tls.rs (ring-only, install_ring_provider, load_server_config,
+  generate_dev_certs CA+leaf with localhost/127.0.0.1/::1 SANs, quic_server_config with the
+  protocol §1 tuning), FramedTransport trait, QuicAcceptor/QuicTransport (5 s accept_bi deadline,
+  FrameDecoder, app-close→clean None), serve_https (tokio-rustls + hyper http1 with_upgrades —
+  NO axum-server).
+- auth-service: register/login/refresh/logout, race-safe unique-violation mapping, dummy_verify,
+  single-tx rotation + theft detection → SessionRevoked on user subject, rate limits.
+- chat-service: sync_user_state (full Ready payload incl. uncapped user dictionary),
+  send_message (tx + post-commit MessageCreate{nonce}), keyset history (NEWEST-FIRST contract),
+  create_guild (auto-#general + invite code), idempotent join/open_dm, ephemeral typing.
+- presence-service: 90 s TTL key families, DND>ONLINE>IDLE aggregate, guild+DM fan-out,
+  add_interest (broadcasts current dot to only-new subjects), last_seen on OFFLINE.
+- api-gateway: session state machine (5 s identify deadline, mpsc(128), per-session seq+replay
+  ring 256/256KiB, heartbeat 2× deadline), detached-registry resume (live session task keeps
+  absorbing fan-out while detached), refcounted interest router + always-on user subject +
+  mid-session interest from GuildCreate/DmChannelCreate, REST proto-over-HTTP (§10 complete,
+  Bearer middleware, 1 MiB cap with proto-413), WS adapter, start()→Started{bound addrs}.
+- dice-monolith: env config, dev-keygen (certs+JWT on first boot), profile wiring
+  (dev-lite=Local+Memory, full=Nats+Redis), migrate-on-boot, banner, Ctrl-C drain ≤15 s.
+- **E2E gate test `wss_demo_phase2_gate` PASSES** (~1.3 s): register×2 → Ready → guild create/join
+  via invite (live GuildCreate to joiner) → realtime chat w/ nonce ack+dispatch → typing seq=0 →
+  presence via add_interest → DM → REST history → abrupt-drop resume with contiguous replay →
+  graceful Close{GOING_AWAY}. Binary smoke-ran in BOTH profiles.
+
+**Done (frontend, in parallel):** apps/desktop-client — retro Luna/Aero SolidJS scaffold with
+mock IPC seam (`npm run dev` standalone). 30.5 KB CSS, tsc strict clean, zero hardcoded hex.
+
+**Verified by me after the workflow:** `cargo fmt` clean, `cargo clippy --workspace --all-targets
+-- -D warnings` clean, **146 tests passing / 0 failed** (incl. both E2E suites against live
+infra), aws-lc-sys absent, `.sqlx` generated (49 queries) and **offline build verified**
+(SQLX_OFFLINE=true cargo check green).
+
+**Known M1 gaps (accepted/flagged):** per-IP auth rate limits get ip=None (peer addr not threaded
+through serve_https — wire in Phase 5 or network-core follow-up); heartbeat timeout closes 4011;
+per-session re-encode of dispatch frames (critique #3 fallback).
+
+**Next milestone — Phase 3: desktop client over WSS (est. 3–4 d):**
+(1) network-core "client" feature: AnyTransport enum (Wss first), gateway driver state machine
+(Idle→Connecting→Authenticating→Ready→Backoff full-jitter→Failed), heartbeats w/ jitter,
+resume, TokenProvider trait, ApiClient (reqwest, proto bodies, one 401 refresh-retry, dev CA via
+DICE_DEV_CA / add_root_certificate); read services/api-gateway tests/gateway_e2e.rs for the
+exact client-side handshake sequences. (2) apps/desktop-client/src-tauri: Tauri 2 host —
+tauri::async_runtime::set FIRST (never bare tokio::spawn in setup), ClientCore state, keyring
+(windows-native) refresh token + RAM access token behind refresh Mutex, rusqlite(bundled) cache
+worker thread (schema per docs/design/desktop-client.md §3.2, single contiguous window/channel),
+bridge task (cache.apply BEFORE emit, presence coalesced 100 ms), commands matching the
+frontend's src/lib/ipc.ts seam (ids as strings), decorations:false window config + capabilities.
+(3) Replace ipc.mock.ts default with real Tauri IPC when window.__TAURI__ present. Gate: the
+mock demo flows work against the REAL monolith (just dev) with two app instances.
+
+---
+
 ## 2026-06-11 — Phase 1: Protocol + shared crates (DONE)
 
 **Branch:** `main`

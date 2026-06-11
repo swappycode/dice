@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auth_sessions (id, user_id, created_ip) VALUES ($1, $2, ($3::text)::inet)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6c7f1516b734fc8067109c254502c81fe1f7d9812d72228ebe7568ff0527ebbd"
+}

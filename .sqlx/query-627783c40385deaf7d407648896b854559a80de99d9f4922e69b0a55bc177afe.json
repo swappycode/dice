@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO channels (id, channel_type, dm_key) VALUES ($1, $2, $3) ON CONFLICT (dm_key) WHERE dm_key IS NOT NULL DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "627783c40385deaf7d407648896b854559a80de99d9f4922e69b0a55bc177afe"
+}

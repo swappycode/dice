@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth_sessions s SET revoked_at = now()\n               FROM refresh_tokens rt\n               WHERE rt.token_hash = $1\n                 AND rt.session_id = s.id\n                 AND s.revoked_at IS NULL\n               RETURNING s.id AS \"session_id!\", s.user_id AS \"user_id!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2f28478ed0b6c71f8971f7dc1920e6fed2b9c57c89b7e60175793639b26a5cf9"
+}

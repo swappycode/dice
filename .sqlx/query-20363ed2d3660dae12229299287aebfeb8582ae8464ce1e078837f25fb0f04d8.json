@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO channels (id, channel_type, guild_id, name, position) VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(position) + 1, 0) FROM channels WHERE guild_id = $3)) RETURNING position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "20363ed2d3660dae12229299287aebfeb8582ae8464ce1e078837f25fb0f04d8"
+}

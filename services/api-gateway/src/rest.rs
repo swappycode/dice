@@ -1,0 +1,438 @@
+//! REST surface (docs/protocol.md §10): protobuf bodies everywhere, errors
+//! as encoded `dice.v1.Error` + the matching HTTP status, bearer-JWT
+//! middleware on everything except `/v1/auth/*`, `/healthz` and the WS
+//! upgrade. Served over the hand-rolled TLS loop in `dice-network-core`.
+//!
+//! Client IP: the accept loop does not thread the peer address through
+//! hyper, so auth calls receive `None` (X-Forwarded-For is deliberately NOT
+//! trusted in M1).
+
+use std::sync::Arc;
+
+use auth_service::AuthError;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{FromRequest, Path, RawQuery, Request, State};
+use axum::http::{StatusCode, header};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use bytes::Bytes;
+use chat_service::HistoryCursor;
+use dice_common::id::{ChannelId, GuildId, UserId};
+use dice_network_core::server::FramedTransport;
+use dice_protocol::MAX_FRAME_BYTES;
+use dice_protocol::v1::{self, ErrorCode};
+use prost::Message;
+
+use crate::dispatch::chat_error_code;
+use crate::ws::WsTransport;
+use crate::{Gateway, session};
+
+/// Request-body cap (1 MiB).
+pub(crate) const BODY_LIMIT: usize = 1024 * 1024;
+
+const PROTOBUF: &str = "application/x-protobuf";
+
+/// History `limit` default when the query omits it.
+const DEFAULT_HISTORY_LIMIT: u8 = 50;
+
+pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
+    let public = axum::Router::new()
+        .route("/healthz", get(healthz))
+        .route("/v1/auth/register", post(register))
+        .route("/v1/auth/login", post(login))
+        .route("/v1/auth/refresh", post(refresh))
+        .route("/v1/auth/logout", post(logout))
+        .route("/gateway/v1", get(gateway_ws));
+
+    let protected = axum::Router::new()
+        .route("/v1/channels/{channel_id}/messages", get(message_history))
+        .route("/v1/guilds", post(create_guild))
+        .route("/v1/guilds/join", post(join_guild))
+        .route("/v1/channels", post(create_channel))
+        .route("/v1/dms", post(open_dm))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&gw),
+            bearer_auth,
+        ));
+
+    public
+        .merge(protected)
+        // Last layer added = outermost: the 413 rewriter sees the limit
+        // layer's short-circuit response and turns it into a proto Error.
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(BODY_LIMIT))
+        .layer(axum::middleware::from_fn(proto_payload_too_large))
+        .with_state(gw)
+}
+
+/// `RequestBodyLimitLayer` short-circuits announced-oversize bodies with an
+/// empty 413; rewrite that into the spec's encoded `dice.v1.Error` body.
+async fn proto_payload_too_large(req: Request, next: Next) -> Response {
+    let response = next.run(req).await;
+    let already_proto = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .is_some_and(|ct| ct.as_bytes() == PROTOBUF.as_bytes());
+    if response.status() == StatusCode::PAYLOAD_TOO_LARGE && !already_proto {
+        return error_response(ErrorCode::PayloadTooLarge, "body exceeds 1 MiB", 0);
+    }
+    response
+}
+
+// ----------------------------------------------------------- proto plumbing
+
+fn proto_response<M: Message>(status: StatusCode, message: &M) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, PROTOBUF)],
+        message.encode_to_vec(),
+    )
+        .into_response()
+}
+
+fn http_status(code: ErrorCode) -> StatusCode {
+    match code {
+        ErrorCode::Unauthenticated | ErrorCode::InvalidSession => StatusCode::UNAUTHORIZED,
+        ErrorCode::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::PermissionDenied => StatusCode::FORBIDDEN,
+        ErrorCode::NotFound => StatusCode::NOT_FOUND,
+        ErrorCode::InvalidArgument => StatusCode::BAD_REQUEST,
+        ErrorCode::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn error_response(code: ErrorCode, message: impl Into<String>, retry_after_ms: u32) -> Response {
+    proto_response(
+        http_status(code),
+        &v1::Error {
+            code: code as i32,
+            message: message.into(),
+            retry_after_ms,
+        },
+    )
+}
+
+fn map_auth_error(error: AuthError) -> Response {
+    match error {
+        AuthError::EmailTaken | AuthError::UsernameTaken | AuthError::InvalidArgument(_) => {
+            error_response(ErrorCode::InvalidArgument, error.to_string(), 0)
+        }
+        AuthError::InvalidCredentials | AuthError::InvalidToken => {
+            error_response(ErrorCode::Unauthenticated, error.to_string(), 0)
+        }
+        AuthError::RateLimited { retry_after_ms } => {
+            error_response(ErrorCode::RateLimited, "rate limited", retry_after_ms)
+        }
+        AuthError::Internal(_) => {
+            tracing::error!(%error, "auth call failed");
+            error_response(ErrorCode::Internal, "internal error", 0)
+        }
+    }
+}
+
+fn map_chat_error(error: chat_service::ChatError) -> Response {
+    let code = chat_error_code(&error);
+    if code == ErrorCode::Internal {
+        tracing::error!(%error, "chat call failed");
+        return error_response(code, "internal error", 0);
+    }
+    error_response(code, error.to_string(), 0)
+}
+
+/// Protobuf body extractor: decodes `T` from the (1 MiB-capped) body.
+/// Rejections are already protobuf `dice.v1.Error` responses.
+pub(crate) struct Proto<T>(pub T);
+
+impl<S, T> FromRequest<S> for Proto<T>
+where
+    S: Send + Sync,
+    T: Message + Default,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let bytes = Bytes::from_request(req, state).await.map_err(|rejection| {
+            if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                error_response(ErrorCode::PayloadTooLarge, "body exceeds 1 MiB", 0)
+            } else {
+                error_response(ErrorCode::InvalidArgument, "unreadable request body", 0)
+            }
+        })?;
+        T::decode(bytes)
+            .map(Proto)
+            .map_err(|e| error_response(ErrorCode::InvalidArgument, format!("protobuf: {e}"), 0))
+    }
+}
+
+// ------------------------------------------------------------- middleware
+
+/// Request extension inserted by [`bearer_auth`].
+#[derive(Clone, Copy)]
+struct Authed(UserId);
+
+async fn bearer_auth(State(gw): State<Arc<Gateway>>, mut req: Request, next: Next) -> Response {
+    let user = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .and_then(|token| dice_auth_core::token::verify_access(&gw.deps.jwt, token).ok())
+        .and_then(|claims| claims.user_id());
+    match user {
+        Some(user) => {
+            req.extensions_mut().insert(Authed(user));
+            next.run(req).await
+        }
+        None => error_response(
+            ErrorCode::Unauthenticated,
+            "missing or invalid bearer token",
+            0,
+        ),
+    }
+}
+
+// ---------------------------------------------------------------- handlers
+
+async fn healthz() -> &'static str {
+    "ok"
+}
+
+async fn register(
+    State(gw): State<Arc<Gateway>>,
+    Proto(req): Proto<v1::RegisterRequest>,
+) -> Response {
+    match gw
+        .deps
+        .auth
+        .register(&req.email, &req.username, &req.password, None)
+        .await
+    {
+        Ok(success) => proto_response(StatusCode::OK, &success),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+async fn login(State(gw): State<Arc<Gateway>>, Proto(req): Proto<v1::LoginRequest>) -> Response {
+    match gw.deps.auth.login(&req.email, &req.password, None).await {
+        Ok(success) => proto_response(StatusCode::OK, &success),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+async fn refresh(
+    State(gw): State<Arc<Gateway>>,
+    Proto(req): Proto<v1::RefreshRequest>,
+) -> Response {
+    match gw.deps.auth.refresh(&req.refresh_token).await {
+        Ok(success) => proto_response(StatusCode::OK, &success),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+async fn logout(State(gw): State<Arc<Gateway>>, Proto(req): Proto<v1::LogoutRequest>) -> Response {
+    match gw.deps.auth.logout(&req.refresh_token).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+async fn message_history(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(channel_id): Path<String>,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let Ok(channel) = channel_id.parse::<ChannelId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
+    };
+    let (cursor, limit) = match parse_history_query(query.as_deref()) {
+        Ok(parsed) => parsed,
+        Err(message) => return error_response(ErrorCode::InvalidArgument, message, 0),
+    };
+    match gw
+        .deps
+        .chat
+        .get_messages(user, channel, cursor, limit)
+        .await
+    {
+        Ok(messages) => proto_response(StatusCode::OK, &v1::MessageHistory { messages }),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+async fn create_guild(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::CreateGuildRequest>,
+) -> Response {
+    match gw.deps.chat.create_guild(user, req.name).await {
+        Ok(guild) => proto_response(StatusCode::OK, &guild),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+async fn join_guild(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::JoinGuildRequest>,
+) -> Response {
+    match gw.deps.chat.join_guild(user, &req.code).await {
+        Ok(guild) => proto_response(StatusCode::OK, &guild),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+async fn create_channel(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::CreateChannelRequest>,
+) -> Response {
+    match gw
+        .deps
+        .chat
+        .create_channel(user, GuildId::from_raw(req.guild_id), req.name)
+        .await
+    {
+        Ok(channel) => proto_response(StatusCode::OK, &channel),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+async fn open_dm(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::OpenDmRequest>,
+) -> Response {
+    match gw
+        .deps
+        .chat
+        .open_dm(user, UserId::from_raw(req.recipient_id))
+        .await
+    {
+        Ok(channel) => proto_response(StatusCode::OK, &channel),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// WS upgrade: no bearer here — the socket authenticates via Identify.
+async fn gateway_ws(State(gw): State<Arc<Gateway>>, ws: WebSocketUpgrade) -> Response {
+    ws.max_message_size(MAX_FRAME_BYTES)
+        .max_frame_size(MAX_FRAME_BYTES)
+        .on_upgrade(move |socket| async move {
+            let transport: Box<dyn FramedTransport> = Box::new(WsTransport::new(socket));
+            let session = session::drive_connection(Arc::clone(&gw), transport);
+            gw.tracker.track_future(session).await;
+        })
+}
+
+// ------------------------------------------------------------ query parse
+
+/// `?before|after=<id>&limit=1..100` (protocol §10). `before` and `after`
+/// are mutually exclusive; ids are plain decimal snowflakes (never
+/// percent-encoded), so a hand parser keeps serde off the request path.
+fn parse_history_query(query: Option<&str>) -> Result<(HistoryCursor, u8), String> {
+    let mut before: Option<u64> = None;
+    let mut after: Option<u64> = None;
+    let mut limit = DEFAULT_HISTORY_LIMIT;
+    for pair in query.unwrap_or("").split('&').filter(|p| !p.is_empty()) {
+        let (key, value) = pair.split_once('=').ok_or("malformed query parameter")?;
+        match key {
+            "before" => {
+                before = Some(value.parse().map_err(|_| "invalid `before` id")?);
+            }
+            "after" => {
+                after = Some(value.parse().map_err(|_| "invalid `after` id")?);
+            }
+            "limit" => {
+                let parsed: u8 = value.parse().map_err(|_| "invalid `limit`")?;
+                if !(1..=100).contains(&parsed) {
+                    return Err("`limit` must be 1..=100".to_owned());
+                }
+                limit = parsed;
+            }
+            _ => {} // unknown params ignored (forward compat)
+        }
+    }
+    let cursor = match (before, after) {
+        (Some(_), Some(_)) => return Err("`before` and `after` are mutually exclusive".to_owned()),
+        (Some(b), None) => HistoryCursor::Before(dice_common::id::MessageId::from_raw(b)),
+        (None, Some(a)) => HistoryCursor::After(dice_common::id::MessageId::from_raw(a)),
+        (None, None) => HistoryCursor::Latest,
+    };
+    Ok((cursor, limit))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_query_defaults() {
+        let (cursor, limit) = parse_history_query(None).unwrap();
+        assert!(matches!(cursor, HistoryCursor::Latest));
+        assert_eq!(limit, DEFAULT_HISTORY_LIMIT);
+        let (cursor, _) = parse_history_query(Some("")).unwrap();
+        assert!(matches!(cursor, HistoryCursor::Latest));
+    }
+
+    #[test]
+    fn history_query_before_after_limit() {
+        let (cursor, limit) = parse_history_query(Some("before=42&limit=10")).unwrap();
+        match cursor {
+            HistoryCursor::Before(id) => assert_eq!(id.raw(), 42),
+            other => panic!("expected Before, got {other:?}"),
+        }
+        assert_eq!(limit, 10);
+
+        let (cursor, limit) = parse_history_query(Some("after=7")).unwrap();
+        match cursor {
+            HistoryCursor::After(id) => assert_eq!(id.raw(), 7),
+            other => panic!("expected After, got {other:?}"),
+        }
+        assert_eq!(limit, DEFAULT_HISTORY_LIMIT);
+    }
+
+    #[test]
+    fn history_query_rejects_bad_input() {
+        assert!(parse_history_query(Some("before=1&after=2")).is_err());
+        assert!(parse_history_query(Some("before=x")).is_err());
+        assert!(parse_history_query(Some("limit=0")).is_err());
+        assert!(parse_history_query(Some("limit=101")).is_err());
+        assert!(parse_history_query(Some("limit")).is_err());
+    }
+
+    #[test]
+    fn http_statuses_match_the_spec_table() {
+        assert_eq!(
+            http_status(ErrorCode::Unauthenticated),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            http_status(ErrorCode::InvalidSession),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            http_status(ErrorCode::RateLimited),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            http_status(ErrorCode::PermissionDenied),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(http_status(ErrorCode::NotFound), StatusCode::NOT_FOUND);
+        assert_eq!(
+            http_status(ErrorCode::InvalidArgument),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            http_status(ErrorCode::PayloadTooLarge),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(
+            http_status(ErrorCode::Internal),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}

@@ -5,5 +5,35 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[dependencies]
+# internal services (trait impls mounted in-process)
+api-gateway      = { workspace = true }
+auth-service     = { workspace = true }
+chat-service     = { workspace = true }
+presence-service = { workspace = true }
+
+# internal crates
+dice-auth-core    = { workspace = true }
+dice-cache        = { workspace = true }
+dice-common       = { workspace = true }
+dice-database     = { workspace = true }
+dice-event-bus    = { workspace = true }
+dice-logging      = { workspace = true }
+dice-metrics      = { workspace = true }
+dice-network-core = { workspace = true }
+dice-protocol     = { workspace = true }
+
+# external
+anyhow  = { workspace = true }
+tokio   = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+futures-util      = { workspace = true }
+prost             = { workspace = true }
+reqwest           = { workspace = true }
+sqlx              = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
 [lints]
 workspace = true

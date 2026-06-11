@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username, email, password_hash, last_seen_at)\n                 VALUES ($1, $2, $3, 'x', now() - interval '1 hour')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a795d41aea7abfbcd262e00eb6f40257a1f44ec69ebcd11bba245feef7bc707"
+}

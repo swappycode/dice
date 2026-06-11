@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE refresh_tokens SET rotated_at = now(), replaced_by = $2 WHERE id = $1 AND rotated_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5194904c53572a160227409f5746344c3e25a3d4a63a7c8eae5c6d197d148461"
+}

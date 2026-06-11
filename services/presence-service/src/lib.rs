@@ -8,8 +8,12 @@
 //! `dice.evt.dm.{channel_id}.presence` they participate in, so DM-only
 //! contacts see dots too. The gateway passes both lists at `connect`.
 
+mod service;
+
 use dice_common::{ChannelId, GuildId, SessionId, UserId};
 use dice_protocol::v1::{PresenceStatus, PresenceUpdate};
+
+pub use service::{ORIGIN, PRESENCE_KEY_TTL, PresenceService};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PresenceError {

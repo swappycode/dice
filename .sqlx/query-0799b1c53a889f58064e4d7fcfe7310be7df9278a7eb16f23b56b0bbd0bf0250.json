@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM channels WHERE id IN (SELECT channel_id FROM channel_recipients WHERE user_id = ANY($1::bigint[]))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0799b1c53a889f58064e4d7fcfe7310be7df9278a7eb16f23b56b0bbd0bf0250"
+}

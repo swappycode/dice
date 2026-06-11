@@ -5,5 +5,46 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Default ON for now so plain `cargo check -p dice-network-core` covers the
+# server half. The gateway depends on this feature explicitly.
+default = ["server"]
+server = ["dep:async-trait", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio-util"]
+# "client" feature arrives in a later milestone-1 phase (see src/lib.rs).
+
+[dependencies]
+bytes            = { workspace = true }
+dice-common      = { workspace = true }
+dice-protocol    = { workspace = true }
+futures-util     = { workspace = true }
+quinn            = { workspace = true }
+rcgen            = { workspace = true }
+rustls           = { workspace = true }
+rustls-pemfile   = { workspace = true }
+rustls-pki-types = { workspace = true }
+thiserror        = { workspace = true }
+tokio            = { workspace = true }
+tokio-rustls     = { workspace = true }
+tracing          = { workspace = true }
+
+# server-only (feature-gated)
+async-trait = { workspace = true, optional = true }
+axum        = { workspace = true, optional = true }
+hyper       = { workspace = true, optional = true, features = ["http1", "server"] }
+hyper-util  = { workspace = true, optional = true, features = ["service"] }
+tokio-util  = { workspace = true, optional = true }
+
+[dev-dependencies]
+axum             = { workspace = true }
+bytes            = { workspace = true }
+dice-protocol    = { workspace = true }
+quinn            = { workspace = true }
+rustls           = { workspace = true }
+rustls-pemfile   = { workspace = true }
+rustls-pki-types = { workspace = true }
+tokio            = { workspace = true }
+tokio-rustls     = { workspace = true }
+tokio-util       = { workspace = true }
+
 [lints]
 workspace = true
