@@ -5,5 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[dependencies]
+async-nats    = { workspace = true }
+async-trait   = { workspace = true }
+dice-common   = { workspace = true }
+dice-protocol = { workspace = true }
+futures-util  = { workspace = true }
+thiserror     = { workspace = true }
+tokio         = { workspace = true }
+tokio-util    = { workspace = true }
+
 [lints]
 workspace = true

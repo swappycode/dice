@@ -1,9 +1,14 @@
 [package]
 name = "dice-permissions"
+description = "Bitflags-u64 guild permission model: layout, compute(), check(), BIGINT round-trip. No async, no IO."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+
+[dependencies]
+bitflags = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

@@ -19,7 +19,10 @@ impl Default for Shutdown {
 
 impl Shutdown {
     pub fn new() -> Self {
-        Self { token: CancellationToken::new(), tracker: TaskTracker::new() }
+        Self {
+            token: CancellationToken::new(),
+            tracker: TaskTracker::new(),
+        }
     }
 
     pub fn child_token(&self) -> CancellationToken {

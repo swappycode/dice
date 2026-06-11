@@ -9,7 +9,11 @@ pub enum ConfigError {
     #[error("required env var {0} is not set")]
     Missing(&'static str),
     #[error("env var {key} has invalid value {value:?}: {reason}")]
-    Invalid { key: &'static str, value: String, reason: String },
+    Invalid {
+        key: &'static str,
+        value: String,
+        reason: String,
+    },
 }
 
 /// Read and parse, falling back to `default` when unset. Panics never; a

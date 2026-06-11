@@ -6,7 +6,8 @@ services:
       POSTGRES_USER: dice
       POSTGRES_PASSWORD: dice_dev
       POSTGRES_DB: dice
-    ports: ["5432:5432"]
+    # Host port 5433: this machine runs a native PostgreSQL service on 5432.
+    ports: ["5433:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dice -d dice"]

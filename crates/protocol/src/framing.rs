@@ -1,4 +1,4 @@
-//! The ONE codec (docs/protocol.md §1). No other framing implementations are
+//! The ONE codec (docs/protocol.md section 1). No other framing implementations are
 //! permitted anywhere in the workspace.
 //!
 //! - QUIC control stream: `u32 big-endian length || Frame bytes`, decoded with
@@ -60,7 +60,7 @@ pub fn decode_frame_bare(buf: &[u8]) -> Result<Frame, FrameError> {
 ///
 /// Bounded by construction: the announced length is validated against
 /// `MAX_FRAME_BYTES` as soon as the 4-byte prefix arrives, before any payload
-/// accumulation — an attacker cannot make us allocate more than one frame.
+/// accumulation -- an attacker cannot make us allocate more than one frame.
 #[derive(Debug, Default)]
 pub struct FrameDecoder {
     buf: BytesMut,
@@ -76,7 +76,8 @@ impl FrameDecoder {
     pub fn extend(&mut self, chunk: &[u8]) -> Result<(), FrameError> {
         self.buf.extend_from_slice(chunk);
         if self.buf.len() >= LEN_PREFIX_BYTES {
-            let announced = u32::from_be_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
+            let announced =
+                u32::from_be_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
             if announced > MAX_FRAME_BYTES {
                 return Err(FrameError::TooLarge(announced));
             }
@@ -85,11 +86,12 @@ impl FrameDecoder {
     }
 
     /// Pop the next complete frame, if any.
-    pub fn next(&mut self) -> Result<Option<Frame>, FrameError> {
+    pub fn try_next(&mut self) -> Result<Option<Frame>, FrameError> {
         if self.buf.len() < LEN_PREFIX_BYTES {
             return Ok(None);
         }
-        let announced = u32::from_be_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
+        let announced =
+            u32::from_be_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
         if announced > MAX_FRAME_BYTES {
             return Err(FrameError::TooLarge(announced));
         }
@@ -103,6 +105,7 @@ impl FrameDecoder {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::FrameClass;
@@ -122,9 +125,9 @@ mod tests {
         encode_frame(&hello(), &mut buf).unwrap();
         let mut dec = FrameDecoder::new();
         dec.extend(&buf).unwrap();
-        let got = dec.next().unwrap().unwrap();
+        let got = dec.try_next().unwrap().unwrap();
         assert_eq!(got, hello());
-        assert!(dec.next().unwrap().is_none());
+        assert!(dec.try_next().unwrap().is_none());
     }
 
     #[test]
@@ -141,12 +144,12 @@ mod tests {
         let mut dec = FrameDecoder::new();
         let mid = buf.len() / 2;
         dec.extend(&buf[..3]).unwrap(); // not even a full prefix
-        assert!(dec.next().unwrap().is_none());
+        assert!(dec.try_next().unwrap().is_none());
         dec.extend(&buf[3..mid]).unwrap();
         dec.extend(&buf[mid..]).unwrap();
-        assert!(dec.next().unwrap().is_some());
-        assert!(dec.next().unwrap().is_some());
-        assert!(dec.next().unwrap().is_none());
+        assert!(dec.try_next().unwrap().is_some());
+        assert!(dec.try_next().unwrap().is_some());
+        assert!(dec.try_next().unwrap().is_none());
     }
 
     #[test]
@@ -166,11 +169,14 @@ mod tests {
             }),
         );
         let mut buf = BytesMut::new();
-        assert!(matches!(encode_frame(&frame, &mut buf), Err(FrameError::TooLarge(_))));
+        assert!(matches!(
+            encode_frame(&frame, &mut buf),
+            Err(FrameError::TooLarge(_))
+        ));
     }
 
     /// Forward-compat: a frame whose payload tag this build doesn't know decodes
-    /// as payload=None, with seq/nonce intact (docs/protocol.md §2 receiver policy).
+    /// as payload=None, with seq/nonce intact (docs/protocol.md section 2 receiver policy).
     #[test]
     fn unknown_payload_decodes_as_none() {
         use prost::Message;

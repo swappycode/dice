@@ -63,17 +63,29 @@ impl v1::Frame {
 
     /// A dispatch frame with seq unset (the gateway assigns it per session).
     pub fn dispatch(payload: v1::frame::Payload) -> Self {
-        Self { seq: 0, nonce: 0, payload: Some(payload) }
+        Self {
+            seq: 0,
+            nonce: 0,
+            payload: Some(payload),
+        }
     }
 
     /// A control frame (no seq, no nonce).
     pub fn control(payload: v1::frame::Payload) -> Self {
-        Self { seq: 0, nonce: 0, payload: Some(payload) }
+        Self {
+            seq: 0,
+            nonce: 0,
+            payload: Some(payload),
+        }
     }
 
     /// A request/reply frame correlated by nonce.
     pub fn with_nonce(nonce: u64, payload: v1::frame::Payload) -> Self {
-        Self { seq: 0, nonce, payload: Some(payload) }
+        Self {
+            seq: 0,
+            nonce,
+            payload: Some(payload),
+        }
     }
 }
 

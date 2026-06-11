@@ -15,7 +15,9 @@ const MAX_NODE: u16 = (1 << NODE_BITS) as u16 - 1; // 1023
 const SEQ_MASK: u64 = (1 << SEQ_BITS) - 1;
 const TS_MASK: u64 = (1 << TIMESTAMP_BITS) - 1;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(transparent)]
 pub struct Snowflake(pub u64);
 
@@ -117,7 +119,10 @@ impl SnowflakeGenerator {
         if node_id > MAX_NODE {
             return Err(NodeIdTooLarge(node_id));
         }
-        Ok(Self { node: node_id as u64, state: AtomicU64::new(0) })
+        Ok(Self {
+            node: node_id as u64,
+            state: AtomicU64::new(0),
+        })
     }
 
     pub fn generate(&self) -> Snowflake {
@@ -151,6 +156,7 @@ impl SnowflakeGenerator {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
