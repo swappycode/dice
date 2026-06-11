@@ -7,6 +7,62 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-11 (evening) — Phase 3 CHECKPOINT: client core DONE, Tauri host PARTIAL
+
+**Branch:** `main`. Session checkpointed deliberately (token-budget stop requested by user);
+the in-flight Tauri-host agent was stopped cleanly mid-write. THIS ENTRY IS THE CONTINUATION
+CONTRACT for the next session.
+
+**DONE + verified by hand (committed):**
+- `crates/network-core` CLIENT half (feature `client`, in default features):
+  `src/client/` — WSS `AnyTransport` enum (QUIC variant reserved for Phase 4), gateway driver
+  (Hello→Identify/Resume→Ready state machine, ±10% heartbeat jitter, cumulative-ack last_seq,
+  2-missed-acks reconnect, full-jitter backoff w/ 60 s-healthy attempt reset, INVALID_SESSION
+  re-identify on same connection, nonce→Ack/RequestError correlation, bounded mpsc(256) events,
+  `connect(cfg, tokio Handle)` for Tauri setup-hook safety), `TokenProvider` trait, `ApiClient`
+  (reqwest, protobuf bodies, dev-CA via add_root_certificate, one 401 refresh-retry).
+  **Gates green: clippy -D warnings; 22 tests (15 unit + 4 E2E vs in-process live backend + 3 tls).**
+  Read `crates/network-core/tests/client_e2e.rs` for usage patterns.
+
+**PARTIAL — `apps/desktop-client/src-tauri` (committed as WIP, DOES NOT COMPILE YET):**
+Files that EXIST (written by the stopped agent, quality unreviewed): build.rs, Cargo.toml
+(own standalone workspace; tauri 2 + rusqlite bundled + keyring 3 + path deps w/
+network-core default-features=false features=["client"]), tauri.conf.json (decorations:false,
+shadow:true, devUrl :1420, nsis), capabilities/default.json, placeholder icons,
+src/{dto.rs, emit.rs (testable emitter trait), keystore.rs (keyring abstraction),
+session.rs (token lifecycle), bridge.rs (cache-first event pump), cache/{mod.rs (40 KB rusqlite
+worker), schema.rs}}.
+
+**REMAINING WORK for the next session (Tauri host completion):**
+1. `src/state.rs` — ClientCore struct: ApiClient (DICE_API_URL default https://localhost:8443,
+   TlsOptions::from_env reading DICE_DEV_CA), Mutex<Option<GatewayHandle>>, cache handle, session.
+2. `src/commands/` — Tauri commands EXACTLY matching `apps/desktop-client/src/lib/ipc.ts`
+   (names + payload shapes; ids are STRINGS): login, register, logout, getBootstrap,
+   sendMessage (pending row + nonce, returns pending message), fetchMessages, startTyping
+   (host throttle 1/8 s/channel), setPresence, createGuild, joinGuild, openDm, connectionState.
+3. `src/lib.rs` + `src/main.rs` — ONE tokio Runtime built first → `tauri::async_runtime::set`
+   BEFORE Builder (NEVER bare tokio::spawn from setup hook); install_ring_provider; manage
+   ClientCore; single-instance plugin; spawn bridge when session exists.
+4. Frontend: `src/lib/ipc.real.ts` (invoke/listen via @tauri-apps/api) + make ipc.ts pick real
+   when in Tauri; wire TitleBar buttons to getCurrentWindow(). Keep tsc + npm run build green.
+5. Headless gate test (no webview): factor command bodies into plain async fns; fake keystore
+   trait impl; in-process backend (copy pattern from network-core/tests/client_e2e.rs);
+   register→login→Ready→send (pending→ack reconcile in sqlite)→incoming message→cache→
+   fetchMessages pages→offline restart serves bootstrap from cache.
+6. Gates: cargo check/test/clippy -D warnings for the src-tauri package; npm run build;
+   try `npm run tauri dev` once (60 s, kill after; report if WebView2/bundling blocks).
+The full original agent prompt (richer detail) is preserved in the workflow script:
+`C:\Users\HP\.claude\projects\D--Dice\ad09a65c-eb63-4f90-afb2-72d383a4fd90\workflows\scripts\dice-phase3-client-wf_2a494195-a40.js`
+(TauriHost phase). Review/fix the partial files against it before continuing.
+
+**After Phase 3:** Phase 4 = QUIC client transport (fill AnyTransport::Quic; QuicFirst{3 s}
+policy, 2-failure WSS preference, persist last-good transport in cache meta) + verify dev-CA
+works on both transports. Phase 5 = polish gate (perf snapshot vs <100 MB/<2 s/<1% targets,
+`just check` green, two-instance live demo, final worklog wrap-up). Infra: containers stay up
+(`just infra-up`); monolith via `just dev`.
+
+---
+
 ## 2026-06-11 — Phase 2: WSS backend vertical slice (DONE) + retro frontend scaffold
 
 **Branch:** `main`

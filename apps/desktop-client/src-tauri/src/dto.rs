@@ -1,0 +1,296 @@
+//! Bridge DTOs: the exact shapes `apps/desktop-client/src/lib/types.ts`
+//! expects over Tauri IPC. HARD CONVENTION: every id crosses IPC as a
+//! `String` (u64 snowflakes overflow JS numbers); the host back-parses.
+
+use std::collections::BTreeMap;
+
+use dice_common::Snowflake;
+use dice_protocol::v1;
+use serde::{Deserialize, Serialize};
+
+/// The single event channel the frontend listens on (`lib/ipc.ts`).
+pub const EVENT_CHANNEL: &str = "dice://event";
+/// Raw signal after a post-invalidation re-Ready (cache fully re-synced).
+pub const RESYNC_CHANNEL: &str = "cache://resynced";
+
+// ------------------------------------------------------------- conversions
+
+pub fn id_str(id: u64) -> String {
+    id.to_string()
+}
+
+/// Pending cache rows use negative ids; everything else is a u64 snowflake.
+pub fn db_id_str(id: i64) -> String {
+    id.to_string()
+}
+
+pub fn parse_id(s: &str) -> Option<u64> {
+    s.parse::<u64>().ok()
+}
+
+/// Creation time derived from the snowflake (docs/protocol.md §11).
+pub fn snowflake_ms(id: u64) -> u64 {
+    Snowflake(id).timestamp_ms()
+}
+
+/// `dice.v1.PresenceStatus` → frontend string.
+pub fn presence_str(status: i32) -> &'static str {
+    match v1::PresenceStatus::try_from(status) {
+        Ok(v1::PresenceStatus::Online) => "online",
+        Ok(v1::PresenceStatus::Idle) => "idle",
+        Ok(v1::PresenceStatus::Dnd) => "dnd",
+        _ => "offline",
+    }
+}
+
+pub fn parse_presence(status: &str) -> i32 {
+    match status {
+        "online" => v1::PresenceStatus::Online as i32,
+        "idle" => v1::PresenceStatus::Idle as i32,
+        "dnd" => v1::PresenceStatus::Dnd as i32,
+        _ => v1::PresenceStatus::Offline as i32,
+    }
+}
+
+fn kind_str(kind: i32) -> &'static str {
+    if kind == v1::ChannelKind::Dm as i32 {
+        "dm"
+    } else {
+        "guild_text"
+    }
+}
+
+// -------------------------------------------------------------------- DTOs
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserDto {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+}
+
+impl From<&v1::User> for UserDto {
+    fn from(u: &v1::User) -> Self {
+        Self {
+            id: id_str(u.id),
+            username: u.username.clone(),
+            display_name: if u.display_name.is_empty() {
+                u.username.clone()
+            } else {
+                u.display_name.clone()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelDto {
+    pub id: String,
+    pub guild_id: Option<String>,
+    pub kind: String, // "guild_text" | "dm"
+    pub name: String,
+    pub position: u32,
+    pub last_message_id: Option<String>,
+    pub recipient_ids: Vec<String>,
+}
+
+impl From<&v1::Channel> for ChannelDto {
+    fn from(c: &v1::Channel) -> Self {
+        Self {
+            id: id_str(c.id),
+            guild_id: (c.guild_id != 0).then(|| id_str(c.guild_id)),
+            kind: kind_str(c.kind).to_owned(),
+            name: c.name.clone(),
+            position: c.position,
+            last_message_id: (c.last_message_id != 0).then(|| id_str(c.last_message_id)),
+            recipient_ids: c.recipient_ids.iter().map(|&r| id_str(r)).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberDto {
+    pub user_id: String,
+    pub guild_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuildDto {
+    pub id: String,
+    pub name: String,
+    pub owner_id: String,
+    pub invite_code: String,
+    pub members: Vec<MemberDto>,
+}
+
+impl From<&v1::Guild> for GuildDto {
+    fn from(g: &v1::Guild) -> Self {
+        Self {
+            id: id_str(g.id),
+            name: g.name.clone(),
+            owner_id: id_str(g.owner_id),
+            invite_code: g.invite_code.clone(),
+            members: g
+                .members
+                .iter()
+                .map(|m| MemberDto {
+                    user_id: id_str(m.user_id),
+                    guild_id: id_str(g.id),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageDto {
+    pub id: String,
+    pub channel_id: String,
+    pub author_id: String,
+    pub content: String,
+    pub created_at_ms: u64,
+    pub edited_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<bool>,
+}
+
+impl MessageDto {
+    pub fn from_wire(m: &v1::Message, nonce: Option<String>) -> Self {
+        Self {
+            id: id_str(m.id),
+            channel_id: id_str(m.channel_id),
+            author_id: id_str(m.author_id),
+            content: m.content.clone(),
+            created_at_ms: snowflake_ms(m.id),
+            edited_at_ms: (m.edited_at_ms != 0).then_some(m.edited_at_ms),
+            nonce,
+            pending: None,
+            failed: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDto {
+    pub user: UserDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapDto {
+    pub user: UserDto,
+    pub guilds: Vec<GuildDto>,
+    pub channels: Vec<ChannelDto>,
+    pub dms: Vec<ChannelDto>,
+    pub users: Vec<UserDto>,
+    pub presence: BTreeMap<String, String>,
+    pub last_channel_id: Option<String>,
+}
+
+/// The `DiceEvent` union of `lib/types.ts` (serde-tagged on `type`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum DiceEvent {
+    #[serde(rename_all = "camelCase")]
+    MessageCreate {
+        message: MessageDto,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nonce: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    TypingStart { channel_id: String, user_id: String },
+    #[serde(rename_all = "camelCase")]
+    PresenceUpdate { user_id: String, status: String },
+    #[serde(rename_all = "camelCase")]
+    GuildCreate {
+        guild: GuildDto,
+        channels: Vec<ChannelDto>,
+    },
+    #[serde(rename_all = "camelCase")]
+    DmChannelCreate {
+        channel: ChannelDto,
+        users: Vec<UserDto>,
+    },
+    #[serde(rename_all = "camelCase")]
+    ConnState { state: String },
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dice_event_serializes_to_the_ts_shape() {
+        let ev = DiceEvent::TypingStart {
+            channel_id: "42".into(),
+            user_id: "7".into(),
+        };
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["type"], "typingStart");
+        assert_eq!(json["channelId"], "42");
+        assert_eq!(json["userId"], "7");
+
+        let conn = serde_json::to_value(DiceEvent::ConnState {
+            state: "connected".into(),
+        })
+        .unwrap();
+        assert_eq!(conn["type"], "connState");
+        assert_eq!(conn["state"], "connected");
+    }
+
+    #[test]
+    fn message_dto_derives_created_at_and_hides_empty_optionals() {
+        let id = (1234u64 << 22) | 5;
+        let m = v1::Message {
+            id,
+            channel_id: 9,
+            author_id: 3,
+            content: "hi".into(),
+            edited_at_ms: 0,
+        };
+        let dto = MessageDto::from_wire(&m, None);
+        assert_eq!(dto.created_at_ms, 1234 + dice_common::time::DICE_EPOCH_MS);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert!(json.get("nonce").is_none());
+        assert!(json.get("pending").is_none());
+        assert_eq!(json["editedAtMs"], serde_json::Value::Null);
+        assert_eq!(json["channelId"], "9");
+    }
+
+    #[test]
+    fn presence_round_trips() {
+        for s in ["online", "idle", "dnd", "offline"] {
+            assert_eq!(presence_str(parse_presence(s)), s);
+        }
+        assert_eq!(presence_str(0), "offline", "unspecified maps to offline");
+    }
+
+    #[test]
+    fn channel_dto_maps_dm_and_guild_shapes() {
+        let dm = v1::Channel {
+            id: 5,
+            guild_id: 0,
+            kind: v1::ChannelKind::Dm as i32,
+            name: String::new(),
+            position: 0,
+            last_message_id: 0,
+            recipient_ids: vec![1, 2],
+        };
+        let dto = ChannelDto::from(&dm);
+        assert_eq!(dto.kind, "dm");
+        assert!(dto.guild_id.is_none());
+        assert!(dto.last_message_id.is_none());
+        assert_eq!(dto.recipient_ids, vec!["1", "2"]);
+    }
+}

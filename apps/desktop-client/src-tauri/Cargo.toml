@@ -1,0 +1,80 @@
+# Standalone workspace: the Tauri host is deliberately OUTSIDE the root Dice
+# workspace (root Cargo.toml `exclude`s this path) so the heavyweight
+# tauri/webview dependency tree never taints server builds.
+[workspace]
+
+[package]
+name = "dice-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+description = "Dice desktop client host (Tauri 2)"
+
+[lib]
+name = "dice_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# ---- internal (path deps into the root workspace; they resolve their own
+#      `workspace = true` keys against the root manifest) ----
+dice-network-core = { path = "../../../crates/network-core", default-features = false, features = ["client"] }
+dice-protocol     = { path = "../../../crates/protocol" }
+dice-common       = { path = "../../../crates/common" }
+
+# ---- tauri host ----
+tauri                        = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+
+# ---- persistence + secrets ----
+rusqlite = { version = "0.40", features = ["bundled"] }
+keyring  = { version = "3", features = ["windows-native"] }
+
+# ---- runtime + plumbing ----
+tokio              = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+futures-util       = "0.3"
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+anyhow             = "1"
+thiserror          = "2"
+getrandom          = "0.3"
+
+[dev-dependencies]
+# The gate test boots the real api-gateway IN-PROCESS (same wiring as
+# crates/network-core/tests/client_e2e.rs). Dev-only: no cycle.
+api-gateway      = { path = "../../../services/api-gateway" }
+auth-service     = { path = "../../../services/auth-service" }
+chat-service     = { path = "../../../services/chat-service" }
+presence-service = { path = "../../../services/presence-service" }
+dice-auth-core   = { path = "../../../crates/auth-core" }
+dice-cache       = { path = "../../../crates/cache" }
+dice-database    = { path = "../../../crates/database" }
+dice-event-bus   = { path = "../../../crates/event-bus" }
+sqlx             = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres"] }
+
+# Mirrors the root workspace lint wall (this workspace cannot inherit it).
+[lints.rust]
+unsafe_code      = "deny"
+unused_must_use  = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all           = { level = "warn", priority = -1 }
+unwrap_used   = "warn"
+dbg_macro     = "warn"
+todo          = "warn"
+large_futures = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level     = "s"
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
