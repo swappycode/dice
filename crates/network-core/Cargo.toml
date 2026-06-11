@@ -6,11 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-# Default ON for now so plain `cargo check -p dice-network-core` covers the
-# server half. The gateway depends on this feature explicitly.
-default = ["server"]
+# Both halves default ON so plain `cargo check -p dice-network-core` covers
+# everything. The gateway depends on "server", the desktop host on "client".
+default = ["server", "client"]
 server = ["dep:async-trait", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio-util"]
-# "client" feature arrives in a later milestone-1 phase (see src/lib.rs).
+client = [
+  "dep:rand",
+  "dep:reqwest",
+  "dep:tokio-tungstenite",
+  "dep:url",
+  "dep:webpki-roots",
+]
 
 [dependencies]
 bytes            = { workspace = true }
@@ -34,6 +40,14 @@ hyper       = { workspace = true, optional = true, features = ["http1", "server"
 hyper-util  = { workspace = true, optional = true, features = ["service"] }
 tokio-util  = { workspace = true, optional = true }
 
+# client-only (feature-gated). Both tungstenite and reqwest declare rustls
+# with default-features = false, so the ring-only workspace policy holds.
+rand              = { workspace = true, optional = true }
+reqwest           = { workspace = true, optional = true, features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { workspace = true, optional = true, features = ["rustls-tls-webpki-roots"] }
+url               = { workspace = true, optional = true }
+webpki-roots      = { workspace = true, optional = true }
+
 [dev-dependencies]
 axum             = { workspace = true }
 bytes            = { workspace = true }
@@ -45,6 +59,18 @@ rustls-pki-types = { workspace = true }
 tokio            = { workspace = true }
 tokio-rustls     = { workspace = true }
 tokio-util       = { workspace = true }
+
+# client_e2e.rs builds the real gateway in-process (dev-only: no cycle).
+api-gateway      = { workspace = true }
+auth-service     = { workspace = true }
+chat-service     = { workspace = true }
+presence-service = { workspace = true }
+dice-auth-core   = { workspace = true }
+dice-cache       = { workspace = true }
+dice-common      = { workspace = true }
+dice-database    = { workspace = true }
+dice-event-bus   = { workspace = true }
+sqlx             = { workspace = true }
 
 [lints]
 workspace = true

@@ -657,24 +657,38 @@ dependencies = [
 name = "dice-network-core"
 version = "0.1.0"
 dependencies = [
+ "api-gateway",
  "async-trait",
+ "auth-service",
  "axum",
  "bytes",
+ "chat-service",
+ "dice-auth-core",
+ "dice-cache",
  "dice-common",
+ "dice-database",
+ "dice-event-bus",
  "dice-protocol",
  "futures-util",
  "hyper",
  "hyper-util",
+ "presence-service",
  "quinn",
+ "rand 0.9.4",
  "rcgen",
+ "reqwest",
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",
+ "sqlx",
  "thiserror",
  "tokio",
  "tokio-rustls",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
+ "url",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -1182,6 +1196,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -2320,6 +2335,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3127,8 +3143,12 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -3317,6 +3337,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.4",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror",
 ]

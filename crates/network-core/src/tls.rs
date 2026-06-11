@@ -40,7 +40,7 @@ pub fn install_ring_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-fn ring_provider() -> Arc<rustls::crypto::CryptoProvider> {
+pub(crate) fn ring_provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 

@@ -1,0 +1,278 @@
+//! `ApiClient`: the REST half (docs/protocol.md §10) — protobuf bodies
+//! (`application/x-protobuf`) over HTTPS, errors as `dice.v1.Error` + HTTP
+//! status. Auth endpoints need no token; bearer endpoints pull access tokens
+//! from a [`TokenProvider`] and do exactly ONE refresh-and-retry on 401
+//! (the provider owns refresh-token rotation).
+
+use std::sync::Arc;
+
+use dice_protocol::prost::Message;
+use dice_protocol::v1::{self, ErrorCode};
+use reqwest::StatusCode;
+use reqwest::header::CONTENT_TYPE;
+
+use super::tls::TlsOptions;
+use super::token::{TokenError, TokenProvider};
+use crate::tls::TlsError;
+
+const PROTOBUF: &str = "application/x-protobuf";
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApiError {
+    /// The server answered with a `dice.v1.Error` body.
+    #[error("api error {status}: {} ({})", error.message, error.code)]
+    Api { status: u16, error: v1::Error },
+    /// Transport-level failure (DNS, TLS, connect, body read).
+    #[error("http: {0}")]
+    Http(#[from] reqwest::Error),
+    /// 2xx body that did not decode as the expected message.
+    #[error("response decode: {0}")]
+    Decode(#[from] dice_protocol::prost::DecodeError),
+    /// The token provider could not supply an access token.
+    #[error(transparent)]
+    Token(#[from] TokenError),
+    /// Trust configuration problem (bad extra-CA path, …).
+    #[error(transparent)]
+    Tls(#[from] TlsError),
+    /// `base.join(path)` failed (base URL cannot be a base).
+    #[error("url: {0}")]
+    Url(#[from] url::ParseError),
+}
+
+impl ApiError {
+    /// HTTP status when the server answered with an error body.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Api { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+}
+
+/// Protobuf-over-HTTPS client for the gateway's REST surface.
+#[derive(Clone)]
+pub struct ApiClient {
+    http: reqwest::Client,
+    base: url::Url,
+    token: Option<Arc<dyn TokenProvider>>,
+}
+
+impl ApiClient {
+    /// `base` is the scheme+host+port root, e.g. `https://localhost:8443`.
+    /// Trust = webpki roots + the extra anchors in `tls`.
+    pub fn new(base: url::Url, tls: &TlsOptions) -> Result<Self, ApiError> {
+        let builder = tls.apply_to_reqwest(reqwest::Client::builder())?;
+        Ok(Self {
+            http: builder.build()?,
+            base,
+            token: None,
+        })
+    }
+
+    /// Attach the token provider the bearer endpoints will use.
+    #[must_use]
+    pub fn with_token_provider(mut self, provider: Arc<dyn TokenProvider>) -> Self {
+        self.token = Some(provider);
+        self
+    }
+
+    // ------------------------------------------------------ auth endpoints
+
+    pub async fn register(
+        &self,
+        email: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<v1::AuthSuccess, ApiError> {
+        self.post_public(
+            "/v1/auth/register",
+            &v1::RegisterRequest {
+                email: email.to_owned(),
+                username: username.to_owned(),
+                password: password.to_owned(),
+            },
+        )
+        .await
+    }
+
+    pub async fn login(&self, email: &str, password: &str) -> Result<v1::AuthSuccess, ApiError> {
+        self.post_public(
+            "/v1/auth/login",
+            &v1::LoginRequest {
+                email: email.to_owned(),
+                password: password.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Rotates the refresh token; the old one is dead afterwards.
+    pub async fn refresh(&self, refresh_token: &str) -> Result<v1::AuthSuccess, ApiError> {
+        self.post_public(
+            "/v1/auth/refresh",
+            &v1::RefreshRequest {
+                refresh_token: refresh_token.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Revokes the refresh-token family (204 on success).
+    pub async fn logout(&self, refresh_token: &str) -> Result<(), ApiError> {
+        let url = self.url("/v1/auth/logout")?;
+        let body = v1::LogoutRequest {
+            refresh_token: refresh_token.to_owned(),
+        }
+        .encode_to_vec();
+        let response = self
+            .http
+            .post(url)
+            .header(CONTENT_TYPE, PROTOBUF)
+            .body(body)
+            .send()
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
+    // ---------------------------------------------------- bearer endpoints
+
+    /// `GET /v1/channels/{id}/messages?before|after=<id>&limit=1..100`,
+    /// newest first.
+    pub async fn fetch_messages(
+        &self,
+        channel_id: u64,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: u8,
+    ) -> Result<Vec<v1::Message>, ApiError> {
+        let mut url = self.url(&format!("/v1/channels/{channel_id}/messages"))?;
+        {
+            let mut query = url.query_pairs_mut();
+            if let Some(before) = before {
+                query.append_pair("before", &before.to_string());
+            }
+            if let Some(after) = after {
+                query.append_pair("after", &after.to_string());
+            }
+            query.append_pair("limit", &limit.to_string());
+        }
+        let response = self
+            .bearer_send(|token| self.http.get(url.clone()).bearer_auth(token))
+            .await?;
+        let history: v1::MessageHistory = decode_response(response).await?;
+        Ok(history.messages)
+    }
+
+    /// `POST /v1/guilds` — auto-creates `#general`.
+    pub async fn create_guild(&self, name: &str) -> Result<v1::Guild, ApiError> {
+        self.post_bearer(
+            "/v1/guilds",
+            &v1::CreateGuildRequest {
+                name: name.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/guilds/join` by invite code.
+    pub async fn join_guild(&self, code: &str) -> Result<v1::Guild, ApiError> {
+        self.post_bearer(
+            "/v1/guilds/join",
+            &v1::JoinGuildRequest {
+                code: code.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/dms` — idempotent per recipient pair.
+    pub async fn open_dm(&self, recipient_id: u64) -> Result<v1::Channel, ApiError> {
+        self.post_bearer("/v1/dms", &v1::OpenDmRequest { recipient_id })
+            .await
+    }
+
+    // ------------------------------------------------------------ plumbing
+
+    fn url(&self, path: &str) -> Result<url::Url, ApiError> {
+        Ok(self.base.join(path)?)
+    }
+
+    async fn post_public<Req: Message, Resp: Message + Default>(
+        &self,
+        path: &str,
+        request: &Req,
+    ) -> Result<Resp, ApiError> {
+        let url = self.url(path)?;
+        let response = self
+            .http
+            .post(url)
+            .header(CONTENT_TYPE, PROTOBUF)
+            .body(request.encode_to_vec())
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn post_bearer<Req: Message, Resp: Message + Default>(
+        &self,
+        path: &str,
+        request: &Req,
+    ) -> Result<Resp, ApiError> {
+        let url = self.url(path)?;
+        let body = request.encode_to_vec();
+        let response = self
+            .bearer_send(|token| {
+                self.http
+                    .post(url.clone())
+                    .header(CONTENT_TYPE, PROTOBUF)
+                    .body(body.clone())
+                    .bearer_auth(token)
+            })
+            .await?;
+        decode_response(response).await
+    }
+
+    /// Send with a bearer token; on 401, ask the provider ONCE more (it owns
+    /// rotation/refresh) and retry exactly once.
+    async fn bearer_send(
+        &self,
+        build: impl Fn(&str) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, ApiError> {
+        let provider = self.token.as_ref().ok_or(TokenError::NoCredentials)?;
+        let token = provider.access_token().await?;
+        let response = build(&token).send().await?;
+        if response.status() != StatusCode::UNAUTHORIZED {
+            return Ok(response);
+        }
+        let token = provider.access_token().await?;
+        Ok(build(&token).send().await?)
+    }
+}
+
+/// 2xx ⇒ decode `Resp`; otherwise decode (or synthesize) the `dice.v1.Error`.
+async fn decode_response<Resp: Message + Default>(
+    response: reqwest::Response,
+) -> Result<Resp, ApiError> {
+    let status = response.status();
+    let bytes = response.bytes().await?;
+    if status.is_success() {
+        return Ok(Resp::decode(bytes.as_ref())?);
+    }
+    Err(error_from(status, &bytes))
+}
+
+fn error_from(status: StatusCode, body: &[u8]) -> ApiError {
+    let error = v1::Error::decode(body).unwrap_or_else(|_| v1::Error {
+        code: ErrorCode::Unspecified as i32,
+        message: format!("HTTP {status} with undecodable error body"),
+        retry_after_ms: 0,
+    });
+    ApiError::Api {
+        status: status.as_u16(),
+        error,
+    }
+}
