@@ -1,0 +1,19 @@
+/* Window shell: titlebar / body / statusbar rows, retro window frame. */
+
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--c-window-face);
+  border: 1px solid var(--c-window-frame);
+  border-radius: var(--radius-window);
+  box-shadow: inset 0 0 0 1px var(--c-glass-edge);
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  min-height: 0; /* let children scroll instead of growing */
+}

@@ -1,0 +1,97 @@
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--titlebar-h);
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  background: var(--grad-titlebar);
+  color: var(--c-titlebar-text);
+  position: relative;
+  z-index: var(--z-chrome);
+}
+
+.icon {
+  color: var(--c-titlebar-text);
+  pointer-events: none;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  text-shadow: var(--titlebar-text-glow);
+}
+
+/* ---- Luna: floating 21×21 glossy caption buttons ---- */
+
+.captions {
+  display: flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.btn {
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-glass-edge);
+  border-radius: var(--radius-control);
+  background: var(--grad-caption);
+  color: var(--c-caption-glyph);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.55);
+  transition: filter var(--t-fast);
+}
+
+.btn:hover {
+  filter: brightness(1.12);
+}
+
+.btn:active {
+  box-shadow: inset 1px 1px 2px rgba(0, 0, 30, 0.45);
+  filter: brightness(0.94);
+}
+
+.btnClose {
+  background: var(--grad-close);
+}
+
+.btnClose:hover {
+  background: var(--grad-close-hover);
+  color: var(--c-text-invert);
+}
+
+/* ---- Aero: joined caption group hanging from the top edge ---- */
+
+:global([data-theme="aero"]) .captions {
+  gap: 0;
+  align-self: flex-start;
+  margin-right: var(--sp-2);
+}
+
+:global([data-theme="aero"]) .btn {
+  width: 29px;
+  height: 19px;
+  margin-left: -1px; /* shared 1px border between siblings */
+  border: 1px solid rgba(20, 50, 80, 0.55);
+  border-top: none;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+:global([data-theme="aero"]) .btn:first-child {
+  margin-left: 0;
+  border-bottom-left-radius: 5px;
+}
+
+:global([data-theme="aero"]) .btnClose {
+  width: 45px;
+  border-bottom-right-radius: 5px;
+}

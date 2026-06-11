@@ -1,0 +1,169 @@
+/* ============================================================
+   Shared retro recipes. Bevel technique adapted from 98.css /
+   XP.css / 7.css (MIT) — see THIRD_PARTY_NOTICES in repo root
+   docs; all values re-authored, no assets copied.
+   ============================================================ */
+
+/* ---- Raised bevel (Luna buttons, cards) ---- */
+.bevel-raised {
+  border: var(--bevel-w) solid var(--c-bevel-dark);
+  border-radius: var(--radius-control);
+  background: var(--grad-button);
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo);
+}
+
+.bevel-raised:hover {
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo),
+    inset 0 0 0 2px var(--c-hover-ring); /* XP orange hover ring */
+}
+
+.bevel-raised:active,
+.bevel-raised.pressed {
+  /* pressed = invert + nudge */
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-lo),
+    inset -1px -1px 0 var(--c-bevel-hi);
+  background: var(--grad-button-pressed);
+}
+
+/* Luna default button: 1px inner accent ring */
+.btn-default {
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo),
+    inset 0 0 0 1px var(--c-default-ring);
+}
+
+/* ---- Sunken field (inputs, content wells) ---- */
+.bevel-sunken {
+  border: 1px solid var(--c-bevel-lo);
+  background: var(--c-content);
+  box-shadow: inset 1px 1px 2px var(--c-well-shadow);
+}
+
+/* ---- The Aero gloss seam — hard stop at the vertical midpoint ---- */
+.gloss {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.85) 0%,
+      rgba(255, 255, 255, 0.45) 49%,
+      rgba(255, 255, 255, 0.1) 51%,
+      rgba(255, 255, 255, 0.3) 100%
+    ),
+    var(--c-accent);
+  border: 1px solid rgba(0, 40, 80, 0.45);
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.gloss:hover {
+  filter: brightness(1.06);
+}
+
+.gloss:active {
+  filter: brightness(0.94);
+}
+
+/* ---- Glass panel (Aero sidebars/cards) ---- */
+.glass-panel {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.55), rgba(205, 228, 248, 0.35));
+  backdrop-filter: blur(var(--glass-blur)); /* 0px under Luna = no-op, no cost */
+  border: 1px solid var(--c-glass-edge);
+  box-shadow: 0 1px 3px var(--c-shadow-soft);
+}
+
+/* ---- Presence orbs (pure CSS, no images) ---- */
+.orb {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 28%,
+    rgba(255, 255, 255, 0.6),
+    var(--orb-c, var(--orb-off)) 45%,
+    color-mix(in srgb, var(--orb-c, var(--orb-off)) 55%, black) 85%
+  );
+  box-shadow:
+    inset 0 -1px 1px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.orb--online {
+  --orb-c: var(--orb-online);
+}
+
+.orb--idle {
+  --orb-c: var(--orb-idle);
+}
+
+.orb--dnd {
+  --orb-c: var(--orb-dnd);
+}
+
+.orb--offline {
+  /* hollow ring variant */
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--orb-off);
+}
+
+/* ---- Classic yellow tooltip ---- */
+.tooltip-classic {
+  position: absolute;
+  z-index: var(--z-tooltip);
+  padding: 2px 6px 3px;
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+  background: var(--c-tooltip-bg);
+  border: 1px solid var(--c-tooltip-border);
+  box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---- Etched dividers (groupbox-legend style) ---- */
+.etched-h {
+  border: 0;
+  border-top: 1px solid var(--c-bevel-lo);
+  border-bottom: 1px solid var(--c-bevel-hi);
+}
+
+.etched-v {
+  border: 0;
+  border-left: 1px solid var(--c-bevel-lo);
+  border-right: 1px solid var(--c-bevel-hi);
+  width: 0;
+  align-self: stretch;
+}
+
+/* ---- Typing dots — the only animation loop in the app.
+   Mounted only while someone is typing; paused by html.app-idle;
+   killed entirely by prefers-reduced-motion (base.css). ---- */
+.typing-dots::after {
+  content: "";
+  display: inline-block;
+  width: 3ch;
+  text-align: left;
+  animation: dice-dots 1s steps(4) infinite;
+}
+
+@keyframes dice-dots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+}

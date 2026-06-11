@@ -1,0 +1,35 @@
+.self {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--c-bevel-hi);
+  box-shadow: inset 0 1px 0 var(--c-bevel-lo);
+}
+
+.selfOrb {
+  display: inline-flex;
+  padding: var(--sp-1);
+  background: none;
+  border: none;
+}
+
+.selfName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+}
+
+.logOff {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--font-size-chrome);
+  color: var(--c-link);
+  text-decoration: underline;
+}

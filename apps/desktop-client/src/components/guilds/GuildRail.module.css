@@ -1,0 +1,101 @@
+.rail {
+  flex: none;
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  background: var(--grad-rail);
+  backdrop-filter: blur(var(--glass-blur)); /* Aero glass; 0px under Luna */
+  border-right: 1px solid rgba(0, 0, 30, 0.25);
+}
+
+.tileWrap {
+  position: relative;
+}
+
+/* classic yellow tooltip flyout, pure CSS */
+.tip {
+  display: none;
+  left: calc(100% + var(--sp-3));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tileWrap:hover .tip {
+  display: block;
+}
+
+/* green Start-inspired pill */
+.startPill {
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  border: 1px solid rgba(0, 50, 0, 0.55);
+  background: var(--grad-start);
+  color: var(--c-text-invert);
+  font-weight: 700;
+  font-style: italic;
+  font-size: 12px;
+  text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.startPill:hover {
+  filter: brightness(1.08);
+}
+
+.startActive {
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 2px var(--c-active-ring);
+}
+
+.sep {
+  width: 60%;
+  height: 2px;
+  border-top: 1px solid rgba(0, 0, 30, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* 40×40 quick-launch tiles */
+.tile {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  border: 1px solid var(--c-bevel-dark);
+  background: var(--grad-button);
+  color: var(--c-text);
+  font-weight: 700;
+  font-size: var(--font-size-base);
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo);
+  transition: box-shadow var(--t-fast);
+}
+
+.tile:hover {
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo),
+    inset 0 0 0 2px var(--c-hover-ring);
+}
+
+/* active guild = pressed bevel + the XP-orange glow ring */
+.active,
+.active:hover {
+  background: var(--grad-button-pressed);
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-lo),
+    inset -1px -1px 0 var(--c-bevel-hi),
+    inset 0 0 0 2px var(--c-active-ring);
+}
+
+.addTile {
+  font-size: 20px;
+  line-height: 1;
+  color: var(--c-accent);
+}

@@ -1,0 +1,58 @@
+.panel {
+  flex: none;
+  width: var(--members-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--c-window-face);
+  border-left: 1px solid var(--c-bevel-lo);
+}
+
+.header {
+  flex: none;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  color: var(--c-text-dim);
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 0 var(--c-bevel-hi);
+  background: var(--grad-button);
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  text-align: left;
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+}
+
+.row:hover {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent-border);
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.you {
+  color: var(--c-text-dim);
+}

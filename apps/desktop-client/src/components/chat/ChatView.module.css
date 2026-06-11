@@ -1,0 +1,48 @@
+.chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--c-window-face);
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-text-dim);
+}
+
+/* "rebar" toolbar band with etched bottom edge */
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 28px;
+  padding: 0 var(--sp-4);
+  background: var(--grad-button);
+  border-bottom: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 0 var(--c-bevel-hi);
+}
+
+.title {
+  font-weight: 700;
+}
+
+.etch {
+  width: 2px;
+  height: 14px;
+  border-left: 1px solid var(--c-bevel-lo);
+  border-right: 1px solid var(--c-bevel-hi);
+}
+
+.topic {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

@@ -1,0 +1,37 @@
+/* Luna (XP vibe) — Layer B. tokens.css defaults ARE Luna; this block
+   restates the load-bearing values explicitly so Luna survives any
+   future change to the :root defaults (e.g. a midnight default). */
+
+[data-theme="luna"] {
+  --radius-window: 8px 8px 0 0;
+  --scrollbar-w: 15px;
+
+  --font-ui: "Tahoma", "Segoe UI", "DejaVu Sans", sans-serif;
+
+  --c-window-face: #ece9d8;
+  --c-content: #ffffff;
+  --c-text: #1a1a1a;
+  --c-text-dim: #6d6d6d;
+  --c-bevel-hi: #ffffff;
+  --c-bevel-lo: #aca899;
+  --c-bevel-dark: #716f64;
+  --c-accent: #316ac5;
+  --c-accent-soft: #c1d2ee;
+  --c-accent-border: #316ac5;
+  --c-titlebar-text: #ffffff;
+
+  --grad-titlebar: linear-gradient(180deg, #0997ff 0%, #0053ee 10%, #0050c9 85%, #1a6fe8 100%);
+  --grad-button: linear-gradient(180deg, #ffffff 0%, #f0f0ea 45%, #e3e2d8 100%);
+  --grad-button-pressed: linear-gradient(180deg, #e3e2d8, #f0f0ea);
+  --grad-selection: linear-gradient(180deg, #3f81e0, #2a5cb8);
+  --grad-rail: linear-gradient(90deg, #1941a5 0%, #2858c4 6%, #2858c4 94%, #1941a5 100%);
+  --grad-page: radial-gradient(120% 90% at 50% 38%, #5a7edc 0%, #2b50b8 55%, #16307f 100%);
+  --grad-close: linear-gradient(180deg, #f3a08a, #e25b3d 45%, #c43b1d 100%);
+  --grad-close-hover: linear-gradient(180deg, #ffb89e, #ef6a48 45%, #d4441f 100%);
+  --grad-caption: linear-gradient(180deg, #8bc0fa 0%, #3d7de4 45%, #1f5fd0 100%);
+  --c-caption-glyph: #ffffff;
+
+  --glass-blur: 0px; /* Luna has no glass */
+  --c-window-frame: #0050c9;
+  --titlebar-text-glow: 1px 1px 0 var(--c-titlebar-shadow);
+}

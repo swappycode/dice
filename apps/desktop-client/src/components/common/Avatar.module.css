@@ -1,0 +1,21 @@
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  color: var(--c-text-invert);
+  background: var(--grad-selection);
+  border: 1px solid var(--c-accent);
+  box-shadow: inset 0 1px 0 var(--c-glass-edge);
+}
+
+.sm {
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+}

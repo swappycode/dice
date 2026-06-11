@@ -1,0 +1,74 @@
+.panel {
+  flex: none;
+  width: var(--tree-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--c-window-face);
+  border-right: 1px solid var(--c-bevel-lo);
+}
+
+.header {
+  flex: none;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  border-bottom: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 0 var(--c-bevel-hi);
+  background: var(--grad-button);
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  text-align: left;
+  font-size: var(--font-size-base);
+  color: var(--c-text);
+}
+
+/* XP "newly installed program" soft-orange hover */
+.row:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c-unread) 28%, var(--c-content)),
+    color-mix(in srgb, var(--c-unread) 14%, var(--c-content))
+  );
+  border-color: color-mix(in srgb, var(--c-unread) 55%, var(--c-content));
+}
+
+.selected,
+.selected:hover {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-select-text);
+}
+
+:global([data-theme="aero"]) .row:hover {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent-border);
+}
+
+:global([data-theme="aero"]) .selected,
+:global([data-theme="aero"]) .selected:hover {
+  background: var(--grad-selection);
+  border-color: var(--c-accent);
+  color: var(--c-select-text);
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

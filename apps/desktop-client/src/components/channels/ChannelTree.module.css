@@ -1,0 +1,174 @@
+.panel {
+  flex: none;
+  width: var(--tree-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--c-window-face);
+  border-right: 1px solid var(--c-bevel-lo);
+}
+
+.guildName {
+  flex: none;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  color: var(--c-text);
+  /* rebar-style band with etched bottom edge */
+  border-bottom: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 0 var(--c-bevel-hi);
+  background: var(--grad-button);
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-2);
+}
+
+.section {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-1);
+  background: none;
+  border: none;
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  color: var(--c-text-dim);
+  text-align: left;
+}
+
+/* Luna: [-]/[+] box toggle */
+.boxToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border: 1px solid var(--c-bevel-lo);
+  background: var(--c-content);
+  color: var(--c-text);
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Aero: chevron triangle instead of the box */
+.chevToggle {
+  display: none;
+  width: 0;
+  height: 0;
+  flex: none;
+  border-left: 4px solid var(--c-text-dim);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform var(--t-fast);
+}
+
+.chevOpen {
+  transform: rotate(90deg);
+}
+
+:global([data-theme="aero"]) .boxToggle {
+  display: none;
+}
+
+:global([data-theme="aero"]) .chevToggle {
+  display: inline-block;
+}
+
+.sectionLabel {
+  letter-spacing: 0.04em;
+}
+
+/* Luna Explorer tree: dotted vertical rail + dotted connectors */
+.tree {
+  margin-left: 13px;
+  border-left: 1px dotted var(--c-bevel-lo);
+  padding: var(--sp-1) 0;
+}
+
+.node {
+  position: relative;
+}
+
+.node::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 8px;
+  border-top: 1px dotted var(--c-bevel-lo);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: calc(100% - 10px);
+  margin-left: 10px;
+  padding: 2px var(--sp-2);
+  border: 1px solid transparent;
+  background: none;
+  text-align: left;
+  font-size: var(--font-size-base);
+  color: var(--c-text);
+}
+
+.row:hover {
+  background: var(--c-accent-soft);
+}
+
+/* selected channel = solid accent bar with inverted text */
+.selected,
+.selected:hover {
+  background: var(--c-accent);
+  color: var(--c-select-text);
+}
+
+.selected .hash {
+  color: var(--c-select-text);
+}
+
+.hash {
+  color: var(--c-text-dim);
+  font-weight: 700;
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Aero nav pane: no tree lines, rounded soft-fill hover w/ border */
+:global([data-theme="aero"]) .tree {
+  margin-left: var(--sp-2);
+  border-left: none;
+}
+
+:global([data-theme="aero"]) .node::before {
+  display: none;
+}
+
+:global([data-theme="aero"]) .row {
+  margin-left: 0;
+  width: 100%;
+  border-radius: var(--radius-control);
+}
+
+:global([data-theme="aero"]) .row:hover {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent-border);
+}
+
+:global([data-theme="aero"]) .selected,
+:global([data-theme="aero"]) .selected:hover {
+  background: var(--grad-selection);
+  border-color: var(--c-accent);
+  color: var(--c-select-text);
+}
+
+/* footer self strip lives in common/SelfStrip */

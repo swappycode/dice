@@ -1,0 +1,137 @@
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  background: var(--grad-page);
+  padding: var(--sp-6);
+}
+
+/* the XP welcome screen's thin separator lines */
+.rule {
+  width: min(680px, 90%);
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--c-glass-edge), transparent);
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 240px 300px;
+  width: min(560px, 92%);
+  border: 1px solid var(--c-window-frame);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 30, 0.4);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-5);
+  background: var(--grad-titlebar);
+  color: var(--c-titlebar-text);
+  text-align: center;
+}
+
+.logo {
+  color: var(--c-titlebar-text);
+}
+
+.wordmark {
+  letter-spacing: 0.35em;
+  text-shadow: var(--titlebar-text-glow);
+}
+
+.tagline {
+  font-size: var(--font-size-chrome);
+  opacity: 0.92;
+  text-shadow: var(--titlebar-text-glow);
+}
+
+.formPane {
+  background: var(--c-window-face);
+  padding: var(--sp-6) var(--sp-5);
+}
+
+.heading {
+  margin-bottom: var(--sp-4);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.label {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+  margin-top: var(--sp-2);
+}
+
+.input {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border-radius: 0;
+}
+
+.error {
+  margin-top: var(--sp-2);
+  font-size: var(--font-size-chrome);
+  color: var(--orb-dnd);
+}
+
+.submit {
+  margin-top: var(--sp-4);
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  font-weight: 700;
+  padding: 0 var(--sp-4);
+}
+
+.submit:disabled {
+  color: var(--c-text-dim);
+}
+
+.submitArrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--grad-start);
+  color: var(--c-text-invert);
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* classic blue underlined hyperlink */
+.switchLink {
+  margin-top: var(--sp-3);
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--c-link);
+  text-decoration: underline;
+  font-size: var(--font-size-chrome);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  font-size: var(--font-size-chrome);
+  color: var(--c-titlebar-text);
+  text-shadow: var(--titlebar-text-glow);
+  opacity: 0.9;
+}

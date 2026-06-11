@@ -1,0 +1,166 @@
+/* ============================================================
+   Webkit scrollbars (WebView2 / WebKit both support buttons —
+   standards scrollbar-color cannot do arrow buttons).
+   All SVG glyphs below are author-drawn data URIs (no sampled art).
+   ============================================================ */
+
+::-webkit-scrollbar {
+  width: var(--scrollbar-w);
+  height: var(--scrollbar-w);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ================= Luna: pinstripe track, blue gradient thumb,
+   beveled arrow buttons ================= */
+
+[data-theme="luna"] ::-webkit-scrollbar-track {
+  background-color: #f4f3ee;
+  background-image: repeating-linear-gradient(
+    90deg,
+    #f4f3ee 0 2px,
+    #e9e7dc 2px 4px
+  );
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-thumb {
+  background:
+    /* classic center grip: 3 short etched lines */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M1 1h6M1 4h6M1 7h6' stroke='%236d94c9' stroke-width='1'/%3E%3C/svg%3E")
+      center / 8px 8px no-repeat,
+    linear-gradient(90deg, #cde3ff 0%, #b6d3f7 50%, #9ac2f4 100%);
+  border: 1px solid #6d94c9;
+  border-radius: 2px;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-thumb:hover {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M1 1h6M1 4h6M1 7h6' stroke='%236d94c9' stroke-width='1'/%3E%3C/svg%3E")
+      center / 8px 8px no-repeat,
+    linear-gradient(90deg, #ddebff 0%, #c8ddfb 50%, #aecdf8 100%);
+}
+
+/* mini beveled arrow buttons */
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button {
+  display: block;
+  height: 15px;
+  width: 15px;
+  background-color: #ecebe5;
+  background-image: linear-gradient(180deg, #fdfdfb 0%, #ecebe5 45%, #d8d6c8 100%);
+  border: 1px solid #9c9a8a;
+  border-radius: 2px;
+  box-shadow:
+    inset 1px 1px 0 #ffffff,
+    inset -1px -1px 0 #b9b6a5;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button:hover {
+  background-color: #f5f4ef;
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button:active {
+  box-shadow:
+    inset 1px 1px 0 #b9b6a5,
+    inset -1px -1px 0 #ffffff;
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button:vertical:decrement {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M3.5 0 7 4H0z' fill='%23274f9e'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #fdfdfb 0%, #ecebe5 45%, #d8d6c8 100%);
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button:vertical:increment {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M0 0h7L3.5 4z' fill='%23274f9e'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #fdfdfb 0%, #ecebe5 45%, #d8d6c8 100%);
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button:horizontal:decrement {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='7'%3E%3Cpath d='M0 3.5 4 0v7z' fill='%23274f9e'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #fdfdfb 0%, #ecebe5 45%, #d8d6c8 100%);
+}
+
+[data-theme="luna"] ::-webkit-scrollbar-button:single-button:horizontal:increment {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='7'%3E%3Cpath d='M4 3.5 0 7V0z' fill='%23274f9e'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #fdfdfb 0%, #ecebe5 45%, #d8d6c8 100%);
+}
+
+/* ================= Aero: slimmer, flat track, glossy rounded thumb,
+   buttons flat until hover ================= */
+
+[data-theme="aero"] ::-webkit-scrollbar {
+  width: 13px;
+  height: 13px;
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-thumb {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.85) 0%,
+      rgba(255, 255, 255, 0.35) 49%,
+      rgba(255, 255, 255, 0.08) 51%,
+      rgba(255, 255, 255, 0.25) 100%
+    ),
+    #a3b5c9;
+  border: 1px solid #8399ad;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  background-clip: padding-box;
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.85) 0%,
+      rgba(255, 255, 255, 0.35) 49%,
+      rgba(255, 255, 255, 0.08) 51%,
+      rgba(255, 255, 255, 0.25) 100%
+    ),
+    #8fb7dd;
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-button:single-button {
+  display: block;
+  height: 13px;
+  width: 13px;
+  background-color: #f0f0f0;
+  border: 1px solid transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-button:single-button:hover {
+  background-color: #cce8ff;
+  border-color: #99d1ff;
+  border-radius: 2px;
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-button:single-button:vertical:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M3.5 0 7 4H0z' fill='%23505d6b'/%3E%3C/svg%3E");
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-button:single-button:vertical:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M0 0h7L3.5 4z' fill='%23505d6b'/%3E%3C/svg%3E");
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-button:single-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='7'%3E%3Cpath d='M0 3.5 4 0v7z' fill='%23505d6b'/%3E%3C/svg%3E");
+}
+
+[data-theme="aero"] ::-webkit-scrollbar-button:single-button:horizontal:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='7'%3E%3Cpath d='M4 3.5 0 7V0z' fill='%23505d6b'/%3E%3C/svg%3E");
+}

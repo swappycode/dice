@@ -1,0 +1,101 @@
+/* ============================================================
+   Dice Retro UI — token contract (two layers).
+   Layer A (geometry/elevation): rarely differs per theme.
+   Layer B (color/texture): what themes/luna.css + themes/aero.css
+   override via [data-theme=...]. Defaults below = Luna.
+   Components may ONLY consume var(--*) — never raw hex.
+   ============================================================ */
+
+:root {
+  /* ---- Layer A — geometry ---- */
+  --radius-window: 8px 8px 0 0; /* Aero overrides: 6px */
+  --radius-control: 3px;
+  --titlebar-h: 30px;
+  --statusbar-h: 24px;
+  --scrollbar-w: 15px; /* Aero: 13px */
+  --bevel-w: 1px;
+  --rail-w: 56px;
+  --tree-w: 200px;
+  --members-w: 168px;
+
+  /* spacing scale */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+  --sp-6: 24px;
+
+  /* z-layers */
+  --z-chrome: 10;
+  --z-tooltip: 40;
+  --z-dialog: 50;
+
+  /* motion */
+  --t-fast: 120ms;
+  --t-med: 150ms;
+
+  /* ---- Layer B — color/texture contract (defaults = Luna) ---- */
+  --font-ui: "Tahoma", "Segoe UI", "DejaVu Sans", sans-serif;
+  --font-size-base: 13px; /* XP was 11px Tahoma; 13px for readability */
+  --font-size-chrome: 11px; /* titlebar/statusbar/meta keep the XP scale */
+  --font-size-heading: 15px;
+
+  --c-window-face: #ece9d8; /* the Luna beige */
+  --c-content: #ffffff;
+  --c-text: #1a1a1a;
+  --c-text-dim: #6d6d6d;
+  --c-text-invert: #ffffff;
+  --c-bevel-hi: #ffffff;
+  --c-bevel-lo: #aca899;
+  --c-bevel-dark: #716f64;
+  --c-accent: #316ac5; /* Luna selection blue */
+  --c-accent-soft: #c1d2ee;
+  --c-accent-border: #316ac5; /* Aero overrides with its hover border */
+  --c-titlebar-text: #ffffff;
+  --c-link: #0a44c8; /* classic blue hyperlink */
+
+  --grad-titlebar: linear-gradient(180deg, #0997ff 0%, #0053ee 10%, #0050c9 85%, #1a6fe8 100%);
+  --grad-button: linear-gradient(180deg, #ffffff 0%, #f0f0ea 45%, #e3e2d8 100%);
+  --grad-button-pressed: linear-gradient(180deg, #e3e2d8, #f0f0ea);
+  --grad-selection: linear-gradient(180deg, #3f81e0, #2a5cb8);
+  --grad-rail: var(--grad-titlebar); /* guild rail surface */
+  --grad-start: linear-gradient(180deg, #5cbe56 0%, #3c9838 45%, #2f8a2b 100%); /* Start pill green */
+  --grad-page: radial-gradient(120% 90% at 50% 38%, #5a7edc 0%, #2b50b8 55%, #16307f 100%); /* login backdrop */
+  --grad-close: linear-gradient(180deg, #f3a08a, #e25b3d 45%, #c43b1d 100%);
+  --grad-close-hover: linear-gradient(180deg, #ffb89e, #ef6a48 45%, #d4441f 100%);
+  --grad-caption: linear-gradient(180deg, #8bc0fa 0%, #3d7de4 45%, #1f5fd0 100%);
+  --c-caption-glyph: #ffffff;
+
+  --glass-blur: 0px; /* Luna has no glass */
+  --c-glass-edge: rgba(255, 255, 255, 0.65);
+
+  /* presence orbs */
+  --orb-online: #35c13f;
+  --orb-idle: #f4b400;
+  --orb-dnd: #d83b2e;
+  --orb-off: #9a9a9a;
+
+  /* focus */
+  --focus-marquee: 1px dotted #000000; /* Luna keyboard focus (marquee) */
+  --focus-marquee-offset: -4px;
+  --c-focus-field: var(--c-accent); /* focused field border */
+  --c-default-ring: #1c3fbb; /* Luna default-button inner ring */
+  --c-hover-ring: #f8b636aa; /* XP orange hover ring */
+
+  /* misc chrome */
+  --c-window-frame: #0050c9; /* outer window frame (Luna blue) */
+  --c-tooltip-bg: #ffffe1; /* classic yellow tooltip */
+  --c-tooltip-border: #000000;
+  --c-unread: #f8b636; /* glossy notification orange */
+  --c-active-ring: #f8b636; /* XP-orange active glow ring */
+  --c-titlebar-shadow: rgba(0, 0, 40, 0.5);
+  --titlebar-text-glow: 1px 1px 0 var(--c-titlebar-shadow);
+  --c-scrim: rgba(0, 0, 30, 0.45); /* dialog backdrop */
+  --c-shadow-soft: rgba(30, 60, 90, 0.18);
+  --c-well-shadow: rgba(0, 0, 0, 0.18);
+
+  /* selection */
+  --c-select-bg: var(--c-accent);
+  --c-select-text: #ffffff;
+}

@@ -1,0 +1,49 @@
+/* Full-width XP statusbar: window-face band, sunken cells, etched dividers. */
+
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--statusbar-h);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-window-face);
+  border-top: 1px solid var(--c-bevel-hi);
+  box-shadow: inset 0 1px 0 var(--c-bevel-lo);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+}
+
+.cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 18px;
+  padding: 0 var(--sp-3);
+  /* classic statusbar sunken cell */
+  border: 1px solid;
+  border-color: var(--c-bevel-lo) var(--c-bevel-hi) var(--c-bevel-hi) var(--c-bevel-lo);
+  white-space: nowrap;
+}
+
+.typingCell {
+  color: var(--c-text-dim);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.spring {
+  flex: 1;
+}
+
+.themeLabel {
+  color: var(--c-text-dim);
+}
+
+.themeSelect {
+  font-size: var(--font-size-chrome);
+  background: var(--c-content);
+  border: 1px solid var(--c-bevel-lo);
+  padding: 0 var(--sp-1);
+  height: 16px;
+}

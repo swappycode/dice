@@ -1,0 +1,105 @@
+/* Retro frame, modern list: sunken well on white, clean compact rows. */
+
+.well {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  margin: var(--sp-3) var(--sp-3) 0;
+  border-radius: 0;
+}
+
+/* Aero floats the list as a white rounded card on the glass surface */
+:global([data-theme="aero"]) .well {
+  border-radius: var(--radius-control);
+  border-color: var(--c-bevel-lo);
+  box-shadow: 0 1px 3px var(--c-shadow-soft);
+}
+
+.scroller {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+
+.loadOlderRow {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-2) 0 var(--sp-3);
+}
+
+.loadOlder {
+  font-size: var(--font-size-chrome);
+  padding: var(--sp-1) var(--sp-4);
+}
+
+.loadOlder:disabled {
+  color: var(--c-text-dim);
+}
+
+/* day divider — classic groupbox legend breaking an etched line */
+.day {
+  display: flex;
+  align-items: center;
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+.day::before,
+.day::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  border-top: 1px solid var(--c-bevel-lo);
+  border-bottom: 1px solid var(--c-bevel-hi);
+}
+
+.dayLabel {
+  padding: 0 var(--sp-3);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+.row {
+  padding: var(--sp-1) 0;
+  margin-top: var(--sp-2);
+}
+
+.grouped {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+
+.author {
+  font-weight: 700;
+  color: var(--c-accent);
+}
+
+.time {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+.content {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.pending .content {
+  color: var(--c-text-dim);
+}
+
+.failed .content {
+  color: var(--orb-dnd);
+}
+
+.failedNote {
+  font-size: var(--font-size-chrome);
+}

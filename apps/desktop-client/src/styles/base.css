@@ -1,0 +1,120 @@
+/* Reset + typography + selection + focus. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  color: var(--c-text);
+  background: var(--c-window-face);
+  -webkit-user-select: none;
+  user-select: none; /* app chrome is not selectable… */
+  cursor: default;
+}
+
+/* …but message text and fields are. */
+input,
+textarea,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: auto;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+select {
+  cursor: default;
+}
+
+img,
+svg {
+  display: block;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+a {
+  color: var(--c-link);
+  text-decoration: underline;
+}
+
+::selection {
+  background: var(--c-select-bg);
+  color: var(--c-select-text);
+}
+
+h1,
+h2,
+h3 {
+  font-size: var(--font-size-heading);
+  font-weight: 700;
+}
+
+small,
+.text-chrome {
+  font-size: var(--font-size-chrome);
+}
+
+.text-dim {
+  color: var(--c-text-dim);
+}
+
+/* ---- Focus rings ----
+   Fields: accent border. Buttons/tiles: the classic Luna dotted
+   marquee, drawn inset so it sits inside the bevel. */
+:focus {
+  outline: none;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--c-focus-field);
+  outline-offset: -1px;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--focus-marquee);
+  outline-offset: var(--focus-marquee-offset);
+}
+
+/* ---- Motion discipline ---- */
+html.app-idle *,
+html.app-idle *::before,
+html.app-idle *::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
