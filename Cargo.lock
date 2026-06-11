@@ -130,6 +130,19 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "auth-service"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dice-auth-core",
+ "dice-cache",
+ "dice-common",
+ "dice-database",
+ "dice-event-bus",
+ "dice-protocol",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "autocfg"
@@ -236,6 +249,20 @@ dependencies = [
 [[package]]
 name = "chat-service"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dice-cache",
+ "dice-common",
+ "dice-database",
+ "dice-event-bus",
+ "dice-permissions",
+ "dice-protocol",
+ "rand 0.9.4",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "combine"
@@ -1655,6 +1682,19 @@ dependencies = [
 [[package]]
 name = "presence-service"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap",
+ "dice-cache",
+ "dice-common",
+ "dice-database",
+ "dice-event-bus",
+ "dice-protocol",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "prettyplease"

@@ -5,5 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[dependencies]
+dice-common = { workspace = true }
+dice-protocol = { workspace = true }
+dice-cache = { workspace = true }
+dice-database = { workspace = true }
+dice-event-bus = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+dashmap = { workspace = true }
+tracing = { workspace = true }
+
 [lints]
 workspace = true
