@@ -1,0 +1,137 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/common",
+  "crates/protocol",
+  "crates/network-core",
+  "crates/event-bus",
+  "crates/database",
+  "crates/cache",
+  "crates/permissions",
+  "crates/auth-core",
+  "crates/logging",
+  "crates/metrics",
+  "services/api-gateway",
+  "services/auth-service",
+  "services/chat-service",
+  "services/presence-service",
+  "services/monolith",
+]
+# services/* is deliberately NOT a glob: placeholder dirs (voice/media/notification/search)
+# hold only a README and must not be parsed as packages. Do not "tidy" this.
+exclude = ["apps/desktop-client/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# ---- internal ----
+dice-common       = { path = "crates/common" }
+dice-protocol     = { path = "crates/protocol" }
+dice-network-core = { path = "crates/network-core" }
+dice-event-bus    = { path = "crates/event-bus" }
+dice-database     = { path = "crates/database" }
+dice-cache        = { path = "crates/cache" }
+dice-permissions  = { path = "crates/permissions" }
+dice-auth-core    = { path = "crates/auth-core" }
+dice-logging      = { path = "crates/logging" }
+dice-metrics      = { path = "crates/metrics" }
+api-gateway       = { path = "services/api-gateway" }
+auth-service      = { path = "services/auth-service" }
+chat-service      = { path = "services/chat-service" }
+presence-service  = { path = "services/presence-service" }
+
+# ---- async runtime ----
+tokio        = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
+tokio-util   = { version = "0.7", features = ["rt"] }
+futures-util = "0.3"
+bytes        = "1"
+async-trait  = "0.1"
+
+# ---- transport: ALL pinned to the *ring* crypto provider.
+# aws-lc-rs needs NASM+CMake on Windows MSVC, and the MSYS2 MinGW cmake on this
+# machine's PATH would poison the build. `just check` gates on aws-lc-sys absence.
+quinn             = { version = "0.11", default-features = false, features = ["rustls-ring", "runtime-tokio", "log"] }
+rustls            = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rustls-pemfile    = "2"
+rustls-pki-types  = "1"
+tokio-rustls      = { version = "0.26", default-features = false, features = ["ring"] }
+rcgen             = "0.13"
+tokio-tungstenite = "0.29"
+axum              = { version = "0.8", features = ["http1", "ws"] }
+tower-http        = { version = "0.6", features = ["trace", "limit"] }
+hyper             = "1"
+hyper-util        = { version = "0.1", features = ["tokio", "server", "http1"] }
+reqwest           = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "http2"] }
+webpki-roots      = "0.26"
+url               = "2"
+
+# ---- protocol ----
+prost               = "0.14"
+prost-build         = "0.14"
+protoc-bin-vendored = "3"
+
+# ---- data ----
+sqlx  = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "macros", "migrate", "time"] }
+redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
+moka  = { version = "0.12", features = ["future"] }
+async-nats = "0.49"
+
+# ---- auth ----
+argon2        = { version = "0.5", features = ["std"] }
+password-hash = { version = "0.5", features = ["getrandom"] }
+jsonwebtoken  = "9"
+ed25519-dalek = { version = "2", features = ["pkcs8"] }
+pkcs8         = { version = "0.10", features = ["pem"] }
+rand          = "0.9"
+getrandom     = "0.3"
+sha2          = "0.10"
+subtle        = "2"
+base64        = "0.22"
+
+# ---- observability ----
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+metrics            = "0.24"
+metrics-exporter-prometheus = { version = "0.17", default-features = false, features = ["http-listener"] }
+
+# ---- misc ----
+thiserror   = "2"
+anyhow      = "1"
+bitflags    = "2"
+time        = { version = "0.3", features = ["formatting", "macros"] }
+serde       = { version = "1", features = ["derive"] }   # config + JWT claims ONLY; never on the realtime path
+dashmap     = "6"
+parking_lot = "0.12"
+smallvec    = "1"
+
+[workspace.lints.rust]
+unsafe_code      = "deny"
+unused_must_use  = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all           = { level = "warn", priority = -1 }
+unwrap_used   = "warn"
+dbg_macro     = "warn"
+todo          = "warn"
+large_futures = "warn"
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Deps at -O2: ring/quinn/argon2 are unusable at -O0.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
+# Deliberate: panic=abort would let one buggy task kill 100k connections;
+# tokio isolates unwinding task panics.
+panic         = "unwind"
