@@ -1,0 +1,16 @@
+[package]
+name = "dice-common"
+description = "Snowflake ids, time, env config, graceful shutdown. Near-zero deps; everything links this."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

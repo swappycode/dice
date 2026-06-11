@@ -1,0 +1,60 @@
+// THE envelope. One Frame for both transports. See docs/protocol.md (normative).
+//
+// Field-number ranges in the oneof:
+//   10-29  control            (never sequenced, never replayed)
+//   30-49  client->server requests (nonce set)
+//   50-69  server->client replies  (nonce echoed)
+//   100+   sequenced dispatch (seq > 0, replayed on Resume; exception: typing_start)
+//
+// Compatibility: numbers are never reused/renumbered; removals get `reserved`;
+// every enum has *_UNSPECIFIED = 0. Breaking change => package dice.v2 + ALPN dice/2.
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/gateway.proto";
+import "dice/v1/message.proto";
+import "dice/v1/guild.proto";
+import "dice/v1/presence.proto";
+
+message Frame {
+  // Per-session monotonic sequence, gateway-assigned. >0 ONLY on sequenced
+  // dispatches (100+, except typing_start which is always 0). 0 otherwise.
+  uint64 seq = 1;
+  // Client-chosen random u64 on requests (30-49); echoed on replies (50-69)
+  // and on request-scoped Error frames. 0 = not a request/reply.
+  uint64 nonce = 2;
+
+  oneof payload {
+    // -- lifecycle / control (10-29) --
+    Hello hello = 10;
+    Identify identify = 11;
+    Resume resume = 12;
+    Ready ready = 13;
+    Resumed resumed = 14;
+    Heartbeat heartbeat = 15;
+    HeartbeatAck heartbeat_ack = 16;
+    Close close = 17;
+    Error error = 18;
+    // -- client -> server requests (30-49) --
+    SendMessageRequest send_message = 30;
+    StartTypingRequest start_typing = 31;
+    UpdatePresenceRequest update_presence = 32;
+    // -- server -> client replies (50-69) --
+    SendMessageAck send_message_ack = 50;
+    // -- sequenced dispatch events (100+) --
+    MessageCreate message_create = 100;
+    MessageUpdate message_update = 101;   // reserved in M1
+    MessageDelete message_delete = 102;   // reserved in M1
+    TypingStart typing_start = 103;       // exception: seq=0, never replayed
+    PresenceUpdate presence_update = 104;
+    GuildCreate guild_create = 105;
+    GuildUpdate guild_update = 106;
+    GuildDelete guild_delete = 107;
+    ChannelCreate channel_create = 108;
+    ChannelUpdate channel_update = 109;
+    ChannelDelete channel_delete = 110;
+    GuildMemberAdd member_add = 111;
+    GuildMemberRemove member_remove = 112;
+    DmChannelCreate dm_channel_create = 113;
+  }
+}

@@ -1,0 +1,31 @@
+// Message send path rides the gateway socket (nonce in Frame); history is REST.
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/common.proto";
+
+message SendMessageRequest {
+  fixed64 channel_id = 1;
+  string content = 2;        // 1..4000 chars after trim
+}
+
+message SendMessageAck {
+  Message message = 1;       // Frame.nonce echoes the request
+}
+
+message MessageCreate {
+  Message message = 1;
+  uint64 nonce = 2;          // originating client's nonce; 0 for everyone else's sends
+}
+
+// RESERVED in M1 (no edit/delete UI); frame numbers 101/102 are held for these.
+message MessageUpdate { Message message = 1; }
+message MessageDelete {
+  fixed64 channel_id = 1;
+  fixed64 message_id = 2;
+}
+
+// GET /v1/channels/{id}/messages response body.
+message MessageHistory {
+  repeated Message messages = 1;  // descending by id (newest first)
+}

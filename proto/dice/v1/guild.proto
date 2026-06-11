@@ -1,0 +1,38 @@
+// Guild/channel/member dispatch events + REST bodies.
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/common.proto";
+
+// -- dispatch events --
+// GuildCreate is also sent on join (to the joiner, via their user subject).
+message GuildCreate { Guild guild = 1; }
+message GuildUpdate { Guild guild = 1; }
+message GuildDelete { fixed64 guild_id = 1; }
+
+message ChannelCreate { Channel channel = 1; }
+message ChannelUpdate { Channel channel = 1; }
+message ChannelDelete {
+  fixed64 guild_id = 1;
+  fixed64 channel_id = 2;
+}
+
+message GuildMemberAdd {
+  Member member = 1;
+  User user = 2;   // keeps client user dictionaries warm
+}
+message GuildMemberRemove {
+  fixed64 guild_id = 1;
+  fixed64 user_id = 2;
+}
+
+message DmChannelCreate { Channel channel = 1; }
+
+// -- REST bodies --
+message CreateGuildRequest { string name = 1; }       // auto-creates #general
+message JoinGuildRequest { string code = 1; }
+message CreateChannelRequest {
+  fixed64 guild_id = 1;
+  string name = 2;
+}
+message OpenDmRequest { fixed64 recipient_id = 1; }   // idempotent via dm_key

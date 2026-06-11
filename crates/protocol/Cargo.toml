@@ -1,0 +1,19 @@
+[package]
+name = "dice-protocol"
+description = "Generated wire types (prost) + the one framing codec. No tokio: the desktop client links this too."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+prost = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+prost-build = { workspace = true }
+protoc-bin-vendored = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+// HTTPS auth bodies, content-type: application/x-protobuf (ADR-0005).
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/common.proto";
+
+message RegisterRequest {
+  string email = 1;
+  string username = 2;   // ^[a-z0-9_.]{2,32}$
+  string password = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RefreshRequest { string refresh_token = 1; }
+message LogoutRequest { string refresh_token = 1; }
+
+// Returned by register, login, AND refresh (no GET /users/@me needed).
+message AuthSuccess {
+  string access_token = 1;        // JWT, ~600 s
+  string refresh_token = 2;       // opaque drt_..., rotates on every refresh
+  uint64 access_expires_in_s = 3;
+  User user = 4;
+}

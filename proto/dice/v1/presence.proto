@@ -1,0 +1,30 @@
+syntax = "proto3";
+package dice.v1;
+
+enum PresenceStatus {
+  PRESENCE_STATUS_UNSPECIFIED = 0;
+  PRESENCE_STATUS_ONLINE = 1;
+  PRESENCE_STATUS_IDLE = 2;
+  PRESENCE_STATUS_DND = 3;
+  PRESENCE_STATUS_OFFLINE = 4;
+  // 5 reserved for INVISIBLE (post-M1; servers reject it in M1).
+}
+
+message PresenceUpdate {
+  fixed64 user_id = 1;
+  PresenceStatus status = 2;
+  uint64 since_ms = 3;       // status change time; last-seen on OFFLINE
+}
+
+message UpdatePresenceRequest {
+  PresenceStatus status = 1;
+}
+
+message StartTypingRequest {
+  fixed64 channel_id = 1;
+}
+
+message TypingStart {
+  fixed64 channel_id = 1;
+  fixed64 user_id = 2;
+}

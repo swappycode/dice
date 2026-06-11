@@ -1,0 +1,51 @@
+// Shared entities. All snowflake ids are fixed64 (high bits are a timestamp;
+// varint would cost 9-10 bytes, fixed64 is always 8). Bit 63 is always 0.
+syntax = "proto3";
+package dice.v1;
+
+message User {
+  fixed64 id = 1;
+  string username = 2;
+  string display_name = 3;
+  uint32 flags = 4;
+}
+
+enum ChannelKind {
+  CHANNEL_KIND_UNSPECIFIED = 0;
+  CHANNEL_KIND_GUILD_TEXT = 1;
+  CHANNEL_KIND_DM = 2;
+}
+
+message Channel {
+  fixed64 id = 1;
+  fixed64 guild_id = 2;                // 0 for DM channels
+  ChannelKind kind = 3;
+  string name = 4;                     // empty for DM channels
+  uint32 position = 5;
+  fixed64 last_message_id = 6;         // 0 = no messages yet
+  repeated fixed64 recipient_ids = 7;  // DM only
+}
+
+message Member {
+  fixed64 user_id = 1;
+  fixed64 guild_id = 2;
+  uint64 joined_at_ms = 3;
+  uint64 permissions = 4;
+}
+
+message Guild {
+  fixed64 id = 1;
+  string name = 2;
+  fixed64 owner_id = 3;
+  repeated Channel channels = 4;
+  string invite_code = 5;        // sent to members only
+  repeated Member members = 6;   // capped at 100 in M1
+}
+
+message Message {
+  fixed64 id = 1;                // created_at derives from the snowflake
+  fixed64 channel_id = 2;
+  fixed64 author_id = 3;
+  string content = 4;
+  uint64 edited_at_ms = 5;       // 0 = never edited (editing itself is post-M1)
+}

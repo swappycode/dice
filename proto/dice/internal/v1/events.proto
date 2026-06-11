@@ -1,0 +1,29 @@
+// Service->service bus envelope (NATS or in-proc). NEVER sent to clients.
+syntax = "proto3";
+package dice.internal.v1;
+
+import "dice/v1/envelope.proto";
+
+// Internal-only: gateway drops the user's live sessions; not client-dispatched.
+message SessionRevoked {
+  fixed64 user_id = 1;
+  fixed64 auth_session_id = 2;
+}
+
+message BusEvent {
+  fixed64 event_id = 1;        // snowflake; consumer idempotency key
+  uint64 emitted_at_ms = 2;
+  string origin = 3;           // "chat-service@node0"
+  // Routing hints so gateways fan out without decoding the payload deeply:
+  fixed64 guild_id = 4;                     // 0 if not guild-scoped
+  repeated fixed64 recipient_user_ids = 5;  // DM / user-targeted
+  // true => gateway never inserts into replay buffers (typing).
+  bool ephemeral = 6;
+
+  oneof payload {
+    // Ready-to-dispatch client frame with seq=0; the gateway assigns
+    // per-session seq at delivery time.
+    dice.v1.Frame frame = 7;
+    SessionRevoked session_revoked = 8;
+  }
+}
