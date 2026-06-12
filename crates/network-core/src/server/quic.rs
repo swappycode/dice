@@ -121,10 +121,22 @@ impl QuicTransport {
 fn read_error(err: quinn::ReadError) -> Option<TransportError> {
     use quinn::{ConnectionError, ReadError};
     match err {
-        // The peer (or we) closed the connection deliberately: clean close.
-        ReadError::ConnectionLost(
-            ConnectionError::ApplicationClosed(_) | ConnectionError::LocallyClosed,
-        ) => None,
+        // We closed: clean.
+        ReadError::ConnectionLost(ConnectionError::LocallyClosed) => None,
+        // The client closed the connection deliberately. Codes 0 (quinn's
+        // implicit drop-close) and 1000 (the driver's clean goodbye) are a
+        // clean close — the session ends, no resume window. Anything else —
+        // notably GOING_AWAY (4011) from a client about to resume — surfaces
+        // as a transport error so the session DETACHES into the resume
+        // window instead (protocol §5/§8).
+        ReadError::ConnectionLost(ConnectionError::ApplicationClosed(close)) => {
+            match close.error_code.into_inner() {
+                0 | 1000 => None,
+                code => Some(TransportError::Closed(format!(
+                    "client application close {code}"
+                ))),
+            }
+        }
         other => Some(TransportError::Closed(other.to_string())),
     }
 }

@@ -241,6 +241,9 @@ fn raw_client(env: &Env, token: &str) -> GatewayHandle {
     connect(
         GatewayClientConfig {
             wss_url: env.wss.clone(),
+            quic: None,
+            policy: dice_network_core::client::TransportPolicy::WssOnly,
+            initial_preference: None,
             tls: env.tls.clone(),
             token: Arc::new(StaticToken(token.to_owned())),
             properties: v1::ClientProperties {
@@ -296,6 +299,8 @@ async fn host_gate_full_journey_and_offline_restart() {
     let cfg = CoreConfig {
         api_url: env.base.clone(),
         wss_url: env.wss.clone(),
+        quic: None,
+        policy: dice_network_core::client::TransportPolicy::WssOnly,
         tls: env.tls.clone(),
         cache_path: cache_path.clone(),
     };
@@ -384,6 +389,16 @@ async fn host_gate_full_journey_and_offline_restart() {
     assert_eq!(page[0].pending, None);
     assert_eq!(page[0].failed, None);
     assert_eq!(core.connection_state(), "connected");
+    // Phase 4: the bridge persisted the active transport for the next start.
+    // (The in-process gateway here is reached via WssOnly policy.)
+    assert_eq!(
+        core.cache()
+            .get_meta("last_transport".to_owned())
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("wss")
+    );
 
     // ---- a second RAW WSS client joins and talks ----
     let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();

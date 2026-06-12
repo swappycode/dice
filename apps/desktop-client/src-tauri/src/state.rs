@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use dice_network_core::client::url::Url;
 use dice_network_core::client::{
-    ApiClient, ApiError, Command, ConnStateLite, GatewayClientConfig, TlsOptions, connect,
+    ApiClient, ApiError, Command, ConnStateLite, GatewayClientConfig, PreferredTransport,
+    QuicEndpoint, TlsOptions, TransportPolicy, connect,
 };
 use dice_protocol::v1;
 use dice_protocol::v1::frame::Payload;
@@ -79,24 +80,56 @@ pub struct CoreConfig {
     pub api_url: Url,
     /// Gateway WSS endpoint, e.g. `wss://localhost:8443/gateway/v1`.
     pub wss_url: Url,
+    /// QUIC gateway endpoint (UDP, ALPN dice/1). None ⇒ WSS only.
+    pub quic: Option<QuicEndpoint>,
+    /// Transport-selection policy (protocol §1 / design §1.3).
+    pub policy: TransportPolicy,
     pub tls: TlsOptions,
     pub cache_path: PathBuf,
 }
 
 impl CoreConfig {
-    /// `DICE_API_URL` / `DICE_GATEWAY_WSS` / `DICE_DEV_CA` with the dev
-    /// defaults from docs/design/desktop-client.md §2.
+    /// `DICE_API_URL` / `DICE_GATEWAY_WSS` / `DICE_GATEWAY_QUIC` /
+    /// `DICE_TRANSPORT` / `DICE_DEV_CA` with the dev defaults from
+    /// docs/design/desktop-client.md §2.
     pub fn from_env(cache_path: PathBuf) -> anyhow::Result<Self> {
         let api =
             std::env::var("DICE_API_URL").unwrap_or_else(|_| "https://localhost:8443".to_owned());
         let wss = std::env::var("DICE_GATEWAY_WSS")
             .unwrap_or_else(|_| "wss://localhost:8443/gateway/v1".to_owned());
+        let quic_ep =
+            std::env::var("DICE_GATEWAY_QUIC").unwrap_or_else(|_| "localhost:8444".to_owned());
+        let policy = transport_policy_from_env(std::env::var("DICE_TRANSPORT").ok().as_deref());
+        // An unparseable endpoint only matters when QUIC may actually be used.
+        let quic = match QuicEndpoint::from_host_port(&quic_ep) {
+            Ok(ep) => Some(ep),
+            Err(e) if matches!(policy, TransportPolicy::WssOnly) => {
+                tracing::debug!(%e, "ignoring bad DICE_GATEWAY_QUIC under wss-only policy");
+                None
+            }
+            Err(e) => return Err(anyhow::anyhow!("DICE_GATEWAY_QUIC invalid: {e}")),
+        };
         Ok(Self {
             api_url: Url::parse(&api)?,
             wss_url: Url::parse(&wss)?,
+            quic,
+            policy,
             tls: TlsOptions::from_env(),
             cache_path,
         })
+    }
+}
+
+/// `DICE_TRANSPORT`: `quic-first` (default) | `wss` | `quic`.
+fn transport_policy_from_env(value: Option<&str>) -> TransportPolicy {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("wss") | Some("wss-only") => TransportPolicy::WssOnly,
+        Some("quic") | Some("quic-only") => TransportPolicy::QuicOnly,
+        Some("quic-first") | None => TransportPolicy::default(),
+        Some(other) => {
+            tracing::warn!(%other, "unknown DICE_TRANSPORT, using quic-first");
+            TransportPolicy::default()
+        }
     }
 }
 
@@ -172,16 +205,36 @@ impl ClientCore {
     // ------------------------------------------------------------- gateway
 
     /// Spawn the gateway driver + bridge if none is running. Idempotent.
-    pub fn ensure_gateway(&self) {
+    /// Async only to read the persisted last-good transport from cache meta
+    /// (so a WSS-bound network doesn't pay the QUIC probe timeout again).
+    pub async fn ensure_gateway(&self) {
+        {
+            let slot = self.gateway.lock().expect("gateway lock");
+            if let Some(ctl) = slot.as_ref()
+                && !ctl.task.is_finished()
+            {
+                return;
+            }
+        }
+        let initial_preference = self
+            .cache
+            .get_meta("last_transport".to_owned())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| PreferredTransport::from_name(&v));
         let mut slot = self.gateway.lock().expect("gateway lock");
         if let Some(ctl) = slot.as_ref()
             && !ctl.task.is_finished()
         {
-            return;
+            return; // raced with another caller while we awaited
         }
         let handle = connect(
             GatewayClientConfig {
                 wss_url: self.cfg.wss_url.clone(),
+                quic: self.cfg.quic.clone(),
+                policy: self.cfg.policy,
+                initial_preference,
                 tls: self.cfg.tls.clone(),
                 token: self.session.clone(),
                 properties: v1::ClientProperties {
@@ -270,7 +323,7 @@ impl ClientCore {
         self.session.install(&auth).await;
         *self.current_user.lock().expect("user lock") = Some(user.clone());
         self.cache.set_current_user(user.clone()).await?;
-        self.ensure_gateway();
+        self.ensure_gateway().await;
         Ok(SessionDto {
             user: UserDto::from(&user),
         })
@@ -291,7 +344,7 @@ impl ClientCore {
                     flags: 0,
                 });
             }
-            self.ensure_gateway();
+            self.ensure_gateway().await;
             return Ok(Some(SessionDto { user }));
         }
         // Stored token but empty cache (first run on this machine): prove the
@@ -300,7 +353,7 @@ impl ClientCore {
             Ok(user) => {
                 self.cache.set_current_user(user.clone()).await?;
                 *self.current_user.lock().expect("user lock") = Some(user.clone());
-                self.ensure_gateway();
+                self.ensure_gateway().await;
                 Ok(Some(SessionDto {
                     user: UserDto::from(&user),
                 }))
@@ -331,6 +384,7 @@ impl ClientCore {
             &self.emitter,
             &DiceEvent::ConnState {
                 state: "idle".to_owned(),
+                transport: None,
             },
         );
         Ok(())

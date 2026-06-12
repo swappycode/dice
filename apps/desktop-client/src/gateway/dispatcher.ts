@@ -6,7 +6,7 @@
 
 import { ipc } from "../lib/ipc";
 import type { DiceEvent } from "../lib/types";
-import { setConnState } from "../stores/connection";
+import { setConnState, setTransport } from "../stores/connection";
 import { addDm, addGuild, applyBootstrap } from "../stores/guilds";
 import { applyMessageCreate } from "../stores/messages";
 import { loadPresence, setPresenceLocal } from "../stores/presence";
@@ -33,6 +33,7 @@ function dispatch(ev: DiceEvent): void {
       break;
     case "connState":
       setConnState(ev.state);
+      setTransport(ev.state === "connected" ? (ev.transport ?? null) : null);
       break;
   }
 }

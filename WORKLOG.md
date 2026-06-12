@@ -7,6 +7,45 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-12 — Phase 4 COMPLETE: QUIC client transport + QuicFirst policy
+
+**Branch:** `main`. The network-core half was built by an agent (which then died silently before
+the host wiring — second such death; both post-mortems: long silent tool call, no processes left);
+its work compiled clean and all tests passed on my verification. I wired the host side by hand.
+
+**Shipped:**
+- `crates/network-core` client: `QuicTransport` (quinn client endpoint, single bidi control
+  stream, u32-BE framing via the shared codec, keep-alive OFF/idle 90 s/0-RTT off per protocol §1),
+  `AnyTransport::Quic`, `TransportPolicy{QuicFirst{3 s}|WssOnly|QuicOnly}` + `TransportSelector`
+  (2 consecutive QUIC failures ⇒ WSS preference + opportunistic re-probe), `PreferredTransport`
+  (as_str/from_name) + `initial_preference` on `GatewayClientConfig`, `QuicEndpoint::from_host_port`
+  (IPv4-preferring resolution), `ConnState::Ready{transport}` / `ConnStateLite::Ready{transport}`.
+  **42 tests green** incl. QUIC E2E: happy path over QUIC, untrusted-cert rejection, QuicFirst
+  fallback (no endpoint AND unreachable endpoint), resume over QUIC.
+- Host wiring (by hand): `CoreConfig` gains `quic` + `policy` from `DICE_TRANSPORT`
+  (quic-first default | wss | quic) and `DICE_GATEWAY_QUIC` (default localhost:8444);
+  `ensure_gateway` is async and feeds the persisted `last_transport` cache-meta back as
+  `initial_preference` (double-checked locking around the await); the bridge persists the active
+  transport on every Ready and emits it in the connState event; frontend shows
+  "Connected (QUIC|WSS)" in the status bar (types/store/dispatcher/mock updated).
+- host_gate test now asserts `last_transport` == "wss" after Ready (WssOnly in-process backend).
+
+**Gates:** root workspace fmt/clippy -D warnings clean, network-core 42 tests; src-tauri clippy
+clean + 14 tests (incl. the extended host gate); tsc + vite build green (CSS still 30.56 KB);
+aws-lc-sys absent in BOTH workspaces.
+
+**Next milestone — Phase 5: polish gate.** (1) `just check` full green; (2) live two-instance
+demo: `just dev` + `just client` ×2 (second instance needs a distinct cache/keyring scope —
+set a per-instance DICE_PROFILE-style env or app-data dir override if single-instance plugin
+blocks; verify chat/typing/presence between real windows, then `DICE_TRANSPORT=wss` vs
+quic-first and confirm the status bar shows QUIC vs WSS); (3) perf snapshot vs targets
+(<100 MB idle full tree via `Get-Process dice-desktop, msedgewebview2 | Measure-Object
+WorkingSet64 -Sum`, cold start <2 s, idle CPU <1%) recorded in docs/; (4) known-gaps review
+(per-IP rate limits ip=None; QUIC server keylog?; heartbeat-timeout close code) ⇒ file follow-ups
+in worklog; (5) final M1 wrap-up entry.
+
+---
+
 ## 2026-06-12 — Phase 3 COMPLETE: Tauri 2 desktop host over WSS
 
 **Branch:** `main`. Resumed from the Phase-3 checkpoint below; the partial src-tauri files were

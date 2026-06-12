@@ -222,7 +222,12 @@ pub enum DiceEvent {
         users: Vec<UserDto>,
     },
     #[serde(rename_all = "camelCase")]
-    ConnState { state: String },
+    ConnState {
+        state: String,
+        /// Active transport ("quic"/"wss"); only set while connected.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        transport: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -243,10 +248,18 @@ mod tests {
 
         let conn = serde_json::to_value(DiceEvent::ConnState {
             state: "connected".into(),
+            transport: Some("quic".into()),
         })
         .unwrap();
         assert_eq!(conn["type"], "connState");
         assert_eq!(conn["state"], "connected");
+        assert_eq!(conn["transport"], "quic");
+        let idle = serde_json::to_value(DiceEvent::ConnState {
+            state: "idle".into(),
+            transport: None,
+        })
+        .unwrap();
+        assert!(idle.get("transport").is_none());
     }
 
     #[test]

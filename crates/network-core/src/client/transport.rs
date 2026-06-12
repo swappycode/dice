@@ -1,6 +1,6 @@
-//! Client-side framed transports. WSS only in this phase; [`AnyTransport`]
-//! is an enum (not the server's dyn trait) so the Phase-4 QUIC transport
-//! slots in without boxing or an async-trait dependency.
+//! Client-side framed transports: QUIC (primary) and WSS (fallback).
+//! [`AnyTransport`] is an enum (not the server's dyn trait) so dispatch is
+//! static — no boxing, no async-trait dependency.
 
 use std::sync::Arc;
 
@@ -13,6 +13,26 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Message, WebSocketConfig};
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 
+use super::quic::QuicTransport;
+
+/// Which concrete transport a connection runs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportKind {
+    Quic,
+    Wss,
+}
+
+impl TransportKind {
+    /// Stable lowercase name (`"quic"` / `"wss"`) for logs, UI events and
+    /// persistence (cache `meta."last_transport"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quic => "quic",
+            Self::Wss => "wss",
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClientTransportError {
     #[error("websocket: {0}")]
@@ -23,6 +43,20 @@ pub enum ClientTransportError {
     /// Text WS frames are a protocol violation (docs/protocol.md §1).
     #[error("server sent a text WS frame (protocol violation)")]
     TextFrame,
+    /// Endpoint bind / DNS resolution.
+    #[error("i/o: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("quic connect: {0}")]
+    QuicConnect(#[from] quinn::ConnectError),
+    #[error("quic connection: {0}")]
+    QuicConnection(#[from] quinn::ConnectionError),
+    #[error("quic stream read: {0}")]
+    QuicRead(#[from] quinn::ReadError),
+    #[error("quic stream write: {0}")]
+    QuicWrite(#[from] quinn::WriteError),
+    /// Anything else QUIC (empty DNS answer, …).
+    #[error("quic: {0}")]
+    Quic(String),
 }
 
 /// One WSS connection to `/gateway/v1`: one binary WS message = one bare
@@ -107,16 +141,19 @@ impl WssTransport {
     }
 }
 
-/// Static dispatch over the client transports. WSS-only in this phase;
-/// `Quic(QuicTransport)` is the Phase-4 addition.
+/// Static dispatch over the client transports. Both variants are boxed (one
+/// allocation per connection): the transports differ ~6x in size and either
+/// would dominate the enum footprint (clippy::large_enum_variant).
 pub enum AnyTransport {
-    Wss(WssTransport),
+    Quic(Box<QuicTransport>),
+    Wss(Box<WssTransport>),
 }
 
 impl AnyTransport {
     /// Next inbound frame; `Ok(None)` = clean close by the peer.
     pub async fn recv(&mut self) -> Result<Option<Frame>, ClientTransportError> {
         match self {
+            Self::Quic(t) => t.recv().await,
             Self::Wss(t) => t.recv().await,
         }
     }
@@ -124,6 +161,7 @@ impl AnyTransport {
     /// Send one frame.
     pub async fn send(&mut self, frame: &Frame) -> Result<(), ClientTransportError> {
         match self {
+            Self::Quic(t) => t.send(frame).await,
             Self::Wss(t) => t.send(frame).await,
         }
     }
@@ -131,6 +169,7 @@ impl AnyTransport {
     /// Best-effort close with an application close code.
     pub async fn close(&mut self, code: u32, reason: &str) {
         match self {
+            Self::Quic(t) => t.close(code, reason).await,
             Self::Wss(t) => t.close(code, reason).await,
         }
     }
@@ -138,7 +177,16 @@ impl AnyTransport {
     /// Close code from the most recent peer close, if any.
     pub fn last_close_code(&self) -> Option<u16> {
         match self {
+            Self::Quic(t) => t.last_close_code(),
             Self::Wss(t) => t.last_close_code(),
+        }
+    }
+
+    /// Which transport this connection runs on.
+    pub fn kind(&self) -> TransportKind {
+        match self {
+            Self::Quic(_) => TransportKind::Quic,
+            Self::Wss(_) => TransportKind::Wss,
         }
     }
 }

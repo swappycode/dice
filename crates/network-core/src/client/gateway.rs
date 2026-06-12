@@ -2,9 +2,12 @@
 //! state machine (docs/protocol.md §3–§8), commanded through a bounded mpsc
 //! and observed through a bounded event mpsc + a `watch` of [`ConnState`].
 //!
-//! Lifecycle per connection: connect → `Hello` (5 s) → `Identify` (fresh
-//! session) or `Resume` (when resume state exists) → `Ready`/`Resumed` →
-//! pump. Backoff is full-jitter `rand(0..=min(30 s, 500 ms·2^attempt))`; the
+//! Lifecycle per connection: connect (QUIC first with WSS fallback per the
+//! [`TransportPolicy`]) → `Hello` (5 s) → `Identify` (fresh session) or
+//! `Resume` (when resume state exists) → `Ready`/`Resumed` → pump. On QUIC
+//! the first frame is sent BEFORE awaiting `Hello` — the server cannot see
+//! the control stream until data flows on it (protocol §1).
+//! Backoff is full-jitter `rand(0..=min(30 s, 500 ms·2^attempt))`; the
 //! attempt counter resets only after a connection stayed Ready ≥ 60 s.
 //! `Error{INVALID_SESSION}` while resuming degrades to a fresh `Identify`
 //! on the SAME connection (protocol §3); close codes 4010/4011 are resumable;
@@ -21,9 +24,11 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+use super::policy::{ConnectPlan, PreferredTransport, TransportPolicy, TransportSelector};
+use super::quic::{QuicEndpoint, QuicTransport};
 use super::tls::TlsOptions;
 use super::token::TokenProvider;
-use super::transport::{AnyTransport, WssTransport};
+use super::transport::{AnyTransport, TransportKind, WssTransport};
 
 // ------------------------------------------------------------------ tuning
 
@@ -51,10 +56,19 @@ const MAX_MISSED_ACKS: u32 = 2;
 
 // ------------------------------------------------------------ public types
 
-/// Everything [`connect`] needs. WSS-only this phase.
+/// Everything [`connect`] needs.
 pub struct GatewayClientConfig {
-    /// `wss://host:port/gateway/v1`.
+    /// `wss://host:port/gateway/v1` (the fallback transport).
     pub wss_url: url::Url,
+    /// QUIC gateway endpoint (UDP 8444, ALPN `dice/1`). Required for
+    /// [`TransportPolicy::QuicOnly`]; optional for `QuicFirst` (absent ⇒
+    /// straight to WSS); ignored by `WssOnly`.
+    pub quic: Option<QuicEndpoint>,
+    /// Which transport(s) to try and in what order.
+    pub policy: TransportPolicy,
+    /// Last-good transport from a previous session (cache meta), fed back by
+    /// the host so a WSS-bound network doesn't pay the QUIC timeout again.
+    pub initial_preference: Option<PreferredTransport>,
     pub tls: TlsOptions,
     /// Fresh access token per (re-)Identify.
     pub token: Arc<dyn TokenProvider>,
@@ -73,6 +87,8 @@ pub enum ConnState {
     Authenticating,
     Ready {
         gateway_session_id: u64,
+        /// Which transport this connection runs on.
+        transport: TransportKind,
     },
     Backoff {
         until_ms: u64,
@@ -91,7 +107,10 @@ pub enum ConnStateLite {
     Idle,
     Connecting,
     Authenticating,
-    Ready,
+    Ready {
+        /// Active transport, so consumers can display + persist it.
+        transport: TransportKind,
+    },
     Backoff,
     Failed,
 }
@@ -102,7 +121,9 @@ impl From<&ConnState> for ConnStateLite {
             ConnState::Idle => Self::Idle,
             ConnState::Connecting { .. } => Self::Connecting,
             ConnState::Authenticating => Self::Authenticating,
-            ConnState::Ready { .. } => Self::Ready,
+            ConnState::Ready { transport, .. } => Self::Ready {
+                transport: *transport,
+            },
             ConnState::Backoff { .. } => Self::Backoff,
             ConnState::Failed { .. } => Self::Failed,
         }
@@ -215,10 +236,9 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
     let (event_tx, event_rx) = mpsc::channel(EVENT_QUEUE);
     let (state_tx, state_rx) = watch::channel(ConnState::Idle);
     let task = rt.spawn(async move {
-        let tls = match cfg.tls.client_config() {
-            Ok(tls) => tls,
-            Err(error) => {
-                let reason = format!("tls configuration: {error}");
+        let (tls, quic) = match transport_setup(&cfg) {
+            Ok(parts) => parts,
+            Err(reason) => {
                 let _ = state_tx.send_replace(ConnState::Failed {
                     reason: reason.clone(),
                 });
@@ -229,9 +249,12 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
                 return;
             }
         };
+        let selector = TransportSelector::new(cfg.policy, quic.is_some(), cfg.initial_preference);
         let driver = Driver {
             cfg,
             tls,
+            quic,
+            selector,
             cmds: cmd_rx,
             events: event_tx,
             state: state_tx,
@@ -248,6 +271,39 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
         state: state_rx,
         task,
     }
+}
+
+/// Ready-to-dial QUIC pieces, built once at driver start.
+#[derive(Debug)]
+struct QuicSetup {
+    target: QuicEndpoint,
+    config: quinn::ClientConfig,
+}
+
+/// Build the per-driver transport configs. A failure here (broken trust
+/// config, quic-only without an endpoint) is unrecoverable: the driver
+/// starts in `Failed`.
+fn transport_setup(
+    cfg: &GatewayClientConfig,
+) -> Result<(Arc<rustls::ClientConfig>, Option<QuicSetup>), String> {
+    let tls = cfg
+        .tls
+        .client_config()
+        .map_err(|error| format!("tls configuration: {error}"))?;
+    let quic = match (cfg.policy, &cfg.quic) {
+        (TransportPolicy::WssOnly, _) | (TransportPolicy::QuicFirst { .. }, None) => None,
+        (TransportPolicy::QuicOnly, None) => {
+            return Err("transport policy is quic-only but no QUIC endpoint is configured".into());
+        }
+        (_, Some(target)) => Some(QuicSetup {
+            target: target.clone(),
+            config: cfg
+                .tls
+                .quic_client_config()
+                .map_err(|error| format!("quic tls configuration: {error}"))?,
+        }),
+    };
+    Ok((tls, quic))
 }
 
 // ------------------------------------------------------------------ driver
@@ -309,6 +365,10 @@ enum FrameOutcome {
 struct Driver {
     cfg: GatewayClientConfig,
     tls: Arc<rustls::ClientConfig>,
+    /// Present iff a QUIC endpoint is configured and the policy may use it.
+    quic: Option<QuicSetup>,
+    /// The transport-selection state machine (design §1.3).
+    selector: TransportSelector,
     cmds: mpsc::Receiver<Command>,
     events: mpsc::Sender<ClientEvent>,
     state: watch::Sender<ConnState>,
@@ -386,22 +446,31 @@ impl Driver {
             None
         };
 
-        let mut transport = match tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            WssTransport::connect(&self.cfg.wss_url, Arc::clone(&self.tls)),
-        )
-        .await
-        {
-            Ok(Ok(wss)) => AnyTransport::Wss(wss),
-            Ok(Err(error)) => {
-                tracing::debug!(%error, "gateway connect failed");
-                return Flow::Retry { delay: None };
-            }
-            Err(_) => {
-                tracing::debug!("gateway connect timed out");
-                return Flow::Retry { delay: None };
-            }
+        let plan = self.selector.plan();
+        let Some(mut transport) = self.establish(plan).await else {
+            return Flow::Retry { delay: None };
         };
+        let transport_kind = transport.kind();
+
+        // Identify or Resume.
+        let first = match (&self.resume, identify_token) {
+            (Some(resume), _) => Frame::control(Payload::Resume(v1::Resume {
+                gateway_session_id: resume.gateway_session_id,
+                resume_token: resume.resume_token.clone(),
+                last_seq: resume.last_seq,
+            })),
+            (None, Some(token)) => self.identify_frame(token),
+            // Unreachable: identify_token is Some exactly when resume is None.
+            (None, None) => return Flow::Retry { delay: None },
+        };
+        let mut resuming = self.resume.is_some();
+
+        // QUIC: the server cannot SEE the control stream until data flows on
+        // it (protocol §1) — Identify/Resume goes out immediately and Hello
+        // arrives back concurrently. WSS: the server speaks first (§3).
+        if transport_kind == TransportKind::Quic && transport.send(&first).await.is_err() {
+            return Flow::Retry { delay: None };
+        }
 
         // Hello within 5 s.
         let hello = loop {
@@ -418,19 +487,7 @@ impl Driver {
             return Flow::Shutdown;
         }
 
-        // Identify or Resume.
-        let first = match (&self.resume, identify_token) {
-            (Some(resume), _) => Frame::control(Payload::Resume(v1::Resume {
-                gateway_session_id: resume.gateway_session_id,
-                resume_token: resume.resume_token.clone(),
-                last_seq: resume.last_seq,
-            })),
-            (None, Some(token)) => self.identify_frame(token),
-            // Unreachable: identify_token is Some exactly when resume is None.
-            (None, None) => return Flow::Retry { delay: None },
-        };
-        let mut resuming = self.resume.is_some();
-        if transport.send(&first).await.is_err() {
+        if transport_kind == TransportKind::Wss && transport.send(&first).await.is_err() {
             return Flow::Retry { delay: None };
         }
 
@@ -503,6 +560,7 @@ impl Driver {
         if !self
             .set_state(ConnState::Ready {
                 gateway_session_id: session_id,
+                transport: transport_kind,
             })
             .await
         {
@@ -532,6 +590,69 @@ impl Driver {
             self.attempt = 0; // protocol-mandated reset rule
         }
         flow
+    }
+
+    /// Connect per the selector's plan. `None` = the whole attempt failed
+    /// (caller backs off). QUIC outcomes feed the selector; the WSS fallback
+    /// happens INSIDE the same attempt (design §1.3) so a blocked UDP path
+    /// costs at most the QUIC budget, never an extra backoff cycle.
+    async fn establish(&mut self, plan: ConnectPlan) -> Option<AnyTransport> {
+        let (quic_budget, fall_back) = match plan {
+            ConnectPlan::Wss => return self.connect_wss().await,
+            // QuicOnly: the standard connect budget applies.
+            ConnectPlan::Quic => (CONNECT_TIMEOUT, false),
+            ConnectPlan::QuicThenWss => match self.cfg.policy {
+                TransportPolicy::QuicFirst { quic_timeout } => (quic_timeout, true),
+                // Unreachable: the selector only plans QuicThenWss for
+                // QuicFirst. Defensive default.
+                _ => (CONNECT_TIMEOUT, true),
+            },
+        };
+        // Clone the dial parts out so the connect future borrows no `self`.
+        let Some((target, config)) = self
+            .quic
+            .as_ref()
+            .map(|setup| (setup.target.clone(), setup.config.clone()))
+        else {
+            // Unreachable: QUIC plans require a configured endpoint.
+            return self.connect_wss().await;
+        };
+        match tokio::time::timeout(quic_budget, QuicTransport::connect(&target, config)).await {
+            Ok(Ok(quic)) => {
+                self.selector.note_quic_success();
+                return Some(AnyTransport::Quic(Box::new(quic)));
+            }
+            Ok(Err(error)) => tracing::debug!(%error, "quic connect failed"),
+            Err(_) => tracing::debug!(
+                budget_ms = quic_budget.as_millis() as u64,
+                "quic connect timed out"
+            ),
+        }
+        self.selector.note_quic_failure();
+        if fall_back {
+            self.connect_wss().await
+        } else {
+            None
+        }
+    }
+
+    async fn connect_wss(&self) -> Option<AnyTransport> {
+        match tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            WssTransport::connect(&self.cfg.wss_url, Arc::clone(&self.tls)),
+        )
+        .await
+        {
+            Ok(Ok(wss)) => Some(AnyTransport::Wss(Box::new(wss))),
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "gateway connect failed");
+                None
+            }
+            Err(_) => {
+                tracing::debug!("gateway connect timed out");
+                None
+            }
+        }
     }
 
     /// Ready-state pump: commands out, frames in, heartbeats on a timer.
@@ -902,8 +1023,20 @@ mod tests {
             (
                 ConnState::Ready {
                     gateway_session_id: 9,
+                    transport: TransportKind::Quic,
                 },
-                ConnStateLite::Ready,
+                ConnStateLite::Ready {
+                    transport: TransportKind::Quic,
+                },
+            ),
+            (
+                ConnState::Ready {
+                    gateway_session_id: 9,
+                    transport: TransportKind::Wss,
+                },
+                ConnStateLite::Ready {
+                    transport: TransportKind::Wss,
+                },
             ),
             (
                 ConnState::Backoff {
@@ -989,11 +1122,16 @@ mod tests {
         Driver {
             cfg: GatewayClientConfig {
                 wss_url: url::Url::parse("wss://localhost:1/gateway/v1").unwrap(),
+                quic: None,
+                policy: TransportPolicy::WssOnly,
+                initial_preference: None,
                 tls: TlsOptions::default(),
                 token: Arc::new(NoToken),
                 properties: v1::ClientProperties::default(),
             },
             tls: TlsOptions::default().client_config().unwrap(),
+            quic: None,
+            selector: TransportSelector::new(TransportPolicy::WssOnly, false, None),
             cmds,
             events,
             state,
@@ -1002,6 +1140,35 @@ mod tests {
             auth_retry_used: false,
             pending: PendingSends::default(),
         }
+    }
+
+    /// `transport_setup` startup validation: quic-only without an endpoint
+    /// is unrecoverable; quic-first without one quietly degrades to WSS.
+    #[test]
+    fn transport_setup_validates_the_policy() {
+        let cfg = |policy: TransportPolicy, quic: Option<QuicEndpoint>| GatewayClientConfig {
+            wss_url: url::Url::parse("wss://localhost:1/gateway/v1").unwrap(),
+            quic,
+            policy,
+            initial_preference: None,
+            tls: TlsOptions::default(),
+            token: Arc::new(NoToken),
+            properties: v1::ClientProperties::default(),
+        };
+        let endpoint = QuicEndpoint::from_host_port("localhost:8444").unwrap();
+
+        let err = transport_setup(&cfg(TransportPolicy::QuicOnly, None)).unwrap_err();
+        assert!(err.contains("quic-only"), "{err}");
+
+        let (_, quic) = transport_setup(&cfg(TransportPolicy::default(), None)).unwrap();
+        assert!(quic.is_none(), "quic-first without endpoint = wss only");
+
+        let (_, quic) =
+            transport_setup(&cfg(TransportPolicy::default(), Some(endpoint.clone()))).unwrap();
+        assert!(quic.is_some());
+
+        let (_, quic) = transport_setup(&cfg(TransportPolicy::WssOnly, Some(endpoint))).unwrap();
+        assert!(quic.is_none(), "wss-only never dials quic");
     }
 
     /// `note_seq` keeps the cumulative-ack cursor monotonic.

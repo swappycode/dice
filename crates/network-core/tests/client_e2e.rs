@@ -25,7 +25,8 @@ use dice_event_bus::BusConfig;
 use dice_network_core::client::url::Url;
 use dice_network_core::client::{
     ApiClient, ApiError, ClientEvent, Command, ConnState, ConnStateLite, GatewayClientConfig,
-    GatewayHandle, TlsOptions, TokenError, TokenProvider, connect,
+    GatewayHandle, PreferredTransport, QuicAddr, QuicEndpoint, QuicTransport, TlsOptions,
+    TokenError, TokenProvider, TransportKind, TransportPolicy, connect,
 };
 use dice_network_core::tls::{generate_dev_certs, install_ring_provider};
 use dice_protocol::v1::frame::Payload;
@@ -76,6 +77,8 @@ struct Env {
     pool: PgPool,
     base: Url,
     wss: Url,
+    /// Bound QUIC endpoint (UDP, ALPN `dice/1`).
+    quic: std::net::SocketAddr,
     tls: TlsOptions,
     cert_dir: PathBuf,
 }
@@ -146,16 +149,28 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
     .unwrap();
 
     let port = started.bound_rest.port();
+    let quic = started.bound_quic;
     Env {
         started,
         ct,
         pool,
         base: Url::parse(&format!("https://localhost:{port}")).unwrap(),
         wss: Url::parse(&format!("wss://localhost:{port}/gateway/v1")).unwrap(),
+        quic,
         tls: TlsOptions {
             extra_ca_pem: Some(certs.ca_pem),
         },
         cert_dir,
+    }
+}
+
+/// Dial the in-process gateway's QUIC port with SNI `localhost` (the dev
+/// leaf's DNS SAN) even though the addr is 127.0.0.1 — addr and server name
+/// are deliberately decoupled.
+fn quic_endpoint(addr: std::net::SocketAddr) -> QuicEndpoint {
+    QuicEndpoint {
+        server_name: "localhost".to_owned(),
+        addr: QuicAddr::Socket(addr),
     }
 }
 
@@ -227,9 +242,22 @@ impl TokenProvider for SeqToken {
 // ------------------------------------------------------------- gw helpers
 
 fn gw_connect(env: &Env, provider: Arc<dyn TokenProvider>) -> GatewayHandle {
+    gw_connect_with(env, provider, TransportPolicy::WssOnly, None, None)
+}
+
+fn gw_connect_with(
+    env: &Env,
+    provider: Arc<dyn TokenProvider>,
+    policy: TransportPolicy,
+    quic: Option<QuicEndpoint>,
+    initial_preference: Option<PreferredTransport>,
+) -> GatewayHandle {
     connect(
         GatewayClientConfig {
             wss_url: env.wss.clone(),
+            quic,
+            policy,
+            initial_preference,
             tls: env.tls.clone(),
             token: provider,
             properties: v1::ClientProperties {
@@ -388,7 +416,7 @@ async fn gateway_journey() {
     assert!(a_session > 0);
     assert!(matches!(
         &*alice.state().borrow(),
-        ConnState::Ready { gateway_session_id } if *gateway_session_id == a_session
+        ConnState::Ready { gateway_session_id, .. } if *gateway_session_id == a_session
     ));
 
     let mut bob = gw_connect(&env, Arc::new(StaticToken(b_auth.access_token.clone())));
@@ -536,7 +564,7 @@ async fn gateway_journey() {
     assert!(
         matches!(
             &*alice.state().borrow(),
-            ConnState::Ready { gateway_session_id } if *gateway_session_id == a_session
+            ConnState::Ready { gateway_session_id, .. } if *gateway_session_id == a_session
         ),
         "alice must still be Ready on the SAME session after 3.5 s"
     );
@@ -626,7 +654,7 @@ async fn gateway_journey() {
     tokio::time::timeout(
         Duration::from_secs(5),
         a_state.wait_for(
-            |s| matches!(s, ConnState::Ready { gateway_session_id } if *gateway_session_id == a_session),
+            |s| matches!(s, ConnState::Ready { gateway_session_id, .. } if *gateway_session_id == a_session),
         ),
     )
     .await
@@ -769,5 +797,342 @@ async fn rejected_token_retries_once_then_fails() {
         .unwrap()
         .unwrap();
     cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+// ------------------------------------------------------------- QUIC (Ph. 4)
+
+/// QUIC-only happy path: Ready over QUIC with the kind exposed on BOTH the
+/// rich state watch and the mirrored `ConnState` event; a sequenced dispatch
+/// arrives over the control stream; a `SendMessage` round-trips to its
+/// nonce-correlated ack. Dev-CA verification necessarily passed (the
+/// transport has no bypass — see `quic_rejects_untrusted_certificates`).
+#[tokio::test]
+async fn quic_only_happy_path_send_and_ack() {
+    let env = spawn_env("quichappy", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+
+    let (name, email) = unique("qh");
+    let auth = api
+        .register(&email, &name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+    let a_api = api
+        .clone()
+        .with_token_provider(Arc::new(StaticToken(auth.access_token.clone())));
+
+    let mut handle = gw_connect_with(
+        &env,
+        Arc::new(StaticToken(auth.access_token.clone())),
+        TransportPolicy::QuicOnly,
+        Some(quic_endpoint(env.quic)),
+        None,
+    );
+    let ready = expect_ready(&mut handle).await;
+    assert_eq!(ready.user.as_ref().unwrap().id, user.id);
+
+    // Kind on the watch…
+    assert!(
+        matches!(
+            &*handle.state().borrow(),
+            ConnState::Ready {
+                transport: TransportKind::Quic,
+                ..
+            }
+        ),
+        "watch must expose the QUIC transport kind"
+    );
+    // …and on the mirrored ConnState event (what hosts persist/display).
+    let kind = expect_event(&mut handle, "Ready ConnState event", |e| match e {
+        ClientEvent::ConnState(ConnStateLite::Ready { transport }) => Some(transport),
+        _ => None,
+    })
+    .await;
+    assert_eq!(kind, TransportKind::Quic);
+
+    // Server→client sequenced dispatch over QUIC.
+    let guild = a_api.create_guild("quic hq").await.unwrap();
+    let general = guild
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .expect("auto-created #general")
+        .clone();
+    let gc = expect_event(&mut handle, "GuildCreate over QUIC", |e| {
+        dispatch_payload(e).and_then(|f| match f.payload {
+            Some(Payload::GuildCreate(gc)) => Some((f.seq, gc)),
+            _ => None,
+        })
+    })
+    .await;
+    assert!(gc.0 > 0, "GuildCreate is sequenced");
+    assert_eq!(gc.1.guild.unwrap().id, guild.id);
+
+    // Client→server request + nonce-correlated ack over QUIC.
+    let nonce = 0xC0FFEE_u64;
+    handle
+        .send(Command::SendMessage {
+            channel_id: general.id,
+            content: "over quic".into(),
+            nonce,
+        })
+        .await
+        .unwrap();
+    let acked = expect_event(&mut handle, "SendMessageAck over QUIC", |e| match e {
+        ClientEvent::Ack { nonce: n, message } if n == nonce => Some(message),
+        _ => None,
+    })
+    .await;
+    assert_eq!(acked.content, "over quic");
+    assert_eq!(acked.author_id, user.id);
+
+    handle.shutdown().await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+/// QuicFirst with NO QUIC endpoint configured: straight to WSS (no timeout
+/// paid, no failure counted) and Ready on the first attempt.
+#[tokio::test]
+async fn quic_first_without_endpoint_uses_wss() {
+    let env = spawn_env("quicnone", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+
+    let (name, email) = unique("qn");
+    let auth = api
+        .register(&email, &name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+
+    let mut handle = gw_connect_with(
+        &env,
+        Arc::new(StaticToken(auth.access_token.clone())),
+        TransportPolicy::default(), // QuicFirst { 3 s }
+        None,
+        None,
+    );
+    let _ = expect_ready(&mut handle).await;
+    assert!(matches!(
+        &*handle.state().borrow(),
+        ConnState::Ready {
+            transport: TransportKind::Wss,
+            ..
+        }
+    ));
+
+    handle.shutdown().await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+/// QuicFirst against an unreachable QUIC port (bound-then-dropped UDP port):
+/// the driver falls back to WSS WITHIN the same backoff attempt — no
+/// `Backoff` state may precede the first `Ready` — and lands Ready within
+/// the ~3 s QUIC budget plus the WSS handshake.
+#[tokio::test]
+async fn quic_first_unreachable_quic_falls_back_to_wss() {
+    let env = spawn_env("quicdead", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+
+    // A localhost UDP port that is certainly closed: bind, note, drop.
+    let dead_port = {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.local_addr().unwrap().port()
+    };
+    let dead = quic_endpoint(format!("127.0.0.1:{dead_port}").parse().unwrap());
+
+    let (name, email) = unique("qd");
+    let auth = api
+        .register(&email, &name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+
+    let connect_started = std::time::Instant::now();
+    let mut handle = gw_connect_with(
+        &env,
+        Arc::new(StaticToken(auth.access_token.clone())),
+        TransportPolicy::default(), // QuicFirst { 3 s }
+        Some(dead),
+        None,
+    );
+
+    // Same-attempt fallback: Connecting → Authenticating → Ready with NO
+    // Backoff in between.
+    loop {
+        match next_event(&mut handle).await {
+            ClientEvent::ConnState(ConnStateLite::Backoff) => {
+                panic!("fallback must happen within the SAME attempt, not after a backoff")
+            }
+            ClientEvent::Ready(_) => break,
+            _ => {}
+        }
+    }
+    let elapsed = connect_started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "fallback should cost ≈ the 3 s QUIC budget, took {elapsed:?}"
+    );
+    assert!(matches!(
+        &*handle.state().borrow(),
+        ConnState::Ready {
+            transport: TransportKind::Wss,
+            ..
+        }
+    ));
+
+    handle.shutdown().await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+/// Resume over QUIC (same shape as the WSS resume in `gateway_journey`):
+/// ForceReconnect drops the transport abruptly (the drop closes 4011 so the
+/// gateway detaches instead of reading a clean goodbye), a sequenced
+/// dispatch lands while down, and the driver Resumes — NOT re-identifies —
+/// on the SAME gateway session, over QUIC again, replaying the miss.
+#[tokio::test]
+async fn quic_resume_after_force_reconnect() {
+    let env = spawn_env("quicresume", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+
+    let (name, email) = unique("qr");
+    let auth = api
+        .register(&email, &name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+    let a_api = api
+        .clone()
+        .with_token_provider(Arc::new(StaticToken(auth.access_token.clone())));
+
+    let mut handle = gw_connect_with(
+        &env,
+        Arc::new(StaticToken(auth.access_token.clone())),
+        TransportPolicy::QuicOnly,
+        Some(quic_endpoint(env.quic)),
+        None,
+    );
+    let ready = expect_ready(&mut handle).await;
+    let session = ready.gateway_session_id;
+    assert!(session > 0);
+
+    let mut state = handle.state();
+    handle.send(Command::ForceReconnect).await.unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        state.wait_for(|s| !matches!(s, ConnState::Ready { .. })),
+    )
+    .await
+    .expect("must leave Ready after ForceReconnect")
+    .unwrap();
+
+    // While down: a sequenced dispatch (GuildCreate via REST) enters the
+    // detached session's replay buffer.
+    let guild = a_api.create_guild("made while away").await.unwrap();
+
+    // Resumed — NOT SessionInvalidated, NOT a fresh Ready.
+    let mut resumed = false;
+    for _ in 0..64 {
+        match next_event(&mut handle).await {
+            ClientEvent::Resumed { .. } => {
+                resumed = true;
+                break;
+            }
+            ClientEvent::SessionInvalidated => {
+                panic!("QUIC resume degraded to a fresh Identify (clean-close mapping broken?)")
+            }
+            ClientEvent::Ready(_) => panic!("resume produced a fresh session"),
+            _ => {}
+        }
+    }
+    assert!(resumed, "driver must Resume inside the window over QUIC");
+
+    // The dispatch missed while down arrives after Resumed.
+    let missed = expect_event(&mut handle, "replayed GuildCreate", |e| {
+        dispatch_payload(e).and_then(|f| match f.payload {
+            Some(Payload::GuildCreate(gc)) => Some((f.seq, gc)),
+            _ => None,
+        })
+    })
+    .await;
+    assert!(missed.0 > 0);
+    assert_eq!(missed.1.guild.unwrap().id, guild.id);
+
+    // Same session, still QUIC.
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        state.wait_for(|s| {
+            matches!(
+                s,
+                ConnState::Ready { gateway_session_id, transport: TransportKind::Quic }
+                    if *gateway_session_id == session
+            )
+        }),
+    )
+    .await
+    .expect("must be Ready again on the SAME gateway session over QUIC")
+    .unwrap();
+
+    handle.shutdown().await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+/// Certificate verification is ENFORCED on QUIC: without the dev-CA anchor
+/// the handshake must fail (webpki roots cannot vouch for the dev leaf);
+/// with the anchor the same dial succeeds. There is no bypass to misuse.
+#[tokio::test]
+async fn quic_rejects_untrusted_certificates() {
+    let env = spawn_env("quictrust", 30_000, 60_000).await;
+    let target = quic_endpoint(env.quic);
+
+    // webpki roots only — the dev CA is NOT trusted.
+    let untrusted = TlsOptions::default().quic_client_config().unwrap();
+    let denied = QuicTransport::connect(&target, untrusted).await;
+    let error = match denied {
+        Err(error) => error.to_string().to_lowercase(),
+        Ok(_) => panic!("QUIC connect without the dev CA anchor MUST fail verification"),
+    };
+    assert!(
+        error.contains("certificate") || error.contains("unknown issuer"),
+        "failure must be a certificate rejection, got: {error}"
+    );
+
+    // Control: the identical dial WITH the dev CA anchor succeeds, proving
+    // the failure above was trust, not infrastructure.
+    let trusted = env.tls.quic_client_config().unwrap();
+    let mut ok = QuicTransport::connect(&target, trusted)
+        .await
+        .expect("dev-CA-anchored QUIC connect must succeed");
+    ok.close(1000, "test done").await;
+
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
     let _ = std::fs::remove_dir_all(&env.cert_dir);
 }

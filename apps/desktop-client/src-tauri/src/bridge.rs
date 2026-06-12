@@ -41,7 +41,7 @@ pub fn conn_state_str(state: ConnStateLite) -> &'static str {
     match state {
         ConnStateLite::Idle => "idle",
         ConnStateLite::Connecting | ConnStateLite::Authenticating => "connecting",
-        ConnStateLite::Ready => "connected",
+        ConnStateLite::Ready { .. } => "connected",
         ConnStateLite::Backoff => "reconnecting",
         ConnStateLite::Failed => "offline",
     }
@@ -145,10 +145,28 @@ impl Bridge {
                 }
             }
             ClientEvent::ConnState(state) => {
+                // Persist the last-good transport so the next start skips the
+                // QUIC probe on WSS-bound networks (and vice versa).
+                let transport = if let ConnStateLite::Ready { transport } = state {
+                    let name = dice_network_core::client::PreferredTransport::from(transport)
+                        .as_str()
+                        .to_owned();
+                    if let Err(error) = self
+                        .cache
+                        .set_meta("last_transport".to_owned(), name.clone())
+                        .await
+                    {
+                        tracing::warn!(%error, "persisting last_transport failed");
+                    }
+                    Some(name)
+                } else {
+                    None
+                };
                 emit_dice(
                     &self.emitter,
                     &DiceEvent::ConnState {
                         state: conn_state_str(state).to_owned(),
+                        transport,
                     },
                 );
             }
@@ -342,10 +360,22 @@ mod tests {
 
     #[test]
     fn conn_state_maps_to_the_frontend_vocabulary() {
+        use dice_network_core::client::TransportKind;
         assert_eq!(conn_state_str(ConnStateLite::Idle), "idle");
         assert_eq!(conn_state_str(ConnStateLite::Connecting), "connecting");
         assert_eq!(conn_state_str(ConnStateLite::Authenticating), "connecting");
-        assert_eq!(conn_state_str(ConnStateLite::Ready), "connected");
+        assert_eq!(
+            conn_state_str(ConnStateLite::Ready {
+                transport: TransportKind::Wss
+            }),
+            "connected"
+        );
+        assert_eq!(
+            conn_state_str(ConnStateLite::Ready {
+                transport: TransportKind::Quic
+            }),
+            "connected"
+        );
         assert_eq!(conn_state_str(ConnStateLite::Backoff), "reconnecting");
         assert_eq!(conn_state_str(ConnStateLite::Failed), "offline");
     }

@@ -63,6 +63,27 @@ impl TlsOptions {
         Ok(Arc::new(cfg))
     }
 
+    /// quinn client config for the QUIC transport: the SAME root store as
+    /// WSS/HTTPS (webpki + extra anchors), ring provider, TLS 1.3 only, ALPN
+    /// `dice/1`, and the protocol §1 transport tuning (keep-alive OFF, idle
+    /// 90 s, 0-RTT disabled). Full chain + server-name verification always
+    /// runs — there is deliberately NO bypass.
+    pub fn quic_client_config(&self) -> Result<quinn::ClientConfig, TlsError> {
+        crate::tls::quic_client_config(self.quic_tls_config()?)
+    }
+
+    /// rustls layer of [`Self::quic_client_config`] (split out so tests can
+    /// assert the ALPN).
+    fn quic_tls_config(&self) -> Result<Arc<rustls::ClientConfig>, TlsError> {
+        let roots = self.root_store()?;
+        let mut cfg = rustls::ClientConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        cfg.alpn_protocols = vec![dice_protocol::ALPN_GATEWAY.to_vec()];
+        Ok(Arc::new(cfg))
+    }
+
     /// Apply this trust configuration to a reqwest builder: built-in webpki
     /// roots stay ON and the extra anchors are added on top
     /// (`use_preconfigured_tls` is deliberately avoided — it pins reqwest to
@@ -133,6 +154,16 @@ mod tests {
 
         let cfg = with_dev.client_config().unwrap();
         assert_eq!(cfg.alpn_protocols, vec![b"http/1.1".to_vec()]);
+
+        // The QUIC flavor shares the trust config but negotiates dice/1 and
+        // keeps 0-RTT off; the quinn wrapper accepts it (TLS 1.3 only).
+        let quic_tls = with_dev.quic_tls_config().unwrap();
+        assert_eq!(
+            quic_tls.alpn_protocols,
+            vec![dice_protocol::ALPN_GATEWAY.to_vec()]
+        );
+        assert!(!quic_tls.enable_early_data, "0-RTT must stay disabled");
+        with_dev.quic_client_config().unwrap();
 
         // reqwest accepts the same anchors.
         let builder = with_dev

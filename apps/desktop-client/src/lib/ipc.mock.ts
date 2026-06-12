@@ -1,4 +1,4 @@
-/**
+﻿/**
  * In-memory mock of the DiceIpc interface (no network, no Tauri).
  * Fixtures: 2 guilds / 4 guild channels / 2 DMs / ~30 messages / 4 other
  * users with varied presence. Sends echo back after 150 ms with a real id
@@ -114,7 +114,7 @@ function seed(channel: Channel, author: User, content: string, minutesAgo: numbe
 }
 
 // ~30 seeded messages: #general gets a two-day conversation, the rest a sprinkle.
-const Y = 24 * 60; // minutes in a day → yesterday
+const Y = 24 * 60; // minutes in a day â†’ yesterday
 seed(chGeneral, AYAAN, "ok the retro UI direction is locked in", Y + 95);
 seed(chGeneral, AYAAN, "Luna AND Aero, switchable live", Y + 94);
 seed(chGeneral, PRIYA, "the orange hover ring is so 2003, I love it", Y + 90);
@@ -148,7 +148,7 @@ seed(chLounge, AYAAN, "anyone restored a CRT lately", 400);
 seed(chLounge, GLITCH, "got a 17 inch trinitron last week, it weighs a ton", 395);
 
 seed(dmPriya, PRIYA, "hey, did the build finish?", 75);
-seed(dmPriya, SELF, "yep — try the aero theme, it's glossy", 71);
+seed(dmPriya, SELF, "yep â€” try the aero theme, it's glossy", 71);
 seed(dmPriya, PRIYA, "ooh the titlebar glow is perfect", 68);
 seed(dmMoss, MOSS, "ping me when the member sidebar is clickable", 150);
 
@@ -218,7 +218,7 @@ export function createMockIpc(): DiceIpc {
 
   function connectFlow(): void {
     emit({ type: "connState", state: "connecting" });
-    setTimeout(() => emit({ type: "connState", state: "connected" }), 700);
+    setTimeout(() => emit({ type: "connState", state: "connected", transport: "wss" }), 700);
   }
 
   return {
@@ -306,7 +306,7 @@ export function createMockIpc(): DiceIpc {
           id: genId(cursor),
           channelId,
           authorId: author.id,
-          content: `(archive) old log line ${left * 20 - i} — from before the demo window`,
+          content: `(archive) old log line ${left * 20 - i} â€” from before the demo window`,
           createdAtMs: cursor,
           editedAtMs: null,
         });

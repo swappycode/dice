@@ -160,7 +160,27 @@ pub fn generate_dev_certs(dir: &Path) -> Result<DevCertPaths, TlsError> {
 pub fn quic_server_config(tls: Arc<rustls::ServerConfig>) -> Result<quinn::ServerConfig, TlsError> {
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(tls)?;
     let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(crypto));
+    cfg.transport_config(Arc::new(quic_transport_config()?));
+    Ok(cfg)
+}
 
+/// Wrap a rustls client config (TLS 1.3, ALPN `dice/1`) for quinn with the
+/// client half of the docs/protocol.md §1 tuning: QUIC keep-alive OFF (the
+/// 30 s app heartbeat is the keep-alive), `max_idle_timeout` 90 s, 0-RTT
+/// disabled (an Identify token must never be replayable; rustls keeps early
+/// data off by default and quinn only attempts it via the opt-in
+/// `into_0rtt`, which the client transport never calls).
+pub fn quic_client_config(tls: Arc<rustls::ClientConfig>) -> Result<quinn::ClientConfig, TlsError> {
+    let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls)?;
+    let mut cfg = quinn::ClientConfig::new(Arc::new(crypto));
+    cfg.transport_config(Arc::new(quic_transport_config()?));
+    Ok(cfg)
+}
+
+/// The §1 transport knobs shared by both directions: keep-alive OFF, idle
+/// timeout 90 s. Stream/window limits only bind the receive side; the
+/// defaults on the client comfortably exceed one 256 KiB control stream.
+fn quic_transport_config() -> Result<quinn::TransportConfig, TlsError> {
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(4));
     transport.stream_receive_window(quinn::VarInt::from_u32(1024 * 1024));
@@ -170,8 +190,7 @@ pub fn quic_server_config(tls: Arc<rustls::ServerConfig>) -> Result<quinn::Serve
         quinn::IdleTimeout::try_from(Duration::from_secs(90))
             .map_err(|_| TlsError::TransportParam)?,
     ));
-    cfg.transport_config(Arc::new(transport));
-    Ok(cfg)
+    Ok(transport)
 }
 
 #[cfg(test)]
@@ -277,6 +296,26 @@ mod tests {
         )
         .unwrap();
         quic_server_config(tls).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quic_client_config_builds_from_a_tls13_config() {
+        install_ring_provider();
+        let dir = temp_dir("quicclientcfg");
+        let paths = generate_dev_certs(&dir).unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in load_certs(&paths.ca_pem).unwrap() {
+            roots.add(cert).unwrap();
+        }
+        let mut tls = rustls::ClientConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        tls.alpn_protocols = vec![dice_protocol::ALPN_GATEWAY.to_vec()];
+        assert!(!tls.enable_early_data, "0-RTT must stay disabled");
+        quic_client_config(Arc::new(tls)).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }
