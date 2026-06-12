@@ -8,6 +8,7 @@ retro Windows XP/7 ("Luna"/"Aero") theme.
 Targets: idle RAM < 100 MB, cold start < 2 s, idle CPU < 1%, 100k+ connections per gateway node.
 
 - New here? Read [docs/getting-started.md](docs/getting-started.md).
+- Roadmap (M2 polish → M3 voice → M4 scaling → M5 optimization): [docs/ROADMAP.md](docs/ROADMAP.md)
 - Wire protocol (normative): [docs/protocol.md](docs/protocol.md)
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Database workflow: [docs/database.md](docs/database.md)
