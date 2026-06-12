@@ -46,3 +46,15 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* Click-to-copy invite chip, pinned to the header's right edge. */
+.invite {
+  margin-left: auto;
+  flex: none;
+  height: 20px;
+  padding: 0 var(--sp-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+  cursor: pointer;
+}

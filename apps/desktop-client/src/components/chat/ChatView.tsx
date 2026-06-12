@@ -1,4 +1,4 @@
-import { createEffect, Show, type Component } from "solid-js";
+import { createEffect, createSignal, Show, type Component } from "solid-js";
 import { ipc } from "../../lib/ipc";
 import {
   displayName,
@@ -30,6 +30,25 @@ export const ChatView: Component = () => {
     return ch?.kind === "dm" ? dmPartnerId(ch, currentUser()?.id) : null;
   };
 
+  const [copied, setCopied] = createSignal(false);
+  const copyInvite = async () => {
+    const code = selectedGuild()?.inviteCode;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // Webview clipboard denied: old-school fallback.
+      const ta = document.createElement("textarea");
+      ta.value = code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <section class={styles.chat}>
       <Show
@@ -46,6 +65,16 @@ export const ChatView: Component = () => {
                     <span class={styles.title}>#{ch().name}</span>
                     <span class={styles.etch} />
                     <span class={styles.topic}>{selectedGuild()?.name}</span>
+                    <Show when={selectedGuild()?.inviteCode}>
+                      <button
+                        type="button"
+                        class={`bevel-raised ${styles.invite}`}
+                        title="Copy the invite code — friends join via [+] > Join with an invite code"
+                        onClick={copyInvite}
+                      >
+                        {copied() ? "Copied!" : `Invite: ${selectedGuild()!.inviteCode}`}
+                      </button>
+                    </Show>
                   </>
                 }
               >
