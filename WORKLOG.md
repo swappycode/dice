@@ -7,6 +7,45 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-12 — MILESTONE 1 WRAP-UP: Phase 5 polish gate
+
+**Branch:** `main`. All five phases done. `just check` fully green (fmt, clippy -D warnings,
+full test suite, aws-lc gate). Live boot verified: `just dev` monolith banner clean (dev-keygen,
+migrations, REST+WSS 8443 / QUIC 8444 / metrics 9600 answering), release client (12.1 MB exe)
+launched against it.
+
+**Perf snapshot (release client, login screen, 60 s idle, Win11):**
+| Target | Measured | Verdict |
+|---|---|---|
+| Cold start < 2 s | **1.54 s** (process → first webview child) | ✅ |
+| Idle CPU < 1% | **0.05%** (10 s window, whole tree) | ✅ |
+| Idle RAM < 100 MB | **~170 MB private** (host 5.5 MB + WebView2 164 MB; 373 MB naive WS sum overcounts shared pages) | ❌ see below |
+
+RAM verdict detail: the Rust host is exceptionally lean (5.5 MB private). The entire overage is
+the WebView2 process tree floor on current Win11 (6 processes; top consumers: 70 MB renderer,
+41 MB GPU). Still ~2.4–4.7× lighter than Discord's 400–800 MB, but the <100 MB goal needs M2
+work: webview memory-trim on blur/minimize, `--disable-gpu`-class browser-arg experiments via
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, single-renderer tuning, and (longer term) evaluating a
+native-UI shell. Filed as the headline M2 optimization item.
+
+**Demo status:** headless E2E suites prove the full multi-user flow (chat/typing/presence/DM/
+resume) over BOTH transports. The interactive two-instance visual demo is ready for the user:
+terminal 1 `just infra-up && just dev`; terminal 2 `just client`; a second instance needs its
+own data dir (single-instance plugin focuses otherwise) — e.g. launch the release exe with a
+distinct `APPDATA` or add a `--profile` arg in M2. Status bar shows Connected (QUIC) or (WSS);
+`DICE_TRANSPORT=wss` forces the fallback path.
+
+**Known gaps carried to M2:** RAM target (above); per-IP auth rate limits get ip=None (peer addr
+not threaded through serve_https); second-instance profile switch; heartbeat-timeout close code
+reuses 4011; split-mode NATS RPC interconnect; message edit/delete; voice (M3 per master plan).
+
+**MILESTONE 1 COMPLETE.** Master-prompt Phase 1 scope (auth, gateway, guilds/channels, DMs,
+realtime messaging, presence) shipped end-to-end: Rust backend (QUIC+WSS binary-protobuf
+gateway, Postgres/Redis/NATS with in-proc dev fallbacks, monolith + service bins) and the
+retro Luna/Aero Tauri desktop client, 200+ tests, all milestone gates green.
+
+---
+
 ## 2026-06-12 — Phase 4 COMPLETE: QUIC client transport + QuicFirst policy
 
 **Branch:** `main`. The network-core half was built by an agent (which then died silently before
