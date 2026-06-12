@@ -125,8 +125,7 @@ impl SessionManager {
 fn adopt(inner: &mut Inner, auth: &v1::AuthSuccess) {
     inner.refresh = Some(auth.refresh_token.clone());
     inner.access = Some(auth.access_token.clone());
-    inner.expires_at =
-        Some(Instant::now() + Duration::from_secs(auth.access_expires_in_s.max(1)));
+    inner.expires_at = Some(Instant::now() + Duration::from_secs(auth.access_expires_in_s.max(1)));
     if auth.user.is_some() {
         inner.user.clone_from(&auth.user);
     }

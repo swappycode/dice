@@ -14,7 +14,9 @@ use dice_protocol::v1;
 use dice_protocol::v1::frame::Payload;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::dto::{BootstrapDto, ChannelDto, GuildDto, MemberDto, MessageDto, UserDto, snowflake_ms};
+use crate::dto::{
+    BootstrapDto, ChannelDto, GuildDto, MemberDto, MessageDto, UserDto, snowflake_ms,
+};
 
 /// Pending rows older than this at open are marked failed (design §3.3).
 const PENDING_TTL_MS: u64 = 60_000;
@@ -112,7 +114,9 @@ impl Cache {
                 let _ = tx.send(op(conn));
             }))
             .map_err(|_| CacheError::Closed)?;
-        rx.await.map_err(|_| CacheError::Closed)?.map_err(Into::into)
+        rx.await
+            .map_err(|_| CacheError::Closed)?
+            .map_err(Into::into)
     }
 
     // ------------------------------------------------------------ snapshots
@@ -495,20 +499,22 @@ impl Cache {
             let mut members_by_guild: BTreeMap<i64, Vec<MemberDto>> = BTreeMap::new();
             let mut stmt =
                 conn.prepare_cached("SELECT guild_id, user_id FROM members ORDER BY user_id")?;
-            for row in stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-            })? {
+            for row in
+                stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+            {
                 let (guild_id, member_id) = row?;
-                members_by_guild.entry(guild_id).or_default().push(MemberDto {
-                    user_id: member_id.to_string(),
-                    guild_id: guild_id.to_string(),
-                });
+                members_by_guild
+                    .entry(guild_id)
+                    .or_default()
+                    .push(MemberDto {
+                        user_id: member_id.to_string(),
+                        guild_id: guild_id.to_string(),
+                    });
             }
 
             let mut guilds = Vec::new();
-            let mut stmt = conn.prepare_cached(
-                "SELECT id, name, owner_id, invite_code FROM guilds ORDER BY id",
-            )?;
+            let mut stmt = conn
+                .prepare_cached("SELECT id, name, owner_id, invite_code FROM guilds ORDER BY id")?;
             for row in stmt.query_map([], |row| {
                 let id: i64 = row.get(0)?;
                 Ok(GuildDto {
@@ -527,11 +533,12 @@ impl Cache {
             }
 
             let mut recipients: BTreeMap<i64, Vec<String>> = BTreeMap::new();
-            let mut stmt = conn
-                .prepare_cached("SELECT channel_id, user_id FROM dm_participants ORDER BY user_id")?;
-            for row in stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-            })? {
+            let mut stmt = conn.prepare_cached(
+                "SELECT channel_id, user_id FROM dm_participants ORDER BY user_id",
+            )?;
+            for row in
+                stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+            {
                 let (channel_id, recipient) = row?;
                 recipients
                     .entry(channel_id)
@@ -589,8 +596,8 @@ impl Cache {
     pub async fn get_users(&self, ids: Vec<u64>) -> Result<Vec<UserDto>, CacheError> {
         self.run(move |conn| {
             let mut out = Vec::new();
-            let mut stmt = conn
-                .prepare_cached("SELECT id, username, display_name FROM users WHERE id = ?1")?;
+            let mut stmt =
+                conn.prepare_cached("SELECT id, username, display_name FROM users WHERE id = ?1")?;
             for id in ids {
                 if let Some(user) = stmt.query_row(params![id as i64], row_to_user).optional()? {
                     out.push(user);
@@ -649,7 +656,9 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserDto> {
     let display: Option<String> = row.get(2)?;
     Ok(UserDto {
         id: id.to_string(),
-        display_name: display.filter(|d| !d.is_empty()).unwrap_or_else(|| username.clone()),
+        display_name: display
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| username.clone()),
         username,
     })
 }
@@ -822,9 +831,18 @@ fn bump_last_message(conn: &Connection, channel_id: i64, message_id: i64) -> rus
 fn delete_channel(conn: &Connection, channel_id: u64) -> rusqlite::Result<()> {
     let id = channel_id as i64;
     conn.execute("DELETE FROM messages WHERE channel_id = ?1", params![id])?;
-    conn.execute("DELETE FROM channel_sync WHERE channel_id = ?1", params![id])?;
-    conn.execute("DELETE FROM read_markers WHERE channel_id = ?1", params![id])?;
-    conn.execute("DELETE FROM dm_participants WHERE channel_id = ?1", params![id])?;
+    conn.execute(
+        "DELETE FROM channel_sync WHERE channel_id = ?1",
+        params![id],
+    )?;
+    conn.execute(
+        "DELETE FROM read_markers WHERE channel_id = ?1",
+        params![id],
+    )?;
+    conn.execute(
+        "DELETE FROM dm_participants WHERE channel_id = ?1",
+        params![id],
+    )?;
     conn.execute("DELETE FROM channels WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -913,7 +931,11 @@ mod tests {
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, real_id.to_string());
         assert_eq!(page[0].pending, None);
-        assert_eq!(page[0].nonce.as_deref(), Some("n-1"), "echo keeps the nonce");
+        assert_eq!(
+            page[0].nonce.as_deref(),
+            Some("n-1"),
+            "echo keeps the nonce"
+        );
 
         // A second pending row fails: kept, flagged.
         cache
@@ -1070,7 +1092,11 @@ mod tests {
         let sync = cache.channel_sync(7).await.unwrap().unwrap();
         assert!(!sync.stale);
         assert_eq!(sync.newest_synced_id, Some(400));
-        assert_eq!(sync.oldest_fetched_id, Some(100), "window stayed contiguous");
+        assert_eq!(
+            sync.oldest_fetched_id,
+            Some(100),
+            "window stayed contiguous"
+        );
 
         // A gapped newest page resets the window to itself.
         cache.mark_all_stale().await.unwrap();
@@ -1079,7 +1105,11 @@ mod tests {
             .await
             .unwrap();
         let sync = cache.channel_sync(7).await.unwrap().unwrap();
-        assert_eq!(sync.oldest_fetched_id, Some(800), "window reset to the page");
+        assert_eq!(
+            sync.oldest_fetched_id,
+            Some(800),
+            "window reset to the page"
+        );
 
         // Older page extends downward.
         cache
@@ -1120,7 +1150,13 @@ mod tests {
         assert!(cache.bootstrap_snapshot().await.unwrap().is_some());
         cache.wipe().await.unwrap();
         assert!(cache.bootstrap_snapshot().await.unwrap().is_none());
-        assert!(cache.get_meta("last_channel_id".into()).await.unwrap().is_none());
+        assert!(
+            cache
+                .get_meta("last_channel_id".into())
+                .await
+                .unwrap()
+                .is_none()
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

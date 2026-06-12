@@ -1,16 +1,17 @@
 /**
- * The IPC seam. The UI talks ONLY to this interface; in a later phase the
- * Tauri host (src-tauri) implements it over invoke/listen, today the mock
- * (ipc.mock.ts) implements it with in-memory fixtures.
+ * The IPC seam. The UI talks ONLY to this interface; inside the Tauri shell
+ * the real host implementation (ipc.real.ts, invoke/listen) is selected,
+ * everywhere else the in-memory mock (ipc.mock.ts) serves the demo fixtures.
  *
- * Selection: VITE_MOCK_IPC (default "true") — and we always fall back to
- * the mock when window.__TAURI__ is absent, so `npm run dev` in a plain
- * browser can never hit a dead bridge.
+ * Selection: real when running inside Tauri (detected via the always-present
+ * `__TAURI_INTERNALS__`; `__TAURI__` only exists with `withGlobalTauri`).
+ * `VITE_MOCK_IPC=true` forces the mock even inside Tauri (UI demos against
+ * fixtures); a plain browser ALWAYS gets the mock so `npm run dev` can never
+ * hit a dead bridge.
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createMockIpc } from "./ipc.mock";
+import { createTauriIpc } from "./ipc.real";
 import type {
   Bootstrap,
   Channel,
@@ -22,7 +23,7 @@ import type {
 } from "./types";
 
 export interface DiceIpc {
-  /** Resume an existing session if the host has one (keyring later, localStorage in mock). */
+  /** Resume an existing session if the host has one (keyring; localStorage in mock). */
   getSession(): Promise<Session | null>;
   login(email: string, password: string): Promise<Session>;
   register(email: string, username: string, password: string): Promise<Session>;
@@ -49,45 +50,14 @@ export interface DiceIpc {
 declare global {
   interface Window {
     __TAURI__?: unknown;
+    __TAURI_INTERNALS__?: unknown;
   }
 }
 
-export const hasTauri = typeof window !== "undefined" && "__TAURI__" in window;
+export const hasTauri =
+  typeof window !== "undefined" &&
+  ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
-export const MOCK_IPC: boolean = import.meta.env.VITE_MOCK_IPC !== "false" || !hasTauri;
+export const MOCK_IPC: boolean = !hasTauri || import.meta.env.VITE_MOCK_IPC === "true";
 
-/* ---- Tauri-backed implementation (wired up when src-tauri lands) ---- */
-
-const EVENT_CHANNEL = "dice://event";
-
-const tauriIpc: DiceIpc = {
-  getSession: () => invoke<Session | null>("session_status"),
-  login: (email, password) => invoke<Session>("login", { email, password }),
-  register: (email, username, password) =>
-    invoke<Session>("register", { email, username, password }),
-  logout: () => invoke<void>("logout"),
-  getBootstrap: () => invoke<Bootstrap>("get_bootstrap"),
-  sendMessage: (channelId, content, nonce) =>
-    invoke<void>("send_message", { channelId, content, nonce }),
-  fetchMessages: (channelId, before, limit) =>
-    invoke<Message[]>("fetch_messages", { channelId, before, limit }),
-  startTyping: (channelId) => invoke<void>("start_typing", { channelId }),
-  setPresence: (status) => invoke<void>("set_presence", { status }),
-  createGuild: (name) => invoke<Guild>("create_guild", { name }),
-  joinGuild: (code) => invoke<Guild>("join_guild", { code }),
-  openDm: (recipientId) => invoke<Channel>("open_dm", { recipientId }),
-  onEvent: (cb) => {
-    let unlisten: UnlistenFn | null = null;
-    let cancelled = false;
-    void listen<DiceEvent>(EVENT_CHANNEL, (e) => cb(e.payload)).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  },
-};
-
-export const ipc: DiceIpc = MOCK_IPC ? createMockIpc() : tauriIpc;
+export const ipc: DiceIpc = MOCK_IPC ? createMockIpc() : createTauriIpc();

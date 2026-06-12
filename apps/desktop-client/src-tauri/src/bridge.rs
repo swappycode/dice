@@ -14,7 +14,9 @@ use dice_protocol::v1::frame::Payload;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cache::Cache;
-use crate::dto::{ChannelDto, DiceEvent, GuildDto, MessageDto, RESYNC_CHANNEL, id_str, presence_str};
+use crate::dto::{
+    ChannelDto, DiceEvent, GuildDto, MessageDto, RESYNC_CHANNEL, id_str, presence_str,
+};
 use crate::emit::{Emitter, emit_dice};
 
 /// Presence updates are batched on this tick to keep webview wakeups low.

@@ -12,7 +12,9 @@ license = "MIT OR Apache-2.0"
 description = "Dice desktop client host (Tauri 2)"
 
 [lib]
-name = "dice_desktop"
+# `_lib` suffix (Tauri convention): the bin target `dice-desktop` and a lib
+# named `dice_desktop` would collide on the MSVC .pdb filename.
+name = "dice_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -30,7 +32,10 @@ tauri                        = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 
 # ---- persistence + secrets ----
-rusqlite = { version = "0.40", features = ["bundled"] }
+# rusqlite is pinned to the line whose libsqlite3-sys (0.30.x) matches
+# sqlx-sqlite 0.8's: the gate test pulls sqlx (via the service dev-deps) and
+# two majors of libsqlite3-sys cannot coexist (`links = "sqlite3"`).
+rusqlite = { version = "0.32", features = ["bundled"] }
 keyring  = { version = "3", features = ["windows-native"] }
 
 # ---- runtime + plumbing ----
@@ -42,7 +47,6 @@ tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 anyhow             = "1"
 thiserror          = "2"
-getrandom          = "0.3"
 
 [dev-dependencies]
 # The gate test boots the real api-gateway IN-PROCESS (same wiring as

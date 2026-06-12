@@ -7,6 +7,51 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-12 — Phase 3 COMPLETE: Tauri 2 desktop host over WSS
+
+**Branch:** `main`. Resumed from the Phase-3 checkpoint below; the partial src-tauri files were
+audited, fixed, and finished. ALL gates green.
+
+**Shipped (`apps/desktop-client`):**
+- `src-tauri/src/lib.rs` + `main.rs`: ONE tokio runtime built first → `tauri::async_runtime::set`
+  before the Builder; ring provider install; tracing init; single-instance plugin (focus+unminimize);
+  ClientCore managed from the setup hook (cache at `app_data_dir()/cache.db`); background
+  session-resume + gateway connect at startup when the keystore holds a session.
+- `src-tauri/src/commands.rs`: 13 `#[tauri::command]` shims matching `src/lib/ipc.ts` exactly
+  (session_status, login, register, logout, get_bootstrap, send_message → returns the pending row,
+  fetch_messages, start_typing, set_presence, create_guild, join_guild, open_dm, connection_state);
+  camelCase JS keys map onto snake_case args via the Tauri 2 default; errors cross as
+  `CoreError::user_message()` strings.
+- Frontend wiring: new `src/lib/ipc.real.ts` (invoke/listen, rejections wrapped in `Error`);
+  `ipc.ts` now selects real-inside-Tauri (detected via `__TAURI_INTERNALS__`) with
+  `VITE_MOCK_IPC=true` as the mock override; TitleBar was already wired to getCurrentWindow().
+  `npm run tauri` script + @tauri-apps/cli added (makes `just client` work).
+- Fixes to the checkpointed files: rusqlite 0.40→0.32 (`links="sqlite3"` clash — sqlx-sqlite 0.8
+  needs libsqlite3-sys 0.30; 0.40 cannot coexist), `time` pinned 0.3.47 (0.3.48 breaks cookie
+  0.18.1), lib target renamed `dice_desktop_lib` (MSVC .pdb collision with the bin), logout now
+  shuts the gateway down BEFORE clearing credentials, `get_bootstrap` waits (bounded 10 s, 250 ms
+  state polls) for the first applied Ready when the cache is empty/user-only AND the driver is
+  actively connecting — fresh login of an existing account no longer paints an empty shell;
+  offline starts still serve the cache instantly.
+- New headless gate test `src-tauri/tests/host_gate.rs` (in-process backend per
+  network-core/client_e2e.rs; fake keystore + channel-backed emitter): register → keystore holds
+  drt_ → Ready → optimistic send (pending sqlite row → ack reconciles to the real id, nonce kept)
+  → second RAW WSS client joins + sends → dispatch reaches cache AND emitter → fetch_messages
+  pages from cache → core rebuilt on the same cache+keystore with the backend GONE →
+  session_status + get_bootstrap + history all served offline from sqlite.
+
+**Gates:** cargo check/clippy `-D warnings`/fmt clean; **14 tests passing** (13 unit + 1 E2E gate
+vs live Postgres, 7.5 s); `cargo tree -i aws-lc-sys` empty; `npx tsc --noEmit` + `npm run build`
+green; `npm run tauri dev` boots end-to-end (vite 2.3 s, cargo 22 s, window process spawned ~28 s).
+
+**Next milestone — Phase 4: QUIC client transport** (fill `AnyTransport::Quic`; QuicFirst{3 s}
+policy, 2-failure WSS preference, persist last-good transport in cache meta; verify dev-CA on both
+transports). Then Phase 5 polish gate (perf snapshot vs <100 MB/<2 s/<1% targets, `just check`,
+two-instance live demo). Live demo now: `just dev` (monolith) + `just client` (sets DICE_DEV_CA +
+URLs, runs `npm run tauri dev`).
+
+---
+
 ## 2026-06-11 (evening) — Phase 3 CHECKPOINT: client core DONE, Tauri host PARTIAL
 
 **Branch:** `main`. Session checkpointed deliberately (token-budget stop requested by user);

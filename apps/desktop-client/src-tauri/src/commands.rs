@@ -1,0 +1,118 @@
+//! `#[tauri::command]` shims — names and payload shapes match
+//! `apps/desktop-client/src/lib/ipc.ts` EXACTLY. No logic lives here: every
+//! body delegates to a plain async fn on [`ClientCore`] so the surface is
+//! testable without Tauri.
+//!
+//! Conventions (the webview side of the contract):
+//! - command names are snake_case (`invoke("send_message", …)`);
+//! - argument KEYS arrive camelCase from JS and Tauri 2 maps them onto these
+//!   snake_case parameters by default (`channelId` → `channel_id`) — exactly
+//!   what ipc.ts sends, so no `rename_all` overrides are needed;
+//! - every id crosses as a `String` (u64 snowflakes overflow JS numbers);
+//! - errors cross as a plain user-presentable string (`CoreError::user_message`).
+
+use std::sync::Arc;
+
+use tauri::State;
+
+use crate::dto::{BootstrapDto, ChannelDto, GuildDto, MessageDto, SessionDto};
+use crate::state::{ClientCore, CoreError};
+
+type Core<'a> = State<'a, Arc<ClientCore>>;
+type CmdResult<T> = Result<T, String>;
+
+fn user(e: CoreError) -> String {
+    e.user_message()
+}
+
+/// `getSession()`: resume from keystore + cache; `null` when logged out.
+#[tauri::command]
+pub async fn session_status(core: Core<'_>) -> CmdResult<Option<SessionDto>> {
+    core.session_status().await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn login(core: Core<'_>, email: String, password: String) -> CmdResult<SessionDto> {
+    core.login(&email, &password).await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn register(
+    core: Core<'_>,
+    email: String,
+    username: String,
+    password: String,
+) -> CmdResult<SessionDto> {
+    core.register(&email, &username, &password)
+        .await
+        .map_err(user)
+}
+
+#[tauri::command]
+pub async fn logout(core: Core<'_>) -> CmdResult<()> {
+    core.logout().await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn get_bootstrap(core: Core<'_>) -> CmdResult<BootstrapDto> {
+    core.get_bootstrap().await.map_err(user)
+}
+
+/// Optimistic send: returns the PENDING message row (negative id, caller's
+/// nonce); the `messageCreate` event later reconciles it by nonce.
+#[tauri::command]
+pub async fn send_message(
+    core: Core<'_>,
+    channel_id: String,
+    content: String,
+    nonce: String,
+) -> CmdResult<MessageDto> {
+    core.send_message(&channel_id, &content, &nonce)
+        .await
+        .map_err(user)
+}
+
+#[tauri::command]
+pub async fn fetch_messages(
+    core: Core<'_>,
+    channel_id: String,
+    before: Option<String>,
+    limit: Option<u32>,
+) -> CmdResult<Vec<MessageDto>> {
+    core.fetch_messages(&channel_id, before.as_deref(), limit)
+        .await
+        .map_err(user)
+}
+
+/// Host-throttled to 1 per 8 s per channel; lossy while disconnected.
+#[tauri::command]
+pub async fn start_typing(core: Core<'_>, channel_id: String) -> CmdResult<()> {
+    core.start_typing(&channel_id).await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn set_presence(core: Core<'_>, status: String) -> CmdResult<()> {
+    core.set_presence(&status).await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn create_guild(core: Core<'_>, name: String) -> CmdResult<GuildDto> {
+    core.create_guild(&name).await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn join_guild(core: Core<'_>, code: String) -> CmdResult<GuildDto> {
+    core.join_guild(&code).await.map_err(user)
+}
+
+#[tauri::command]
+pub async fn open_dm(core: Core<'_>, recipient_id: String) -> CmdResult<ChannelDto> {
+    core.open_dm(&recipient_id).await.map_err(user)
+}
+
+/// Pull-style mirror of the `connState` event stream
+/// (`"idle" | "connecting" | "connected" | "reconnecting" | "offline"`).
+#[tauri::command]
+pub fn connection_state(core: Core<'_>) -> String {
+    core.connection_state()
+}
