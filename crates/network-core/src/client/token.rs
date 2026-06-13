@@ -8,10 +8,17 @@ use futures_util::future::BoxFuture;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum TokenError {
-    /// No credentials are available (logged out / never logged in).
+    /// No credentials are available (logged out / never logged in). TERMINAL:
+    /// the user must authenticate.
     #[error("no credentials available")]
     NoCredentials,
-    /// The provider tried to refresh and failed (network, revoked family, …).
+    /// The server refused the credentials (refresh token revoked, rotated, or
+    /// otherwise invalid — a 4xx from `POST /v1/auth/refresh`). TERMINAL: the
+    /// stored session is dead; the host must re-authenticate.
+    #[error("credentials rejected: {0}")]
+    Rejected(String),
+    /// A refresh attempt failed for a TRANSIENT reason (network, TLS, 5xx).
+    /// Retryable — the credentials may still be good once the server is back.
     #[error("token refresh failed: {0}")]
     Refresh(String),
 }

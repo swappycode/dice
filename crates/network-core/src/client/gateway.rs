@@ -27,7 +27,7 @@ use tokio::time::Instant;
 use super::policy::{ConnectPlan, PreferredTransport, TransportPolicy, TransportSelector};
 use super::quic::{QuicEndpoint, QuicTransport};
 use super::tls::TlsOptions;
-use super::token::TokenProvider;
+use super::token::{TokenError, TokenProvider};
 use super::transport::{AnyTransport, TransportKind, WssTransport};
 
 // ------------------------------------------------------------------ tuning
@@ -143,6 +143,12 @@ pub enum ClientEvent {
     /// Resume was rejected; the caller must treat local caches as stale
     /// (HTTP re-sync). A fresh `Ready` follows on success.
     SessionInvalidated,
+    /// TERMINAL: the stored credentials are dead (the server rejected the
+    /// refresh token, or rejected the access token twice at the handshake).
+    /// Unlike [`Self::SessionInvalidated`] there is no recovery on this
+    /// connection — the host must clear the session and route to login. The
+    /// driver parks in `Failed` afterwards (a fresh login spawns a new one).
+    AuthExpired { reason: String },
     /// Sequenced dispatches (`seq > 0`) plus ephemeral `TypingStart`.
     Dispatch(Box<Frame>),
     /// `SendMessageAck` correlated to [`Command::SendMessage`] by nonce.
@@ -353,8 +359,12 @@ enum Flow {
     /// fixed delay without counting an attempt (user-forced reconnect, fresh
     /// auth retry).
     Retry { delay: Option<Duration> },
-    /// Stop until `ForceReconnect`.
-    Failed(String),
+    /// Terminal because the credentials/session were rejected: emit
+    /// [`ClientEvent::AuthExpired`] first so the host can clear them, then
+    /// park until `ForceReconnect` (a fresh login spawns a new driver).
+    /// (A broken TLS config is the only other terminal, and it is caught in
+    /// [`connect`] before the driver loop ever starts.)
+    AuthExpired(String),
 }
 
 enum FrameOutcome {
@@ -385,14 +395,23 @@ impl Driver {
         loop {
             match self.connection_life().await {
                 Flow::Shutdown => break,
-                Flow::Failed(reason) => {
+                Flow::AuthExpired(reason) => {
+                    // Tell the host FIRST (it clears credentials + routes to
+                    // login), then park in Failed like any other terminal.
+                    if !self
+                        .emit(ClientEvent::AuthExpired {
+                            reason: reason.clone(),
+                        })
+                        .await
+                    {
+                        break;
+                    }
                     if !self.set_state(ConnState::Failed { reason }).await {
                         break;
                     }
                     if !self.idle_until_reconnect().await {
                         break;
                     }
-                    // User-initiated fresh cycle.
                     self.attempt = 0;
                     self.auth_retry_used = false;
                 }
@@ -440,7 +459,7 @@ impl Driver {
         let identify_token = if self.resume.is_none() {
             match self.cfg.token.access_token().await {
                 Ok(token) => Some(token),
-                Err(error) => return Flow::Failed(format!("access token: {error}")),
+                Err(error) => return token_error_flow(error),
             }
         } else {
             None
@@ -538,7 +557,7 @@ impl Driver {
                     }
                     let token = match self.cfg.token.access_token().await {
                         Ok(token) => token,
-                        Err(error) => return Flow::Failed(format!("access token: {error}")),
+                        Err(error) => return token_error_flow(error),
                     };
                     let identify = self.identify_frame(token);
                     if transport.send(&identify).await.is_err() {
@@ -768,7 +787,7 @@ impl Driver {
             Some(4001 | 4002) => {
                 self.resume = None;
                 if self.auth_retry_used {
-                    Flow::Failed(
+                    Flow::AuthExpired(
                         "gateway rejected the access token twice; fresh login required".to_owned(),
                     )
                 } else {
@@ -891,6 +910,22 @@ impl Driver {
 }
 
 // ----------------------------------------------------------- pure helpers
+
+/// Map a [`TokenError`] from the credential provider onto a connection flow:
+/// a transient refresh failure backs off and retries (the credentials may
+/// still be good); a terminal one (no credentials, or the server refused
+/// them) becomes [`Flow::AuthExpired`] so the host clears the session.
+fn token_error_flow(error: TokenError) -> Flow {
+    match error {
+        TokenError::Refresh(reason) => {
+            tracing::debug!(%reason, "token refresh failed transiently; backing off");
+            Flow::Retry { delay: None }
+        }
+        terminal @ (TokenError::NoCredentials | TokenError::Rejected(_)) => {
+            Flow::AuthExpired(format!("access token: {terminal}"))
+        }
+    }
+}
 
 fn command_frame(cmd: &Command) -> Option<Frame> {
     match cmd {
@@ -1092,7 +1127,7 @@ mod tests {
         assert!(driver.auth_retry_used);
         assert!(matches!(
             driver.handshake_close(Some(4001)),
-            Flow::Failed(_)
+            Flow::AuthExpired(_)
         ));
         // Non-credential closes during the handshake just back off.
         assert!(matches!(
@@ -1169,6 +1204,24 @@ mod tests {
 
         let (_, quic) = transport_setup(&cfg(TransportPolicy::WssOnly, Some(endpoint))).unwrap();
         assert!(quic.is_none(), "wss-only never dials quic");
+    }
+
+    /// Credential-provider failures split into transient (retry) vs terminal
+    /// (auth-expired), the distinction Issue 1 hinges on.
+    #[test]
+    fn token_errors_split_transient_from_terminal() {
+        assert!(matches!(
+            token_error_flow(TokenError::Refresh("connection reset".into())),
+            Flow::Retry { delay: None }
+        ));
+        assert!(matches!(
+            token_error_flow(TokenError::NoCredentials),
+            Flow::AuthExpired(_)
+        ));
+        assert!(matches!(
+            token_error_flow(TokenError::Rejected("HTTP 401".into())),
+            Flow::AuthExpired(_)
+        ));
     }
 
     /// `note_seq` keeps the cumulative-ack cursor monotonic.
