@@ -4,14 +4,16 @@
  * will feed the exact same DiceEvent stream later.
  */
 
+import { playChime } from "../lib/chime";
 import { ipc } from "../lib/ipc";
-import type { DiceEvent } from "../lib/types";
+import type { DiceEvent, Message } from "../lib/types";
 import { setConnState, setTransport } from "../stores/connection";
 import {
   addDm,
   addGuild,
   applyBootstrap,
   applyUserUpdate,
+  displayName,
   resetDirectory,
   selectedChannelId,
 } from "../stores/guilds";
@@ -33,19 +35,36 @@ import {
 import { currentUser, session, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
 
+/** Collapse whitespace + cap length for an OS-toast body. */
+function snippet(s: string): string {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > 120 ? `${one.slice(0, 117)}…` : one;
+}
+
+/** Chime + (background-only) OS toast for an incoming message. */
+function notifyNewMessage(m: Message): void {
+  playChime();
+  // Don't toast over an app you're actively looking at — the chime + badge
+  // already covered that. Toast only when the window is in the background.
+  if (typeof document !== "undefined" && document.hasFocus()) return;
+  void ipc.notify(displayName(m.authorId), snippet(m.content) || "Sent an attachment");
+}
+
 function dispatch(ev: DiceEvent): void {
   switch (ev.type) {
-    case "messageCreate":
+    case "messageCreate": {
       applyMessageCreate(ev.message, ev.nonce);
       clearTyping(ev.message.channelId, ev.message.authorId);
-      // Badge non-active channels (the author never notifies themselves).
-      if (
-        ev.message.authorId !== currentUser()?.id &&
-        ev.message.channelId !== selectedChannelId()
-      ) {
-        bumpUnread(ev.message.channelId);
+      // The author never notifies themselves.
+      if (ev.message.authorId !== currentUser()?.id) {
+        const elsewhere = ev.message.channelId !== selectedChannelId();
+        // Badge any non-active channel.
+        if (elsewhere) bumpUnread(ev.message.channelId);
+        // Chime + toast unless it's the channel you're actively viewing.
+        if (elsewhere || !document.hasFocus()) notifyNewMessage(ev.message);
       }
       break;
+    }
     case "messageUpdate":
       applyMessageUpdate(ev.message);
       break;

@@ -539,6 +539,10 @@ export function createMockIpc(): DiceIpc {
       /* no server in the mock; the store clears locally */
     },
 
+    async notify(_title, _body) {
+      /* no OS toast in the browser mock */
+    },
+
     onEvent(cb) {
       subscribers.add(cb);
       startAmbient();

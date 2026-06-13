@@ -124,6 +124,7 @@ export function createTauriIpc(): DiceIpc {
       return map;
     },
     markRead: (channelId) => call<void>("mark_read", { channelId }),
+    notify: (title, body) => call<void>("notify", { title, body }),
     onEvent: (cb) => {
       let unlisten: UnlistenFn | null = null;
       let cancelled = false;

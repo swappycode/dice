@@ -257,3 +257,13 @@ pub async fn open_dm(core: Core<'_>, recipient_id: String) -> CmdResult<ChannelD
 pub fn connection_state(core: Core<'_>) -> String {
     core.connection_state()
 }
+
+/// Show an OS toast for a new message (item 14). Best-effort: a failed toast is
+/// logged, never surfaced — the in-app badge/chime already covered the user.
+#[tauri::command]
+pub fn notify(app: tauri::AppHandle, title: String, body: String) {
+    use tauri_plugin_notification::NotificationExt as _;
+    if let Err(error) = app.notification().builder().title(title).body(body).show() {
+        tracing::warn!(%error, "OS notification failed");
+    }
+}

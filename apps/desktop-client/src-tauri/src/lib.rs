@@ -51,6 +51,9 @@ pub fn run() {
     tauri::async_runtime::set(rt_handle.clone());
 
     let mut builder = tauri::Builder::default();
+    // OS toast notifications (item 14): the host shows them via the plugin's
+    // Rust API from the `notify` command.
+    builder = builder.plugin(tauri_plugin_notification::init());
     // Single-instance only for the DEFAULT profile: a second normal launch
     // focuses the existing window, but a named `--profile` is explicitly
     // allowed its own window (local two-user testing).
@@ -148,6 +151,7 @@ pub fn run() {
             commands::join_guild,
             commands::open_dm,
             commands::connection_state,
+            commands::notify,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Dice desktop host");

@@ -94,6 +94,9 @@ export interface DiceIpc {
   /** Clear a channel's unread badge on the server (on open / read). */
   markRead(channelId: string): Promise<void>;
 
+  /** Show an OS toast (new-message notification). No-op in the browser mock. */
+  notify(title: string, body: string): Promise<void>;
+
   /** Subscribe to the gateway event stream. Returns an unsubscribe fn. */
   onEvent(cb: (ev: DiceEvent) => void): () => void;
 }

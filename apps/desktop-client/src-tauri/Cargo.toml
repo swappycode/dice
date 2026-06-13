@@ -37,6 +37,7 @@ dice-common       = { path = "../../../crates/common" }
 # ---- tauri host ----
 tauri                        = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-notification    = "2"
 
 # ---- persistence + secrets ----
 # rusqlite is pinned to the line whose libsqlite3-sys (0.30.x) matches
