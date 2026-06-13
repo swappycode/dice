@@ -7,6 +7,44 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — Post-M1 QA fixes (4 issues)
+
+**Branch:** `main`. Reproducible client connection bug + three smaller QA issues. All gates green
+(`just check`, src-tauri clippy/test, tsc+build, aws-lc-sys clean).
+
+**Issue 1 (priority) — client stuck "Offline" after a monolith restart.** Root cause: on cold
+start the client restores the keystore session, renders the shell cache-first, then the gateway
+driver tries to (re-)authenticate; when the server rejects it (dev-lite keeps sessions only as
+long as the process — a restart loses them, and a refresh-token rotation desync makes refresh
+return 401), the driver landed in a silent `Failed` → host emitted `"offline"` → stuck, no way
+back but manual Log off. Fix (vertical):
+- network-core: `TokenError::Rejected` (terminal) vs `Refresh` (transient); driver maps via
+  `token_error_flow` and the 2nd handshake 4001/4002 to a new terminal `Flow::AuthExpired`, which
+  emits `ClientEvent::AuthExpired` before parking. Transient refresh failures now back off+retry
+  instead of failing hard.
+- host: `SessionManager` maps a refresh **4xx → Rejected** (5xx/transport stay transient); the
+  bridge, on AuthExpired, clears credentials + wipes the cache, emits `sessionExpired`, and tears
+  the driver down so the next login reconnects (the parked driver no longer blocks `ensure_gateway`).
+- frontend: `sessionExpired` resets stores + routes to `LoginCard` with a "session expired" notice.
+- regression test `expired_session_routes_to_login_instead_of_hanging_offline` (host_gate.rs):
+  revoked session → shell renders cache-first → `sessionExpired` emitted → credentials cleared.
+
+**Issue 2 — two instances for local two-user testing.** `--profile <name>` / `DICE_CLIENT_PROFILE`:
+own app-data dir (`profiles/<name>/cache.db`) + scoped keyring (`OsKeyring::for_profile`) + exempt
+from the single-instance lock. `just client-build` + `just client-as <name>`; documented in
+getting-started (incl. the "a browser tab is mock mode, not a real second user" warning that
+explains the user's "invalid server code" confusion — they were joining a real code into a mock).
+
+**Issue 3 — `just client` "Port 1420 in use".** `predev` (scripts/free-port.mjs) frees an orphaned
+dev server before vite's strictPort claim; best-effort, cross-platform.
+
+**Issue 4 — hard-coded "(mock mode)" footer.** Driven by the real `MOCK_IPC` flag now.
+
+Commits: ff3f5a3 (network-core), 1697089 (host+test), d0d48c8 (frontend+label), ed58ea8 (profile),
+5335d5b (free-port).
+
+---
+
 ## 2026-06-12 — MILESTONE 1 WRAP-UP: Phase 5 polish gate
 
 **Branch:** `main`. All five phases done. `just check` fully green (fmt, clippy -D warnings,
