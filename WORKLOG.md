@@ -7,6 +7,68 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (1/n): WebView2 RAM −44% + release-load fix + perf-mode
+
+**Branch:** `main`. First M2 item — the headline carried gap (idle RAM <100 MB). Host compiles +
+clippy clean; frontend `tsc` clean; release client builds and **renders the real login card**
+(screenshotted), idle RAM measured.
+
+**Pre-existing release bug found & fixed (priority).** `just client-build` ran a plain
+`cargo build --release`, which has `tauri::is_dev() == true` (that's `!cfg!(feature =
+"custom-protocol")`). So the "release" exe loaded `devUrl` (`localhost:1420`) and showed
+*"Hmmm… can't reach this page"* — i.e. `client-as` (the two-user demo) never actually worked
+standalone, and the M1 perf snapshot's "~170 MB" was measured on that **error page**, not the app.
+Fix: added the standard `[features] custom-protocol = ["tauri/custom-protocol"]` to the host
+`Cargo.toml` (was missing) and `--features custom-protocol` to `just client-build`. Dev
+(`tauri dev`) deliberately leaves it off.
+
+**WebView2 RAM reduction (the work).** Window creation moved OUT of `tauri.conf.json` (`"windows":
+[]`) and INTO the Rust `setup` hook via `WebviewWindowBuilder`, created **after** `app.manage(core)`
+(also closes a latent race: state is now guaranteed present before the webview's first IPC). This
+lets us set `additional_browser_args` from `DICE_WEBVIEW_ARGS` (one build, many experiments) with a
+tuned default (`DEFAULT_WEBVIEW_ARGS`). Because we set the args ourselves, wry stops applying its own
+default, so it's re-included and all feature-disables folded into the single `--disable-features=`
+list Chromium honours.
+
+Measured on the **real rendered app** (release exe, isolated `--profile bench` = clean login screen,
+~25–30 s idle; metric = summed **private commit** across host + WebView2 tree, matching M1's "private"):
+
+| Config | Private | WS (naive) | Procs |
+|---|---|---|---|
+| Before (wry-default args only) | **~210 MB** (208/214) | ~404–413 MB | 7 |
+| Shipped default (`--in-process-gpu` + feature/bg trims) | **118 MB** | ~317 MB | 6 |
+
+`--in-process-gpu` is the headline: folds the separate GPU process (~41 MB) into the browser WHILE
+KEEPING hardware acceleration (strictly better than `--disable-gpu`'s software render, which would
+punish the Aero glass for ~3 MB less). The feature disables (Translate/MediaRouter/OptimizationHints/
+…) also cut the renderer ~108→60 MB. Net **−92 MB / −44%**. `--renderer-process-limit=1` and
+audio-in-process were no-ops here (already one renderer; no idle audio process). Host stays 6 MB.
+
+**Still ABOVE the <100 MB stretch goal**: the residual is the Chromium renderer (~60 MB) + browser
+(~28 MB) floor. Closing it needs the heavier levers M1 flagged — `SetMemoryUsageTargetLevel(LOW)`
+memory-trim on blur/minimize (helps *backgrounded* use, NOT this focused-idle benchmark; and it'd be
+the host's FIRST `unsafe` block — `unsafe_code = "deny"` today — so it's a pending policy decision),
+and longer-term a native-UI shell.
+
+**Perf-mode toggle** (roadmap escape hatch): `src/lib/perfMode.ts` (persisted like the theme, with
+an index.html pre-paint to avoid FOUC), a "Perf" checkbox in the StatusBar, and
+`html.perf-mode { --glass-blur: 0 !important }` in base.css. Forces glass off regardless of theme and
+is the hook the future CRT-veil will check.
+
+**New tooling:** `apps/desktop-client/scripts/measure-ram.ps1` + `just client-measure [idle]` — launches
+the release exe under `--profile bench`, sums private commit across the descendant tree only (never
+matches `msedgewebview2.exe` by name — VSCode et al. share it), tears the tree down. A/B an arg
+experiment with `$env:DICE_WEBVIEW_ARGS`.
+
+Files: `src-tauri/{Cargo.toml, tauri.conf.json, src/lib.rs}`, `scripts/measure-ram.ps1`, `justfile`,
+`src/{App.tsx, index.html, lib/perfMode.ts, styles/base.css, components/chrome/StatusBar.*}`.
+
+**Next (M2 cont.):** carried gaps — `--profile` polish, per-IP rate-limit plumbing, split-mode NATS
+RPC, dedicated heartbeat close code, per-account cache namespacing — then chat completeness
+(edit/delete/replies/reactions, attachments, notifications) and the UI funk pass + theme pack.
+
+---
+
 ## 2026-06-13 — Post-M1 QA fixes (4 issues)
 
 **Branch:** `main`. Reproducible client connection bug + three smaller QA issues. All gates green
