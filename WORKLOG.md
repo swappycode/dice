@@ -36,12 +36,34 @@ getting-started (incl. the "a browser tab is mock mode, not a real second user" 
 explains the user's "invalid server code" confusion — they were joining a real code into a mock).
 
 **Issue 3 — `just client` "Port 1420 in use".** `predev` (scripts/free-port.mjs) frees an orphaned
-dev server before vite's strictPort claim; best-effort, cross-platform.
+dev server before vite's strictPort claim; best-effort, cross-platform. **Follow-up (a5d6d42):**
+the first version used `netstat -ano -p tcp`, which lists only IPv4, so a vite orphan bound to the
+IPv6 loopback (`::1:1420`) stayed invisible and the port was never freed. Switched the Windows path
+to `Get-NetTCPConnection` (both families); verified live against a real `::1:1420` listener.
 
-**Issue 4 — hard-coded "(mock mode)" footer.** Driven by the real `MOCK_IPC` flag now.
+**Issue 4 — hard-coded "(mock mode)" footer.** Driven by the real `MOCK_IPC` flag now (so only a
+plain browser tab, which runs the mock IPC, shows it).
+
+**Manual-test clarifications (NOT bugs — confirmed correct behavior):**
+- Relaunching a closed client logs back in as the same user = intended session persistence
+  (keyring). The Issue-1 fix only triggers when the SERVER rejects the session; manually force it
+  with `just db-reset` while a client is logged in, then relaunch → drops to login, not Offline.
+- A user's presence orb goes OFFLINE for others ~**60 s** after they close (the deliberate
+  resume-window; the gateway calls `presence.disconnect` only when the detached window expires).
+  Candidate M2 tuning: shorten the dev resume window for snappier offline detection.
 
 Commits: ff3f5a3 (network-core), 1697089 (host+test), d0d48c8 (frontend+label), ed58ea8 (profile),
-5335d5b (free-port).
+5335d5b (free-port), a5d6d42 (free-port IPv6 fix). All gates green; HEAD at a5d6d42; tree clean
+(except pre-existing untracked `docs/testing-m1.md` + `qa/`, which are the user's, not this work).
+
+**Next milestone — M2** (see `docs/ROADMAP.md` for the full slice). Carried gaps first:
+WebView2 RAM (~170 MB vs <100 MB target — host is only 5.5 MB; headline item), `--profile` polish,
+per-IP rate-limit plumbing (`serve_https` peer addr → gateway), split-mode NATS RPC. Then chat
+completeness (edit/delete/replies/reactions, attachments via media-service, notifications off the
+JetStream stream) and the **UI retro-funk pass** (user wants the UI funkier while keeping the retro
+aesthetic — gloss/gradients on the flat panes, guild-tile tinting, Bliss-style backdrop, XP balloon
+notifications) + Midnight Aero dark theme. Infra: `just infra-up` (Postgres on host **5433**),
+`just dev` monolith, `just client` (one dev instance) / `just client-as <name>` (built, isolated).
 
 ---
 
