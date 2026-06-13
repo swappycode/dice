@@ -127,6 +127,18 @@ impl Cache {
     pub async fn apply_ready(&self, ready: v1::Ready) -> Result<(), CacheError> {
         self.run(move |conn| {
             let tx = conn.transaction()?;
+            // Cross-account hygiene: a Ready for a DIFFERENT user than the one
+            // the cache currently holds means an account switch in this data
+            // dir (logout + login as someone else). The normal diff only
+            // reconciles guilds the NEW user shares, so without this purge the
+            // previous account's messages/users/read-markers would linger.
+            if let Some(user) = &ready.user {
+                let switching = get_meta(&tx, "current_user_id")?
+                    .is_some_and(|prev| prev != user.id.to_string());
+                if switching {
+                    clear_all(&tx)?;
+                }
+            }
             tx.execute("UPDATE channel_sync SET stale = 1", [])?;
             if let Some(user) = &ready.user {
                 upsert_user(&tx, user)?;
@@ -620,16 +632,18 @@ impl Cache {
 
     /// Logout: drop every row in every table.
     pub async fn wipe(&self) -> Result<(), CacheError> {
-        self.run(|conn| {
-            conn.execute_batch(
-                "DELETE FROM meta; DELETE FROM users; DELETE FROM guilds;
-                 DELETE FROM channels; DELETE FROM dm_participants; DELETE FROM members;
-                 DELETE FROM messages; DELETE FROM channel_sync; DELETE FROM read_markers;",
-            )?;
-            Ok(())
-        })
-        .await
+        self.run(|conn| clear_all(conn)).await
     }
+}
+
+/// Drop every data row — logout ([`Cache::wipe`]) and account-switch purge
+/// ([`Cache::apply_ready`]) share this so the two can never drift apart.
+fn clear_all(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "DELETE FROM meta; DELETE FROM users; DELETE FROM guilds;
+         DELETE FROM channels; DELETE FROM dm_participants; DELETE FROM members;
+         DELETE FROM messages; DELETE FROM channel_sync; DELETE FROM read_markers;",
+    )
 }
 
 // ------------------------------------------------------------ SQL helpers
@@ -1040,6 +1054,82 @@ mod tests {
             boot.users[1].display_name, "priya7",
             "empty display name falls back to username"
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn ready_for_a_different_user_purges_the_previous_account() {
+        let path = temp_db("acct-switch");
+        let cache = Cache::open(&path).unwrap();
+
+        // Account A: one guild (channel + member) and itself in the user dict.
+        let guild = v1::Guild {
+            id: 10,
+            name: "a-hq".into(),
+            owner_id: 1,
+            channels: vec![v1::Channel {
+                id: 11,
+                guild_id: 10,
+                kind: v1::ChannelKind::GuildText as i32,
+                name: "general".into(),
+                position: 0,
+                last_message_id: 0,
+                recipient_ids: vec![],
+            }],
+            invite_code: "a".into(),
+            members: vec![v1::Member {
+                user_id: 1,
+                guild_id: 10,
+                joined_at_ms: 0,
+                permissions: 0,
+            }],
+        };
+        cache
+            .apply_ready(v1::Ready {
+                gateway_session_id: 1,
+                resume_token: Default::default(),
+                user: Some(v1::User {
+                    id: 1,
+                    username: "alice".into(),
+                    display_name: String::new(),
+                    flags: 0,
+                }),
+                guilds: vec![guild],
+                dm_channels: vec![],
+                presences: vec![],
+                users: vec![],
+            })
+            .await
+            .unwrap();
+
+        // Account B logs in on the SAME data dir, sharing nothing.
+        cache
+            .apply_ready(v1::Ready {
+                gateway_session_id: 2,
+                resume_token: Default::default(),
+                user: Some(v1::User {
+                    id: 2,
+                    username: "bob".into(),
+                    display_name: String::new(),
+                    flags: 0,
+                }),
+                guilds: vec![],
+                dm_channels: vec![],
+                presences: vec![],
+                users: vec![],
+            })
+            .await
+            .unwrap();
+
+        let boot = cache.bootstrap_snapshot().await.unwrap().unwrap();
+        assert_eq!(boot.user.id, "2", "cache now belongs to account B");
+        assert!(
+            boot.guilds.is_empty(),
+            "account A's guild must be purged on switch, not diffed-and-left"
+        );
+        assert_eq!(boot.users.len(), 1, "only account B remains in the dict");
+        assert_eq!(boot.users[0].id, "2");
 
         let _ = std::fs::remove_file(&path);
     }
