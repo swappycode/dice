@@ -1,4 +1,4 @@
-import { Show, type Component } from "solid-js";
+import { createSignal, Show, type Component } from "solid-js";
 import { ipc } from "../../lib/ipc";
 import type { PresenceStatus } from "../../lib/types";
 import { resetDirectory } from "../../stores/guilds";
@@ -6,6 +6,7 @@ import { resetMessages } from "../../stores/messages";
 import { presenceOf, resetPresence } from "../../stores/presence";
 import { currentUser, setSession } from "../../stores/session";
 import { resetUnread } from "../../stores/unread";
+import { SecurityDialog } from "../dialogs/SecurityDialog";
 import { Avatar } from "./Avatar";
 import { PresenceOrb } from "./PresenceOrb";
 import styles from "./SelfStrip.module.css";
@@ -16,6 +17,7 @@ const PRESENCE_CYCLE: PresenceStatus[] = ["online", "idle", "dnd", "offline"];
  *  username + log off. */
 export const SelfStrip: Component = () => {
   let avatarInput: HTMLInputElement | undefined;
+  const [securityOpen, setSecurityOpen] = createSignal(false);
 
   function cyclePresence(): void {
     const me = currentUser();
@@ -70,9 +72,21 @@ export const SelfStrip: Component = () => {
             <PresenceOrb status={presenceOf(me().id)()} />
           </button>
           <span class={styles.selfName}>{me().displayName}</span>
+          <button
+            type="button"
+            class={styles.security}
+            title="Security & two-factor"
+            aria-label="Security and two-factor authentication"
+            onClick={() => setSecurityOpen(true)}
+          >
+            🔒
+          </button>
           <button type="button" class={styles.logOff} onClick={() => void logOff()}>
             Log off
           </button>
+          <Show when={securityOpen()}>
+            <SecurityDialog onClose={() => setSecurityOpen(false)} />
+          </Show>
         </footer>
       )}
     </Show>
