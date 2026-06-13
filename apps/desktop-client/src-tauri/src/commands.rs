@@ -100,6 +100,13 @@ pub async fn fetch_attachment(core: Core<'_>, media_id: String) -> CmdResult<Str
     core.fetch_attachment(&media_id).await.map_err(user)
 }
 
+/// Set (or clear, `media_id = None`) the caller's avatar. Confirmed via the
+/// `userUpdate` event the server broadcasts back.
+#[tauri::command]
+pub async fn set_avatar(core: Core<'_>, media_id: Option<String>) -> CmdResult<()> {
+    core.set_avatar(media_id.as_deref()).await.map_err(user)
+}
+
 /// Toggle a reaction emoji on a message (server enforces membership).
 #[tauri::command]
 pub async fn react(

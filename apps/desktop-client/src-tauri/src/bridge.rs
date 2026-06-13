@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cache::Cache;
 use crate::dto::{
-    ChannelDto, DiceEvent, GuildDto, MessageDto, RESYNC_CHANNEL, id_str, presence_str,
+    ChannelDto, DiceEvent, GuildDto, MessageDto, RESYNC_CHANNEL, UserDto, id_str, presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
 use crate::session::SessionManager;
@@ -397,6 +397,19 @@ impl Bridge {
                         &DiceEvent::DmChannelCreate {
                             channel: ChannelDto::from(channel),
                             users,
+                        },
+                    );
+                }
+            }
+            Payload::UserUpdate(uu) => {
+                if let Err(error) = self.cache.apply_event(payload.clone()).await {
+                    tracing::warn!(%error, "user-update cache write failed");
+                }
+                if let Some(user) = &uu.user {
+                    emit_dice(
+                        &self.emitter,
+                        &DiceEvent::UserUpdate {
+                            user: UserDto::from(user),
                         },
                     );
                 }

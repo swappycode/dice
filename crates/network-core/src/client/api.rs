@@ -224,6 +224,27 @@ impl ApiClient {
         })
     }
 
+    /// `PUT /v1/users/@me/avatar` — set (`media_id`) or clear (`0`) the avatar.
+    /// 204 on success; the change propagates via the `UserUpdate` dispatch.
+    pub async fn set_avatar(&self, media_id: u64) -> Result<(), ApiError> {
+        let url = self.url("/v1/users/@me/avatar")?;
+        let body = v1::SetAvatarRequest { media_id }.encode_to_vec();
+        let response = self
+            .bearer_send(|token| {
+                self.http
+                    .put(url.clone())
+                    .header(CONTENT_TYPE, PROTOBUF)
+                    .body(body.clone())
+                    .bearer_auth(token)
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
     /// `GET /v1/media/{id}` — fetch the raw bytes + their MIME type for display.
     pub async fn download_media(&self, id: u64) -> Result<(String, bytes::Bytes), ApiError> {
         let url = self.url(&format!("/v1/media/{id}"))?;

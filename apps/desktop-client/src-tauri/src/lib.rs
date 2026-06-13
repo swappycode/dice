@@ -127,6 +127,7 @@ pub fn run() {
             commands::send_message,
             commands::upload_attachment,
             commands::fetch_attachment,
+            commands::set_avatar,
             commands::edit_message,
             commands::delete_message,
             commands::react,

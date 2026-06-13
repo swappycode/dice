@@ -68,6 +68,10 @@ pub struct UserDto {
     pub id: String,
     pub username: String,
     pub display_name: String,
+    /// Avatar media id (fetch bytes via the same path as attachments); None =
+    /// no avatar (render initials).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
 }
 
 impl From<&v1::User> for UserDto {
@@ -80,6 +84,7 @@ impl From<&v1::User> for UserDto {
             } else {
                 u.display_name.clone()
             },
+            avatar_id: (u.avatar_id != 0).then(|| id_str(u.avatar_id)),
         }
     }
 }
@@ -278,6 +283,8 @@ pub enum DiceEvent {
     TypingStart { channel_id: String, user_id: String },
     #[serde(rename_all = "camelCase")]
     PresenceUpdate { user_id: String, status: String },
+    #[serde(rename_all = "camelCase")]
+    UserUpdate { user: UserDto },
     #[serde(rename_all = "camelCase")]
     GuildCreate {
         guild: GuildDto,

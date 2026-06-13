@@ -222,6 +222,11 @@ impl Cache {
                         upsert_channel(&tx, channel)?;
                     }
                 }
+                Payload::UserUpdate(uu) => {
+                    if let Some(user) = &uu.user {
+                        upsert_user(&tx, user)?;
+                    }
+                }
                 _ => {}
             }
             tx.commit()
@@ -564,7 +569,7 @@ impl Cache {
                 return Ok(None);
             };
             conn.query_row(
-                "SELECT id, username, display_name FROM users WHERE id = ?1",
+                "SELECT id, username, display_name, avatar_hash FROM users WHERE id = ?1",
                 params![id.parse::<i64>().unwrap_or_default()],
                 row_to_user,
             )
@@ -581,7 +586,7 @@ impl Cache {
             };
             let Some(user) = conn
                 .query_row(
-                    "SELECT id, username, display_name FROM users WHERE id = ?1",
+                    "SELECT id, username, display_name, avatar_hash FROM users WHERE id = ?1",
                     params![user_id.parse::<i64>().unwrap_or_default()],
                     row_to_user,
                 )
@@ -591,8 +596,9 @@ impl Cache {
             };
 
             let mut users = Vec::new();
-            let mut stmt =
-                conn.prepare_cached("SELECT id, username, display_name FROM users ORDER BY id")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT id, username, display_name, avatar_hash FROM users ORDER BY id",
+            )?;
             for row in stmt.query_map([], row_to_user)? {
                 users.push(row?);
             }
@@ -697,8 +703,9 @@ impl Cache {
     pub async fn get_users(&self, ids: Vec<u64>) -> Result<Vec<UserDto>, CacheError> {
         self.run(move |conn| {
             let mut out = Vec::new();
-            let mut stmt =
-                conn.prepare_cached("SELECT id, username, display_name FROM users WHERE id = ?1")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT id, username, display_name, avatar_hash FROM users WHERE id = ?1",
+            )?;
             for id in ids {
                 if let Some(user) = stmt.query_row(params![id as i64], row_to_user).optional()? {
                     out.push(user);
@@ -759,12 +766,14 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserDto> {
     let id: i64 = row.get(0)?;
     let username: String = row.get(1)?;
     let display: Option<String> = row.get(2)?;
+    let avatar: Option<String> = row.get(3)?;
     Ok(UserDto {
         id: id.to_string(),
         display_name: display
             .filter(|d| !d.is_empty())
             .unwrap_or_else(|| username.clone()),
         username,
+        avatar_id: avatar.filter(|a| !a.is_empty()),
     })
 }
 
@@ -859,16 +868,21 @@ fn get_meta(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
 }
 
 fn upsert_user(conn: &Connection, user: &v1::User) -> rusqlite::Result<()> {
+    // The avatar media id is stored as text in the existing `avatar_hash` column
+    // (the M1 schema reserved it). 0 ⇒ NULL ⇒ initials.
+    let avatar = (user.avatar_id != 0).then(|| user.avatar_id.to_string());
     conn.execute(
-        "INSERT INTO users(id, username, display_name, updated_at) VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO users(id, username, display_name, avatar_hash, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(id) DO UPDATE SET
              username = excluded.username,
              display_name = excluded.display_name,
+             avatar_hash = excluded.avatar_hash,
              updated_at = excluded.updated_at",
         params![
             user.id as i64,
             user.username,
             user.display_name,
+            avatar,
             now_ms() as i64
         ],
     )?;
@@ -1180,6 +1194,7 @@ mod tests {
             username: "sooru".into(),
             display_name: "Sooru".into(),
             flags: 0,
+            avatar_id: 0,
         };
         let stale_guild = v1::Guild {
             id: 50,
@@ -1242,6 +1257,7 @@ mod tests {
                 username: "priya7".into(),
                 display_name: String::new(),
                 flags: 0,
+                avatar_id: 0,
             }],
         };
         cache.apply_ready(ready2).await.unwrap();
@@ -1299,6 +1315,7 @@ mod tests {
                     username: "alice".into(),
                     display_name: String::new(),
                     flags: 0,
+                    avatar_id: 0,
                 }),
                 guilds: vec![guild],
                 dm_channels: vec![],
@@ -1318,6 +1335,7 @@ mod tests {
                     username: "bob".into(),
                     display_name: String::new(),
                     flags: 0,
+                    avatar_id: 0,
                 }),
                 guilds: vec![],
                 dm_channels: vec![],
@@ -1369,6 +1387,7 @@ mod tests {
                     username: "u".into(),
                     display_name: String::new(),
                     flags: 0,
+                    avatar_id: 0,
                 }),
                 guilds: vec![],
                 dm_channels: vec![],
@@ -1435,6 +1454,7 @@ mod tests {
                 username: "u".into(),
                 display_name: String::new(),
                 flags: 0,
+                avatar_id: 0,
             })
             .await
             .unwrap();

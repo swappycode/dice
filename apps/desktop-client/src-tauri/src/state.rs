@@ -343,6 +343,11 @@ impl ClientCore {
                     username: user.username.clone(),
                     display_name: user.display_name.clone(),
                     flags: 0,
+                    avatar_id: user
+                        .avatar_id
+                        .as_deref()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0),
                 });
             }
             self.ensure_gateway().await;
@@ -553,13 +558,26 @@ impl ClientCore {
     /// Fetch one attachment's bytes as a `data:` URL the webview can render
     /// directly (`<img src>` / a download link). Base64 keeps it compact over
     /// IPC vs. a JSON number array; the 8 MiB upload cap bounds the cost. A
-    /// streaming custom-URI-scheme handler is a future optimisation.
+    /// streaming custom-URI-scheme handler is a future optimisation. Avatars
+    /// are media too, so the UI fetches them through this same path.
     pub async fn fetch_attachment(&self, media_id: &str) -> Result<String, CoreError> {
         use base64::Engine as _;
         let id = parse_id(media_id).ok_or_else(|| CoreError::BadId(media_id.into()))?;
         let (content_type, bytes) = self.api.download_media(id).await?;
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         Ok(format!("data:{content_type};base64,{b64}"))
+    }
+
+    /// Set (or clear, `media_id = None`) the caller's avatar. The media must
+    /// already be uploaded (`upload_attachment`). The server broadcasts a
+    /// `UserUpdate` — including to this client — which updates the cache + UI.
+    pub async fn set_avatar(&self, media_id: Option<&str>) -> Result<(), CoreError> {
+        let id = match media_id {
+            Some(s) => parse_id(s).ok_or_else(|| CoreError::BadId(s.into()))?,
+            None => 0,
+        };
+        self.api.set_avatar(id).await?;
+        Ok(())
     }
 
     /// Toggle a reaction. `add=true` reacts, `add=false` un-reacts. Confirmed by
