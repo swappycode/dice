@@ -9,7 +9,7 @@ SolidJS** desktop client wrapped in a funky **Windows XP / Windows 7 retro UI**.
 > **Status:** Milestone 1 complete — register, log in, guilds & channels, DMs, real-time
 > messaging, typing indicators, presence, and resume-after-disconnect all work end-to-end over
 > both QUIC and WSS. ~200 backend tests + a headless client gate, all green. See
-> [WORKLOG.md](WORKLOG.md) for the build log and [docs/ROADMAP.md](docs/ROADMAP.md) for what's next.
+> [WORKLOG.md](WORKLOG.md) for the build log.
 
 ## Why
 
@@ -85,7 +85,6 @@ two real `client-as` windows for real users.)
 ## Documentation
 
 - [docs/getting-started.md](docs/getting-started.md) — run it, test two users, gotchas
-- [docs/ROADMAP.md](docs/ROADMAP.md) — M2 (polish + more themes) → M3 (voice) → M4 (scaling) → M5 (optimization)
 - [docs/protocol.md](docs/protocol.md) — the normative wire protocol
 - [docs/architecture.md](docs/architecture.md) · [docs/database.md](docs/database.md) · [docs/adr/](docs/adr/)
 - [WORKLOG.md](WORKLOG.md) — the running build log

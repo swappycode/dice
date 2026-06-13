@@ -56,7 +56,7 @@ Commits: ff3f5a3 (network-core), 1697089 (host+test), d0d48c8 (frontend+label), 
 5335d5b (free-port), a5d6d42 (free-port IPv6 fix). All gates green; HEAD at a5d6d42; tree clean
 (except pre-existing untracked `docs/testing-m1.md` + `qa/`, which are the user's, not this work).
 
-**Next milestone — M2** (see `docs/ROADMAP.md` for the full slice). Carried gaps first:
+**Next milestone — M2** (full slice in the local-only `docs/ROADMAP.md`, gitignored). Carried gaps first:
 WebView2 RAM (~170 MB vs <100 MB target — host is only 5.5 MB; headline item), `--profile` polish,
 per-IP rate-limit plumbing (`serve_https` peer addr → gateway), split-mode NATS RPC. Then chat
 completeness (edit/delete/replies/reactions, attachments via media-service, notifications off the
