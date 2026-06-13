@@ -76,6 +76,19 @@ export interface Session {
   user: User;
 }
 
+/** Result of `ipc.login`: either a `session` (no 2FA) or a `totpTicket` to
+ *  answer the 2FA challenge with `ipc.completeTotpLogin`. Exactly one is set. */
+export interface LoginResult {
+  session?: Session;
+  totpTicket?: string;
+}
+
+/** A fresh 2FA enrollment for the settings UI. */
+export interface TotpEnroll {
+  secret: string; // base32, for manual entry
+  otpauthUri: string; // otpauth://totp/... rendered as a QR
+}
+
 export interface Bootstrap {
   user: User;
   guilds: Guild[];

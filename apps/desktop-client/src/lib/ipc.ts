@@ -18,17 +18,30 @@ import type {
   Channel,
   DiceEvent,
   Guild,
+  LoginResult,
   Message,
   PresenceStatus,
   Session,
+  TotpEnroll,
 } from "./types";
 
 export interface DiceIpc {
   /** Resume an existing session if the host has one (keyring; localStorage in mock). */
   getSession(): Promise<Session | null>;
-  login(email: string, password: string): Promise<Session>;
+  /** Password step. Resolves to `{ session }` (no 2FA) or `{ totpTicket }`
+      (2FA on) — answer the latter via `completeTotpLogin`. */
+  login(email: string, password: string): Promise<LoginResult>;
+  /** Finish a 2FA login with the challenge ticket + a TOTP or recovery code. */
+  completeTotpLogin(ticket: string, code: string): Promise<Session>;
   register(email: string, username: string, password: string): Promise<Session>;
   logout(): Promise<void>;
+
+  /** Begin 2FA enrollment: a secret + otpauth URI (inactive until confirmed). */
+  totpEnroll(): Promise<TotpEnroll>;
+  /** Activate 2FA with a code from the enrolled secret; returns recovery codes. */
+  totpConfirm(code: string): Promise<string[]>;
+  /** Disable 2FA (requires a current TOTP or recovery code). */
+  totpDisable(code: string): Promise<void>;
 
   getBootstrap(): Promise<Bootstrap>;
 

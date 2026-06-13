@@ -19,8 +19,10 @@ import type {
   Channel,
   DiceEvent,
   Guild,
+  LoginResult,
   Message,
   Session,
+  TotpEnroll,
 } from "./types";
 
 /** The single host→webview event stream (src-tauri/src/dto.rs EVENT_CHANNEL). */
@@ -61,10 +63,15 @@ const attachmentSrcCache = new Map<string, Promise<string>>();
 export function createTauriIpc(): DiceIpc {
   return {
     getSession: () => call<Session | null>("session_status"),
-    login: (email, password) => call<Session>("login", { email, password }),
+    login: (email, password) => call<LoginResult>("login", { email, password }),
+    completeTotpLogin: (ticket, code) =>
+      call<Session>("complete_totp_login", { ticket, code }),
     register: (email, username, password) =>
       call<Session>("register", { email, username, password }),
     logout: () => call<void>("logout"),
+    totpEnroll: () => call<TotpEnroll>("totp_enroll"),
+    totpConfirm: (code) => call<string[]>("totp_confirm", { code }),
+    totpDisable: (code) => call<void>("totp_disable", { code }),
     getBootstrap: () => call<Bootstrap>("get_bootstrap"),
     // The host returns the pending message row; the DiceIpc seam only needs
     // the promise (the UI renders its own optimistic row keyed by nonce).

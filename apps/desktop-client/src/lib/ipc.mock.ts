@@ -175,6 +175,11 @@ export function createMockIpc(): DiceIpc {
   let session: Session | null = localStorage.getItem(SESSION_KEY) ? { user: SELF } : null;
   let ambientTimer: ReturnType<typeof setInterval> | null = null;
   let ambientIdx = 0;
+  // Mock 2FA state (browser demo of the enroll/challenge/disable flow).
+  let totpSecret: string | null = null; // set on enroll (pending until confirm)
+  let totpEnabled = false;
+  let recoveryCodes: string[] = [];
+  const norm = (s: string): string => s.replace(/[^a-z0-9]/gi, "").toUpperCase();
 
   function emit(ev: DiceEvent): void {
     for (const cb of subscribers) cb(ev);
@@ -234,10 +239,61 @@ export function createMockIpc(): DiceIpc {
     async login(email, _password) {
       await delay(300);
       if (!email.includes("@")) throw new Error("Enter a valid e-mail address.");
+      if (totpEnabled) return { totpTicket: "mock-ticket" };
+      session = { user: SELF };
+      localStorage.setItem(SESSION_KEY, "1");
+      connectFlow();
+      return { session };
+    },
+
+    async completeTotpLogin(ticket, code) {
+      await delay(200);
+      if (ticket !== "mock-ticket") {
+        throw new Error("Your verification session expired. Log in again.");
+      }
+      const isTotp = /^\d{6}$/.test(code.trim());
+      const recovery = recoveryCodes.find((c) => norm(c) === norm(code));
+      if (!isTotp && !recovery) throw new Error("Invalid code. Try again.");
+      if (recovery) recoveryCodes = recoveryCodes.filter((c) => c !== recovery);
       session = { user: SELF };
       localStorage.setItem(SESSION_KEY, "1");
       connectFlow();
       return session;
+    },
+
+    async totpEnroll() {
+      await delay(120);
+      const a = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // RFC 4648 base32
+      totpSecret = Array.from({ length: 32 }, () => a[Math.floor(Math.random() * a.length)]).join("");
+      return {
+        secret: totpSecret,
+        otpauthUri: `otpauth://totp/Dice:${SELF.username}?secret=${totpSecret}&issuer=Dice&algorithm=SHA1&digits=6&period=30`,
+      };
+    },
+
+    async totpConfirm(code) {
+      await delay(120);
+      if (!totpSecret) throw new Error("Start enrollment first.");
+      if (!/^\d{6}$/.test(code.trim())) {
+        throw new Error("Enter the 6-digit code from your authenticator.");
+      }
+      totpEnabled = true;
+      const a = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+      recoveryCodes = Array.from({ length: 10 }, () => {
+        const body = Array.from({ length: 10 }, () => a[Math.floor(Math.random() * a.length)]).join("");
+        return `${body.slice(0, 5)}-${body.slice(5)}`;
+      });
+      return [...recoveryCodes];
+    },
+
+    async totpDisable(code) {
+      await delay(120);
+      if (!totpEnabled) throw new Error("Two-factor is not enabled.");
+      const ok = /^\d{6}$/.test(code.trim()) || recoveryCodes.some((c) => norm(c) === norm(code));
+      if (!ok) throw new Error("Invalid code.");
+      totpEnabled = false;
+      totpSecret = null;
+      recoveryCodes = [];
     },
 
     async register(email, username, _password) {
