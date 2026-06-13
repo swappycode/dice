@@ -98,6 +98,17 @@ export function selectDm(channelId: string): void {
   setSelectedChannelId(channelId);
 }
 
+/** Apply a userUpdate (avatar/profile change): merge into the directory so a
+ *  partial update never drops the cached username/displayName. */
+export function applyUserUpdate(user: User): void {
+  setDirectory(
+    produce((d) => {
+      const existing = d.usersById[user.id];
+      d.usersById[user.id] = existing ? { ...existing, ...user } : user;
+    }),
+  );
+}
+
 export function userById(id: string): User | undefined {
   return directory.usersById[id];
 }

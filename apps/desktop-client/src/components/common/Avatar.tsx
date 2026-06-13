@@ -1,4 +1,5 @@
-import { type Component, createMemo } from "solid-js";
+import { type Component, createMemo, createResource, Show } from "solid-js";
+import { ipc } from "../../lib/ipc";
 import styles from "./Avatar.module.css";
 
 export function initialsOf(name: string): string {
@@ -8,12 +9,32 @@ export function initialsOf(name: string): string {
   return (first + second).toUpperCase();
 }
 
-/** Initials tile — no raster images anywhere in the app. */
-export const Avatar: Component<{ name: string; size?: "sm" | "md" }> = (props) => {
+/** Initials tile, or the user's avatar image when they have one (avatars are
+ *  media; bytes resolve via the same `ipc.attachmentSrc` path as attachments). */
+export const Avatar: Component<{ name: string; avatarId?: string | null; size?: "sm" | "md" }> = (
+  props,
+) => {
   const initials = createMemo(() => initialsOf(props.name));
+  const [src] = createResource(
+    () => props.avatarId ?? null,
+    (id) => ipc.attachmentSrc(id),
+  );
+  const sizeClass = () => (props.size === "sm" ? styles.sm : "");
   return (
-    <span class={`${styles.avatar} ${props.size === "sm" ? styles.sm : ""}`} aria-hidden="true">
-      {initials()}
-    </span>
+    <Show
+      when={props.avatarId && src()}
+      fallback={
+        <span class={`${styles.avatar} ${sizeClass()}`} aria-hidden="true">
+          {initials()}
+        </span>
+      }
+    >
+      <img
+        class={`${styles.avatar} ${styles.img} ${sizeClass()}`}
+        src={src() ?? ""}
+        alt={props.name}
+        title={props.name}
+      />
+    </Show>
   );
 };

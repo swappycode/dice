@@ -48,7 +48,11 @@ export const MemberSidebar: Component = () => {
                 title={m.userId === currentUser()?.id ? "That's you" : `Message ${displayName(m.userId)}`}
                 onClick={() => void openDm(m.userId)}
               >
-                <Avatar name={displayName(m.userId)} size="sm" />
+                <Avatar
+                  name={displayName(m.userId)}
+                  avatarId={userById(m.userId)?.avatarId}
+                  size="sm"
+                />
                 <span class={styles.name}>{displayName(m.userId)}</span>
                 <PresenceOrb status={presenceOf(m.userId)()} />
                 <Show when={m.userId === currentUser()?.id}>

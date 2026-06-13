@@ -312,6 +312,11 @@ export function createMockIpc(): DiceIpc {
       return uploads.get(mediaId)?.url ?? "";
     },
 
+    async setAvatar(mediaId) {
+      await delay(60);
+      emit({ type: "userUpdate", user: { ...SELF, avatarId: mediaId } });
+    },
+
     async react(channelId, messageId, emoji, add) {
       setTimeout(
         () =>

@@ -46,8 +46,12 @@ export interface DiceIpc {
       is then passed to `sendMessage` in `attachmentIds`). */
   uploadAttachment(file: File): Promise<Attachment>;
   /** Resolve an attachment's bytes to a URL the webview can render directly
-      (`<img src>` / download link). Cached per id by the implementation. */
+      (`<img src>` / download link). Cached per id by the implementation.
+      Avatars are media too, so the UI resolves them through this same call. */
   attachmentSrc(mediaId: string): Promise<string>;
+  /** Set (mediaId) or clear (null) the current user's avatar; the change comes
+      back as a `userUpdate` event. */
+  setAvatar(mediaId: string | null): Promise<void>;
   /** Edit (author-only); the UI reconciles on the `messageUpdate` event. */
   editMessage(channelId: string, messageId: string, content: string): Promise<void>;
   /** Delete (author, or MANAGE_MESSAGES); reconciles on `messageDelete`. */

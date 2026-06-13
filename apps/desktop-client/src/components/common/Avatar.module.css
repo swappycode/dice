@@ -19,3 +19,9 @@
   height: 18px;
   font-size: 9px;
 }
+
+/* Image avatars fill the same tile box, cropped to a square. */
+.img {
+  object-fit: cover;
+  background: var(--c-window-face);
+}

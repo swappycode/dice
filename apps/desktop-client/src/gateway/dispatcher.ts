@@ -7,7 +7,7 @@
 import { ipc } from "../lib/ipc";
 import type { DiceEvent } from "../lib/types";
 import { setConnState, setTransport } from "../stores/connection";
-import { addDm, addGuild, applyBootstrap, resetDirectory } from "../stores/guilds";
+import { addDm, addGuild, applyBootstrap, applyUserUpdate, resetDirectory } from "../stores/guilds";
 import {
   applyMessageCreate,
   applyMessageDelete,
@@ -16,7 +16,7 @@ import {
   resetMessages,
 } from "../stores/messages";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
-import { currentUser, setLoginNotice, setSession } from "../stores/session";
+import { currentUser, session, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
 
 function dispatch(ev: DiceEvent): void {
@@ -45,6 +45,14 @@ function dispatch(ev: DiceEvent): void {
       break;
     case "presenceUpdate":
       setPresenceLocal(ev.userId, ev.status);
+      break;
+    case "userUpdate":
+      applyUserUpdate(ev.user);
+      // Keep the session's own user (SelfStrip reads it) in sync too.
+      if (ev.user.id === currentUser()?.id) {
+        const cur = session();
+        if (cur) setSession({ ...cur, user: { ...cur.user, ...ev.user } });
+      }
       break;
     case "guildCreate":
       addGuild(ev.guild, ev.channels);

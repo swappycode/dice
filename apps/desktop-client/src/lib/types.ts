@@ -16,6 +16,7 @@ export interface User {
   id: string;
   username: string;
   displayName: string;
+  avatarId?: string | null; // media id; fetch via ipc.attachmentSrc(id). null = initials
 }
 
 export interface Channel {
@@ -108,6 +109,7 @@ export type DiceEvent =
     }
   | { type: "typingStart"; channelId: string; userId: string }
   | { type: "presenceUpdate"; userId: string; status: PresenceStatus }
+  | { type: "userUpdate"; user: User }
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }
   | { type: "connState"; state: ConnState; transport?: "quic" | "wss" | null }

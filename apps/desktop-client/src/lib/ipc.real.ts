@@ -92,6 +92,7 @@ export function createTauriIpc(): DiceIpc {
       }
       return pending;
     },
+    setAvatar: (mediaId) => call<void>("set_avatar", { mediaId }),
     editMessage: (channelId, messageId, content) =>
       call<void>("edit_message", { channelId, messageId, content }),
     deleteMessage: (channelId, messageId) =>
