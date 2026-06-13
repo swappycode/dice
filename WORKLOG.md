@@ -7,6 +7,46 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (6/n): notifications (unread via a durable consumer)
+
+**Branch:** `main`. Three commits (notify backend / read+clear endpoints / client badges). Full
+`just check` green (new cache + notification-service live tests), host clippy + tests, frontend `tsc`
++ vite (CSS 36 KB). No migration (uses the cache).
+
+**notification-service (new crate).** A **durable JetStream consumer** on the `DICE_EVT` stream
+(durable name `notifications`): for each `MessageCreate` it resolves channel recipients (guild
+members / DM recipients) from Postgres and bumps a per-(user, channel) unread counter for everyone
+except the author. The decode→resolve→bump **core (`handle_event`) is bus-agnostic and live-tested**
+against Postgres + an in-memory cache (no NATS); `run()` is thin JetStream glue. **Full profile only**
+— `dev-lite`'s in-process Local bus has no stream, so the monolith skips the consumer there and unread
+accrues purely client-side. Wired into the monolith drain set.
+
+**Unread store.** `dice-cache::UnreadStore` keeps the count in the value namespace as a LE-`u64`
+(`keys::unread`, `UNREAD_TTL` 30 d) so it reads back (the increment-only counter primitive can't).
+notification-service is the only writer that bumps; the read-marker path clears. The bump's
+read-modify-write can race a clear — benign eventual consistency for M2.
+
+**Read path.** `GET /v1/unread` → the caller's non-zero per-channel counts (channels from
+`sync_user_state`, counts from the store). `POST /v1/channels/{id}/read` clears one. `GatewayDeps`
+gained `unread: UnreadStore` (built from the cache, like `rate`) — threaded through every
+`GatewayDeps` construction site.
+
+**Client.** Unread store seeded on bootstrap (`GET /v1/unread`), bumped live by the dispatcher for
+non-active-channel messages (never the author's own), cleared (local + `POST /read`) on channel open,
+reset on logout/expiry. Badges: counts in the channel tree + DM list, a guild-rail dot when any of a
+guild's channels is unread. Mock accrues badges live from the ambient/echo stream.
+
+**Item 10 status:** the user-visible read path (clear-on-read) ships here. The FULLER read-markers
+work — a persistent `last_read_message_id` table + a `ReadMarkerUpdate` dispatch for multi-device
+badge sync — remains as item 10. **Deferred:** OS toasts (a Tauri notification plugin) + the chime
+sound are item 14; an orphaned-media GC sweep is still pending.
+
+**M2 done so far:** edit/delete/replies/reactions, attachments, avatars, notifications (unread).
+Remaining: read-markers multi-device sync, auth hardening, UI funk pass + theme pack, chime;
+split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (5/n): avatars (user avatars on the media infra)
 
 **Branch:** `main`. Three commits (wire+service / client-host / client-ui). Full `just check` green
