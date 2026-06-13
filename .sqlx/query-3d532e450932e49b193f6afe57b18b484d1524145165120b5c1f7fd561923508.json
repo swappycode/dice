@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ma.message_id AS \"message_id!\", m.id AS \"media_id!\",\n                      m.filename AS \"filename!\", m.content_type AS \"content_type!\",\n                      m.size_bytes AS \"size_bytes!\", m.width AS \"width!\", m.height AS \"height!\"\n               FROM message_attachments ma\n               JOIN media m ON m.id = ma.media_id\n               WHERE ma.message_id = ANY($1)\n               ORDER BY ma.message_id, ma.position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "filename!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "content_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "size_bytes!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "width!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "height!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3d532e450932e49b193f6afe57b18b484d1524145165120b5c1f7fd561923508"
+}

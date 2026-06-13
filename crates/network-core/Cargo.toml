@@ -64,6 +64,7 @@ tokio-util       = { workspace = true }
 api-gateway      = { workspace = true }
 auth-service     = { workspace = true }
 chat-service     = { workspace = true }
+media-service    = { workspace = true }
 presence-service = { workspace = true }
 dice-auth-core   = { workspace = true }
 dice-cache       = { workspace = true }

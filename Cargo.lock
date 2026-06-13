@@ -43,6 +43,7 @@ dependencies = [
  "dice-protocol",
  "futures-util",
  "getrandom 0.3.4",
+ "media-service",
  "parking_lot",
  "presence-service",
  "prost",
@@ -644,6 +645,7 @@ dependencies = [
  "dice-network-core",
  "dice-protocol",
  "futures-util",
+ "media-service",
  "presence-service",
  "prost",
  "reqwest",
@@ -672,6 +674,7 @@ dependencies = [
  "futures-util",
  "hyper",
  "hyper-util",
+ "media-service",
  "presence-service",
  "quinn",
  "rand 0.9.4",
@@ -1332,6 +1335,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "imagesize"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09e54e57b4c48b40f7aec75635392b12b3421fa26fe8b4332e63138ed278459c"
+
+[[package]]
 name = "indexmap"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1495,6 +1504,22 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest",
+]
+
+[[package]]
+name = "media-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "dice-common",
+ "dice-database",
+ "dice-protocol",
+ "imagesize",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -14,6 +14,7 @@ dice-cache        = { workspace = true }
 dice-auth-core    = { workspace = true }
 auth-service      = { workspace = true }
 chat-service      = { workspace = true }
+media-service     = { workspace = true }
 presence-service  = { workspace = true }
 
 anyhow      = { workspace = true }

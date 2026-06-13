@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use dice_common::time::now_ms;
-use dice_common::{ChannelId, GuildId, MessageId, SnowflakeGenerator, UserId};
+use dice_common::{ChannelId, GuildId, MediaId, MessageId, SnowflakeGenerator, UserId};
 use dice_event_bus::{BusEvent, EventBus, Subject};
 use dice_permissions::{DEFAULT_EVERYONE, Permissions, compute};
 use dice_protocol::internal::v1::bus_event::Payload as BusPayload;
@@ -47,6 +47,7 @@ const MEMBER_CAP: i64 = 100;
 const MAX_MESSAGE_CHARS: usize = 4000;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_EMOJI_CHARS: usize = 64; // matches the message_reactions CHECK
+const MAX_ATTACHMENTS: usize = 10; // per message
 
 /// The Postgres-backed [`Chat`] implementation used by the monolith and the
 /// split-mode chat bin.
@@ -223,9 +224,29 @@ impl Chat for ChatService {
         channel: ChannelId,
         content: String,
         reply_to: Option<MessageId>,
+        attachments: Vec<MediaId>,
         nonce: u64,
     ) -> Result<v1::Message, ChatError> {
-        let content = validate_trimmed(&content, MAX_MESSAGE_CHARS, "message content")?;
+        // Content may be empty IFF there is ≥1 attachment; trim + cap either way
+        // (chars, not bytes — matches the relaxed `messages_content_check`).
+        let content = content.trim().to_owned();
+        let content_chars = content.chars().count();
+        if content_chars > MAX_MESSAGE_CHARS {
+            return Err(ChatError::InvalidArgument(format!(
+                "message content exceeds {MAX_MESSAGE_CHARS} characters (got {content_chars})"
+            )));
+        }
+        if content.is_empty() && attachments.is_empty() {
+            return Err(ChatError::InvalidArgument(
+                "a message needs content or at least one attachment".to_owned(),
+            ));
+        }
+        if attachments.len() > MAX_ATTACHMENTS {
+            return Err(ChatError::InvalidArgument(format!(
+                "a message may have at most {MAX_ATTACHMENTS} attachments (got {})",
+                attachments.len()
+            )));
+        }
         let access = self.channel_access(actor, channel).await?;
         if let ChannelAccess::Guild { perms, .. } = &access {
             perms.check(Permissions::SEND_MESSAGES)?;
@@ -248,6 +269,10 @@ impl Chat for ChatService {
         .execute(&mut *tx)
         .await
         .map_err(internal)?;
+        // Claim attachments in the same tx (each owned by the sender + unused).
+        let wire_attachments = self
+            .attach_to_message(&mut tx, actor, MessageId::from(id), &attachments)
+            .await?;
         sqlx::query!(
             "UPDATE channels SET last_message_id = $1 WHERE id = $2",
             id.as_i64(),
@@ -266,6 +291,7 @@ impl Chat for ChatService {
             edited_at_ms: 0,
             reply_to_id: reply_to.map_or(0, |m| m.raw()),
             reactions: Vec::new(),
+            attachments: wire_attachments,
         };
         let payload = FramePayload::MessageCreate(v1::MessageCreate {
             message: Some(message.clone()),
@@ -362,6 +388,7 @@ impl Chat for ChatService {
             }
         };
         self.attach_reactions(actor, &mut messages).await?;
+        self.attach_attachments(&mut messages).await?;
         Ok(messages)
     }
 
@@ -404,10 +431,12 @@ impl Chat for ChatService {
             author_id: actor.raw(),
             content,
             edited_at_ms: edited_at.map_or(0, ms),
-            // The client MERGES updates (keeps its cached reply/reactions), so an
-            // edit need not re-fetch them — these stay zero/empty on the wire.
+            // The client MERGES updates (keeps its cached reply/reactions/
+            // attachments), so an edit need not re-fetch them — they stay
+            // zero/empty on the wire.
             reply_to_id: 0,
             reactions: Vec::new(),
+            attachments: Vec::new(),
         };
         let payload = FramePayload::MessageUpdate(v1::MessageUpdate {
             message: Some(message.clone()),
@@ -1063,6 +1092,108 @@ impl ChatService {
         }
         Ok(())
     }
+
+    /// Claim `media` for a new message inside the send transaction. Every id
+    /// must reference a `media` row owned by `actor` that is not already
+    /// attached (the junction PK is `media_id`, so use is one-shot). Returns the
+    /// resolved [`v1::Attachment`]s in the caller's order for the broadcast.
+    async fn attach_to_message(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        actor: UserId,
+        message: MessageId,
+        media: &[MediaId],
+    ) -> Result<Vec<v1::Attachment>, ChatError> {
+        if media.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<i64> = media.iter().map(|m| m.as_i64()).collect();
+        let rows = sqlx::query!(
+            r#"SELECT m.id AS "id!", m.filename AS "filename!", m.content_type AS "content_type!",
+                      m.size_bytes AS "size_bytes!", m.width AS "width!", m.height AS "height!"
+               FROM media m
+               WHERE m.id = ANY($1) AND m.uploader_id = $2
+                 AND NOT EXISTS (SELECT 1 FROM message_attachments ma WHERE ma.media_id = m.id)"#,
+            &ids[..],
+            actor.as_i64()
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(internal)?;
+        // Every requested id must resolve (distinct, owned, unused). A count
+        // mismatch also catches a client that sent a duplicate id.
+        let by_id: HashMap<i64, _> = rows.into_iter().map(|r| (r.id, r)).collect();
+        if by_id.len() != media.len() {
+            return Err(ChatError::InvalidArgument(
+                "one or more attachments are unknown, not yours, or already in use".to_owned(),
+            ));
+        }
+        let mut out = Vec::with_capacity(media.len());
+        for (position, mid) in media.iter().enumerate() {
+            let r = &by_id[&mid.as_i64()];
+            sqlx::query!(
+                "INSERT INTO message_attachments (media_id, message_id, position) \
+                 VALUES ($1, $2, $3)",
+                mid.as_i64(),
+                message.as_i64(),
+                position as i16
+            )
+            .execute(&mut *conn)
+            .await
+            .map_err(internal)?;
+            out.push(v1::Attachment {
+                id: mid.raw(),
+                filename: r.filename.clone(),
+                content_type: r.content_type.clone(),
+                size_bytes: r.size_bytes as u64,
+                width: r.width as u32,
+                height: r.height as u32,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Populate each message's `attachments` (in display order) from the
+    /// `message_attachments` junction joined to `media` — one query per page.
+    async fn attach_attachments(&self, messages: &mut [v1::Message]) -> Result<(), ChatError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<i64> = messages.iter().map(|m| m.id as i64).collect();
+        let rows = sqlx::query!(
+            r#"SELECT ma.message_id AS "message_id!", m.id AS "media_id!",
+                      m.filename AS "filename!", m.content_type AS "content_type!",
+                      m.size_bytes AS "size_bytes!", m.width AS "width!", m.height AS "height!"
+               FROM message_attachments ma
+               JOIN media m ON m.id = ma.media_id
+               WHERE ma.message_id = ANY($1)
+               ORDER BY ma.message_id, ma.position"#,
+            &ids[..]
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut by_msg: HashMap<i64, Vec<v1::Attachment>> = HashMap::new();
+        for r in rows {
+            by_msg
+                .entry(r.message_id)
+                .or_default()
+                .push(v1::Attachment {
+                    id: r.media_id as u64,
+                    filename: r.filename,
+                    content_type: r.content_type,
+                    size_bytes: r.size_bytes as u64,
+                    width: r.width as u32,
+                    height: r.height as u32,
+                });
+        }
+        for m in messages.iter_mut() {
+            if let Some(attachments) = by_msg.remove(&(m.id as i64)) {
+                m.attachments = attachments;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn internal<E>(e: E) -> ChatError
@@ -1162,8 +1293,9 @@ fn message_row(
         content,
         edited_at_ms: edited_at.map_or(0, ms),
         reply_to_id: reply_to_id.map_or(0, |v| v as u64),
-        // Filled by `attach_reactions` after the page is built.
+        // Filled by `attach_reactions` / `attach_attachments` after the page is built.
         reactions: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 

@@ -6,5 +6,6 @@ pub mod shutdown;
 pub mod time;
 
 pub use id::{
-    ChannelId, EventId, GuildId, MessageId, SessionId, Snowflake, SnowflakeGenerator, UserId,
+    ChannelId, EventId, GuildId, MediaId, MessageId, SessionId, Snowflake, SnowflakeGenerator,
+    UserId,
 };

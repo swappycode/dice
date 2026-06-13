@@ -201,6 +201,7 @@ mod tests {
                     edited_at_ms: 0,
                     reply_to_id: 0,
                     reactions: Vec::new(),
+                    attachments: Vec::new(),
                 }),
                 nonce: 0,
             })),

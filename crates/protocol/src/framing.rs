@@ -167,6 +167,7 @@ mod tests {
                 channel_id: 1,
                 content: "x".repeat(MAX_FRAME_BYTES + 1),
                 reply_to_id: 0,
+                attachment_ids: Vec::new(),
             }),
         );
         let mut buf = BytesMut::new();

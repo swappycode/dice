@@ -21,6 +21,7 @@
 //! | `DICE_TLS_KEY`         | `dev/certs/server.key`        | TLS key PEM (auto-generated when missing) |
 //! | `DICE_JWT_PRIVATE_PEM` | `dev/keys/jwt_ed25519.pem`    | Ed25519 PKCS#8 (auto-generated when missing) |
 //! | `DICE_JWT_PUBLIC_PEM`  | `dev/keys/jwt_ed25519.pub.pem`| Ed25519 SPKI (auto-generated when missing) |
+//! | `DICE_MEDIA_DIR`       | `data/media`                  | local-fs object store for attachments (created on first upload) |
 //! | `RUST_LOG`             | `info,dice=debug`             | tracing filter (read by `dice-logging`) |
 //! | `DICE_LOG_JSON`        | unset                         | `1` ⇒ NDJSON logs (read by `dice-logging`) |
 
@@ -53,6 +54,8 @@ pub struct MonolithConfig {
     pub tls_key: PathBuf,
     pub jwt_private_pem: PathBuf,
     pub jwt_public_pem: PathBuf,
+    /// Local-fs object store root for media-service (attachments).
+    pub media_dir: PathBuf,
 }
 
 impl MonolithConfig {
@@ -79,6 +82,7 @@ impl MonolithConfig {
             tls_key: path_or("DICE_TLS_KEY", "dev/certs/server.key"),
             jwt_private_pem: path_or("DICE_JWT_PRIVATE_PEM", "dev/keys/jwt_ed25519.pem"),
             jwt_public_pem: path_or("DICE_JWT_PUBLIC_PEM", "dev/keys/jwt_ed25519.pub.pem"),
+            media_dir: path_or("DICE_MEDIA_DIR", "data/media"),
         })
     }
 

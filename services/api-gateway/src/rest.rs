@@ -14,25 +14,31 @@ use std::sync::Arc;
 
 use auth_service::AuthError;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{FromRequest, Path, RawQuery, Request, State};
-use axum::http::{StatusCode, header};
+use axum::extract::{DefaultBodyLimit, FromRequest, Path, RawQuery, Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bytes::Bytes;
 use chat_service::HistoryCursor;
-use dice_common::id::{ChannelId, GuildId, UserId};
+use dice_common::id::{ChannelId, GuildId, MediaId, UserId};
 use dice_network_core::server::{FramedTransport, PeerAddr};
 use dice_protocol::MAX_FRAME_BYTES;
 use dice_protocol::v1::{self, ErrorCode};
+use media_service::{MAX_MEDIA_BYTES, MediaError};
 use prost::Message;
 
 use crate::dispatch::chat_error_code;
 use crate::ws::WsTransport;
 use crate::{Gateway, session};
 
-/// Request-body cap (1 MiB).
+/// Request-body cap (1 MiB) for the protobuf REST surface + the realtime path.
 pub(crate) const BODY_LIMIT: usize = 1024 * 1024;
+
+/// Upload-body cap for `POST /v1/media` — the binary path, deliberately larger
+/// than [`BODY_LIMIT`]. Sized to the media-service per-object cap plus protobuf
+/// framing slack (filename/content_type + field headers).
+pub(crate) const MEDIA_BODY_LIMIT: usize = MAX_MEDIA_BYTES + 64 * 1024;
 
 const PROTOBUF: &str = "application/x-protobuf";
 
@@ -54,9 +60,26 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/guilds/join", post(join_guild))
         .route("/v1/channels", post(create_channel))
         .route("/v1/dms", post(open_dm))
+        // Download is a GET (no request body), so it rides the 1 MiB limit fine.
+        .route("/v1/media/{media_id}", get(serve_media))
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&gw),
             bearer_auth,
+        ));
+
+    // Upload is binary and gets its OWN, larger body limit (≠ the 1 MiB cap on
+    // everything else). Merged AFTER the 1 MiB layer below so it is not also
+    // capped to 1 MiB; both the extractor (`DefaultBodyLimit`) and the tower
+    // limit layer are raised to `MEDIA_BODY_LIMIT`.
+    let media_upload = axum::Router::new()
+        .route("/v1/media", post(upload_media))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&gw),
+            bearer_auth,
+        ))
+        .layer(DefaultBodyLimit::max(MEDIA_BODY_LIMIT))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(
+            MEDIA_BODY_LIMIT,
         ));
 
     public
@@ -64,6 +87,7 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         // Last layer added = outermost: the 413 rewriter sees the limit
         // layer's short-circuit response and turns it into a proto Error.
         .layer(tower_http::limit::RequestBodyLimitLayer::new(BODY_LIMIT))
+        .merge(media_upload)
         .layer(axum::middleware::from_fn(proto_payload_too_large))
         .with_state(gw)
 }
@@ -77,7 +101,7 @@ async fn proto_payload_too_large(req: Request, next: Next) -> Response {
         .get(header::CONTENT_TYPE)
         .is_some_and(|ct| ct.as_bytes() == PROTOBUF.as_bytes());
     if response.status() == StatusCode::PAYLOAD_TOO_LARGE && !already_proto {
-        return error_response(ErrorCode::PayloadTooLarge, "body exceeds 1 MiB", 0);
+        return error_response(ErrorCode::PayloadTooLarge, "request body too large", 0);
     }
     response
 }
@@ -143,6 +167,24 @@ fn map_chat_error(error: chat_service::ChatError) -> Response {
     error_response(code, error.to_string(), 0)
 }
 
+fn map_media_error(error: MediaError) -> Response {
+    match error {
+        MediaError::NotFound => error_response(ErrorCode::NotFound, "media not found", 0),
+        MediaError::TooLarge { max } => error_response(
+            ErrorCode::PayloadTooLarge,
+            format!("file exceeds {max} bytes"),
+            0,
+        ),
+        MediaError::InvalidArgument(message) => {
+            error_response(ErrorCode::InvalidArgument, message, 0)
+        }
+        MediaError::Internal(source) => {
+            tracing::error!(error = %source, "media call failed");
+            error_response(ErrorCode::Internal, "internal error", 0)
+        }
+    }
+}
+
 /// Protobuf body extractor: decodes `T` from the (1 MiB-capped) body.
 /// Rejections are already protobuf `dice.v1.Error` responses.
 pub(crate) struct Proto<T>(pub T);
@@ -157,7 +199,7 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let bytes = Bytes::from_request(req, state).await.map_err(|rejection| {
             if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                error_response(ErrorCode::PayloadTooLarge, "body exceeds 1 MiB", 0)
+                error_response(ErrorCode::PayloadTooLarge, "request body too large", 0)
             } else {
                 error_response(ErrorCode::InvalidArgument, "unreadable request body", 0)
             }
@@ -331,6 +373,64 @@ async fn open_dm(
     {
         Ok(channel) => proto_response(StatusCode::OK, &channel),
         Err(error) => map_chat_error(error),
+    }
+}
+
+/// `POST /v1/media` (bearer): upload one file (protobuf `UploadMediaRequest`
+/// body under [`MEDIA_BODY_LIMIT`]). Returns the stored `Attachment`, whose id
+/// the client then references in `SendMessageRequest.attachment_ids`.
+async fn upload_media(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::UploadMediaRequest>,
+) -> Response {
+    let v1::UploadMediaRequest {
+        filename,
+        content_type,
+        data,
+    } = req;
+    match gw
+        .deps
+        .media
+        .upload(user, &filename, &content_type, data)
+        .await
+    {
+        Ok(obj) => proto_response(
+            StatusCode::OK,
+            &v1::UploadMediaResponse {
+                attachment: Some(obj.to_attachment()),
+            },
+        ),
+        Err(error) => map_media_error(error),
+    }
+}
+
+/// `GET /v1/media/{id}` (bearer): stream the stored bytes with their MIME type.
+/// Auth is enforced by the route's bearer middleware; any authenticated user
+/// may fetch by the (unguessable snowflake) id. A channel-scoped ACL — only
+/// members of a channel the media is attached to — is a future hardening.
+async fn serve_media(State(gw): State<Arc<Gateway>>, Path(media_id): Path<String>) -> Response {
+    let Ok(id) = media_id.parse::<MediaId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid media id", 0);
+    };
+    match gw.deps.media.read(id).await {
+        Ok((obj, bytes)) => {
+            let content_type = HeaderValue::from_str(&obj.content_type)
+                .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (
+                        header::CACHE_CONTROL,
+                        HeaderValue::from_static("private, max-age=31536000, immutable"),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(error) => map_media_error(error),
     }
 }
 

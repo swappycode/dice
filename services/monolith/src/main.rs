@@ -26,6 +26,7 @@ use dice_cache::RateLimiter;
 use dice_common::SnowflakeGenerator;
 use dice_common::shutdown::Shutdown;
 use dice_protocol::{HEARTBEAT_INTERVAL_MS, RESUME_WINDOW_MS};
+use media_service::{LocalFsStore, MediaService};
 use presence_service::PresenceService;
 
 use crate::config::MonolithConfig;
@@ -77,6 +78,11 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
             bus.clone(),
         )),
         chat: Arc::new(ChatService::new(pool.clone(), bus.clone(), ids.clone())),
+        media: Arc::new(MediaService::new(
+            pool.clone(),
+            Arc::new(LocalFsStore::new(cfg.media_dir.clone())),
+            ids.clone(),
+        )),
         presence: Arc::new(PresenceService::new(
             cache.clone(),
             bus.clone(),

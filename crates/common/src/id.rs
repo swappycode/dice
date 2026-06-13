@@ -99,7 +99,9 @@ macro_rules! typed_id {
     )+};
 }
 
-typed_id!(UserId, GuildId, ChannelId, MessageId, SessionId, EventId);
+typed_id!(
+    UserId, GuildId, ChannelId, MessageId, SessionId, EventId, MediaId
+);
 
 /// Lock-free generator: one `AtomicU64` packed as `(dice_ts << 12) | seq`.
 ///

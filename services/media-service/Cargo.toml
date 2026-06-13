@@ -1,0 +1,21 @@
+[package]
+name = "media-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dice-common = { workspace = true }
+dice-protocol = { workspace = true }
+dice-database = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+imagesize = { workspace = true }
+
+[lints]
+workspace = true

@@ -117,6 +117,17 @@ async fn spawn_env(tag: &str) -> Env {
             bus.clone(),
         )),
         chat: Arc::new(ChatService::new(pool.clone(), bus.clone(), ids.clone())),
+        media: Arc::new(media_service::MediaService::new(
+            pool.clone(),
+            Arc::new(media_service::LocalFsStore::new(std::env::temp_dir().join(
+                format!(
+                    "dice-gw-media-{}-{}",
+                    std::process::id(),
+                    COUNTER.fetch_add(1, Ordering::Relaxed)
+                ),
+            ))),
+            ids.clone(),
+        )),
         presence: Arc::new(PresenceService::new(
             cache.clone(),
             bus.clone(),
@@ -473,6 +484,7 @@ async fn wss_end_to_end_gate_rehearsal() {
             channel_id: general.id,
             content: "first message".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
         }),
     ))
     .await;
@@ -618,6 +630,7 @@ async fn wss_end_to_end_gate_rehearsal() {
             channel_id: general.id,
             content: "while you were away".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
         }),
     ))
     .await;

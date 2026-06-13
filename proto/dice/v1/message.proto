@@ -6,8 +6,23 @@ import "dice/v1/common.proto";
 
 message SendMessageRequest {
   fixed64 channel_id = 1;
-  string content = 2;        // 1..4000 chars after trim
+  string content = 2;        // 1..4000 chars after trim (may be empty if attachments)
   fixed64 reply_to_id = 3;   // 0 = not a reply
+  repeated fixed64 attachment_ids = 4; // pre-uploaded media to attach (≤10), in display order
+}
+
+// Attachment upload (M2): protobuf body to POST /v1/media (bearer). The whole
+// file rides one protobuf message — consistent with the rest of the REST
+// surface — under a larger body limit than the 1 MiB realtime cap. The reply
+// echoes the stored Attachment metadata; the id is then referenced in
+// SendMessageRequest.attachment_ids.
+message UploadMediaRequest {
+  string filename = 1;       // original name; server keeps the basename only
+  string content_type = 2;   // client-declared MIME; server validates/sniffs
+  bytes data = 3;            // raw file bytes
+}
+message UploadMediaResponse {
+  Attachment attachment = 1;
 }
 
 // Reactions (M2): toggle one emoji on one message.

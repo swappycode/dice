@@ -14,10 +14,11 @@ members = [
   "services/api-gateway",
   "services/auth-service",
   "services/chat-service",
+  "services/media-service",
   "services/presence-service",
   "services/monolith",
 ]
-# services/* is deliberately NOT a glob: placeholder dirs (voice/media/notification/search)
+# services/* is deliberately NOT a glob: placeholder dirs (voice/notification/search)
 # hold only a README and must not be parsed as packages. Do not "tidy" this.
 exclude = ["apps/desktop-client/src-tauri"]
 
@@ -42,6 +43,7 @@ dice-metrics      = { path = "crates/metrics" }
 api-gateway       = { path = "services/api-gateway" }
 auth-service      = { path = "services/auth-service" }
 chat-service      = { path = "services/chat-service" }
+media-service     = { path = "services/media-service" }
 presence-service  = { path = "services/presence-service" }
 
 # ---- async runtime ----
@@ -73,6 +75,10 @@ url               = "2"
 prost               = "0.14"
 prost-build         = "0.14"
 protoc-bin-vendored = "3"
+
+# ---- media ----
+# Header-only image dimension probe (pure Rust; no aws-lc, no image decode).
+imagesize = "0.14"
 
 # ---- data ----
 sqlx  = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "macros", "migrate", "time"] }

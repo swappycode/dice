@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use chat_service::ChatError;
-use dice_common::id::{ChannelId, MessageId};
+use dice_common::id::{ChannelId, MediaId, MessageId};
 use dice_network_core::server::FramedTransport;
 use dice_protocol::v1::frame::Payload;
 use dice_protocol::v1::{self, ErrorCode, Frame};
@@ -137,6 +137,11 @@ pub(crate) async fn handle(
                 return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
             }
             let reply_to = (req.reply_to_id != 0).then(|| MessageId::from_raw(req.reply_to_id));
+            let attachments: Vec<MediaId> = req
+                .attachment_ids
+                .iter()
+                .map(|id| MediaId::from_raw(*id))
+                .collect();
             let result = gw
                 .deps
                 .chat
@@ -145,6 +150,7 @@ pub(crate) async fn handle(
                     ChannelId::from_raw(req.channel_id),
                     req.content,
                     reply_to,
+                    attachments,
                     nonce,
                 )
                 .await;

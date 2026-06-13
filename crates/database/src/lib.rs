@@ -79,8 +79,8 @@ mod tests {
         let versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
         assert_eq!(
             versions.len(),
-            6,
-            "expected 6 embedded migrations (M1 4 + M2 replies/reactions), got {versions:?}"
+            7,
+            "expected 7 embedded migrations (M1 4 + M2 replies/reactions/attachments), got {versions:?}"
         );
         assert!(
             versions.windows(2).all(|w| w[0] < w[1]),
@@ -99,7 +99,8 @@ mod tests {
                 "guilds channels",
                 "messages",
                 "replies",
-                "reactions"
+                "reactions",
+                "attachments"
             ]
         );
     }
@@ -130,6 +131,8 @@ mod tests {
             "channel_recipients",
             "messages",
             "message_reactions",
+            "media",
+            "message_attachments",
         ]
         .iter()
         .map(|s| (*s).to_owned())
@@ -144,6 +147,6 @@ mod tests {
         .await
         .expect("query information_schema");
 
-        assert_eq!(present, 8, "all 8 M1 tables must exist after migrate()");
+        assert_eq!(present, 11, "all 11 tables must exist after migrate()");
     }
 }

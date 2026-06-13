@@ -970,6 +970,8 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
                 channel_id: *channel_id,
                 content: content.clone(),
                 reply_to_id: *reply_to_id,
+                // Wired through to the Command in the client-host change.
+                attachment_ids: Vec::new(),
             }),
         )),
         Command::AddReaction {

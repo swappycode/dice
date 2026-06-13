@@ -113,6 +113,13 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
             bus.clone(),
         )),
         chat: Arc::new(ChatService::new(pool.clone(), bus.clone(), ids.clone())),
+        media: Arc::new(media_service::MediaService::new(
+            pool.clone(),
+            Arc::new(media_service::LocalFsStore::new(
+                std::env::temp_dir().join(format!("dice-client-e2e-media-{}", std::process::id())),
+            )),
+            ids.clone(),
+        )),
         presence: Arc::new(PresenceService::new(
             cache.clone(),
             bus.clone(),

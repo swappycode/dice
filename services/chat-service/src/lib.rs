@@ -6,7 +6,7 @@
 //! AFTER the DB transaction commits (M1 accepts the commit→publish gap;
 //! clients heal via resume + REST backfill).
 
-use dice_common::{ChannelId, GuildId, MessageId, UserId};
+use dice_common::{ChannelId, GuildId, MediaId, MessageId, UserId};
 use dice_permissions::MissingPermissions;
 use dice_protocol::v1;
 
@@ -61,14 +61,18 @@ pub trait Chat: Send + Sync {
     async fn sync_user_state(&self, user: UserId) -> Result<UserSyncState, ChatError>;
 
     /// Persists and publishes `MessageCreate{message, nonce}` to the channel's
-    /// subject. `reply_to` (when set) is stored as `reply_to_id`. Returns the
-    /// message for the gateway's `SendMessageAck`.
+    /// subject. `reply_to` (when set) is stored as `reply_to_id`. `attachments`
+    /// are pre-uploaded media ids (media-service), claimed one-shot in the send
+    /// transaction (each must be owned by `actor` and unused). Content may be
+    /// empty iff there is at least one attachment. Returns the message (with its
+    /// resolved attachments) for the gateway's `SendMessageAck`.
     async fn send_message(
         &self,
         actor: UserId,
         channel: ChannelId,
         content: String,
         reply_to: Option<MessageId>,
+        attachments: Vec<MediaId>,
         nonce: u64,
     ) -> Result<v1::Message, ChatError>;
 

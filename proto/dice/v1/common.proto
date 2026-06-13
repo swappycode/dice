@@ -46,10 +46,23 @@ message Message {
   fixed64 id = 1;                // created_at derives from the snowflake
   fixed64 channel_id = 2;
   fixed64 author_id = 3;
-  string content = 4;
+  string content = 4;            // may be empty when attachments are present
   uint64 edited_at_ms = 5;       // 0 = never edited
   fixed64 reply_to_id = 6;       // 0 = not a reply; parent may have been deleted
   repeated Reaction reactions = 7; // aggregated for the requesting user (history/Ready)
+  repeated Attachment attachments = 8; // media attached at send time (history/Ready/create)
+}
+
+// A file attached to a message. The bytes live in the media store; clients
+// fetch them from `GET /v1/media/{id}`. `width`/`height` are 0 for non-images
+// (carried so the message list can reserve layout space before the image loads).
+message Attachment {
+  fixed64 id = 1;                // snowflake; also the media-store object key
+  string filename = 2;          // original (basename only), 1..255 chars
+  string content_type = 3;      // MIME, validated at upload
+  uint64 size_bytes = 4;
+  uint32 width = 5;             // 0 if not an image
+  uint32 height = 6;            // 0 if not an image
 }
 
 // One emoji's aggregate on a message, from the requesting user's perspective.

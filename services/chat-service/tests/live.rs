@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use chat_service::{Chat, ChatError, ChatService, HistoryCursor};
-use dice_common::{ChannelId, GuildId, MessageId, SnowflakeGenerator, UserId};
+use dice_common::{ChannelId, GuildId, MediaId, MessageId, SnowflakeGenerator, UserId};
 use dice_event_bus::{BusConfig, BusEvent, BusSubscription, EventBus, Subject};
 use dice_permissions::{DEFAULT_EVERYONE, Permissions};
 use dice_protocol::internal::v1::bus_event;
@@ -96,6 +96,35 @@ async fn new_user(pool: &PgPool) -> UserId {
         id.as_i64(),
         name,
         format!("{name}@test.dice")
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// Insert a `media` row directly (the chat tests don't run media-service; they
+/// just need pre-existing media to reference at send time).
+async fn insert_media(
+    pool: &PgPool,
+    uploader: UserId,
+    filename: &str,
+    content_type: &str,
+    size: i64,
+    width: i32,
+    height: i32,
+) -> MediaId {
+    let id = MediaId::from(ids().generate());
+    sqlx::query!(
+        "INSERT INTO media (id, uploader_id, filename, content_type, size_bytes, width, height) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        id.as_i64(),
+        uploader.as_i64(),
+        filename,
+        content_type,
+        size,
+        width,
+        height
     )
     .execute(pool)
     .await
@@ -258,7 +287,7 @@ async fn send_message_dispatches_with_nonce_and_updates_last_message_id() {
     let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, general, "  hello dice  ".into(), None, 42)
+        .send_message(a, general, "  hello dice  ".into(), None, vec![], 42)
         .await
         .unwrap();
     assert_eq!(msg.content, "hello dice", "content is trimmed");
@@ -298,7 +327,7 @@ async fn send_message_requires_membership_and_send_permission() {
     // Non-member.
     let err = ctx
         .svc
-        .send_message(b, general, "hi".into(), None, 1)
+        .send_message(b, general, "hi".into(), None, vec![], 1)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotAMember), "{err:?}");
@@ -306,7 +335,7 @@ async fn send_message_requires_membership_and_send_permission() {
     // Unknown channel (snowflakes are never 1).
     let err = ctx
         .svc
-        .send_message(a, ChannelId::from_raw(1), "hi".into(), None, 1)
+        .send_message(a, ChannelId::from_raw(1), "hi".into(), None, vec![], 1)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotFound), "{err:?}");
@@ -324,7 +353,7 @@ async fn send_message_requires_membership_and_send_permission() {
     .unwrap();
     match ctx
         .svc
-        .send_message(b, general, "hi".into(), None, 1)
+        .send_message(b, general, "hi".into(), None, vec![], 1)
         .await
         .unwrap_err()
     {
@@ -336,7 +365,7 @@ async fn send_message_requires_membership_and_send_permission() {
 
     // The owner always passes (compute() owner override).
     ctx.svc
-        .send_message(a, general, "owner ok".into(), None, 2)
+        .send_message(a, general, "owner ok".into(), None, vec![], 2)
         .await
         .unwrap();
 
@@ -353,7 +382,7 @@ async fn edit_message_is_author_only_and_publishes_update() {
     ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, ch, "typo heer".into(), None, 1)
+        .send_message(a, ch, "typo heer".into(), None, vec![], 1)
         .await
         .unwrap();
 
@@ -413,7 +442,7 @@ async fn delete_message_allows_author_or_manage_messages() {
     // A plain member cannot delete someone else's message.
     let m1 = ctx
         .svc
-        .send_message(a, ch, "a-one".into(), None, 1)
+        .send_message(a, ch, "a-one".into(), None, vec![], 1)
         .await
         .unwrap();
     let err = ctx
@@ -447,7 +476,7 @@ async fn delete_message_allows_author_or_manage_messages() {
     // A moderator with MANAGE_MESSAGES deletes another user's message.
     let m2 = ctx
         .svc
-        .send_message(a, ch, "a-two".into(), None, 2)
+        .send_message(a, ch, "a-two".into(), None, vec![], 2)
         .await
         .unwrap();
     sqlx::query!(
@@ -475,7 +504,7 @@ async fn reply_to_id_round_trips_through_history() {
     let ch = ChannelId::from_raw(guild.channels[0].id);
     let parent = ctx
         .svc
-        .send_message(a, ch, "original".into(), None, 1)
+        .send_message(a, ch, "original".into(), None, vec![], 1)
         .await
         .unwrap();
     let reply = ctx
@@ -485,6 +514,7 @@ async fn reply_to_id_round_trips_through_history() {
             ch,
             "a reply".into(),
             Some(MessageId::from_raw(parent.id)),
+            vec![],
             2,
         )
         .await
@@ -519,7 +549,7 @@ async fn reactions_aggregate_in_history_and_broadcast_deltas() {
     ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, ch, "react to me".into(), None, 1)
+        .send_message(a, ch, "react to me".into(), None, vec![], 1)
         .await
         .unwrap();
     let mid = MessageId::from_raw(msg.id);
@@ -592,6 +622,79 @@ async fn reactions_aggregate_in_history_and_broadcast_deltas() {
 }
 
 #[tokio::test]
+async fn attachments_claim_validate_ownership_and_round_trip() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let guild = ctx.svc.create_guild(a, "att-test".into()).await.unwrap();
+    let ch = ChannelId::from_raw(guild.channels[0].id);
+
+    let m_a1 = insert_media(&ctx.pool, a, "one.png", "image/png", 10, 4, 2).await;
+    let m_a2 = insert_media(&ctx.pool, a, "two.txt", "text/plain", 5, 0, 0).await;
+    let m_b = insert_media(&ctx.pool, b, "theirs.png", "image/png", 3, 1, 1).await;
+
+    // Another user's media, an unknown id, and (later) a re-used id all reject.
+    let err = ctx
+        .svc
+        .send_message(a, ch, "x".into(), None, vec![m_b], 1)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");
+    let err = ctx
+        .svc
+        .send_message(a, ch, "x".into(), None, vec![MediaId::from_raw(1)], 1)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");
+
+    // Attachment-only message (empty content), two attachments, order preserved.
+    let msg = ctx
+        .svc
+        .send_message(a, ch, "   ".into(), None, vec![m_a1, m_a2], 2)
+        .await
+        .unwrap();
+    assert_eq!(msg.content, "", "empty content allowed with attachments");
+    assert_eq!(msg.attachments.len(), 2);
+    assert_eq!(msg.attachments[0].id, m_a1.raw());
+    assert_eq!(msg.attachments[0].filename, "one.png");
+    assert_eq!(
+        (msg.attachments[0].width, msg.attachments[0].height),
+        (4, 2)
+    );
+    assert_eq!(msg.attachments[1].id, m_a2.raw());
+
+    // One-shot: a claimed media id cannot be attached again.
+    let err = ctx
+        .svc
+        .send_message(a, ch, "again".into(), None, vec![m_a1], 3)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");
+
+    // History round-trips the attachments in order.
+    let page = ctx
+        .svc
+        .get_messages(a, ch, HistoryCursor::Latest, 10)
+        .await
+        .unwrap();
+    let got = page.iter().find(|m| m.id == msg.id).unwrap();
+    assert_eq!(
+        got.attachments.iter().map(|x| x.id).collect::<Vec<_>>(),
+        vec![m_a1.raw(), m_a2.raw()],
+        "history preserves attachment order"
+    );
+
+    // Empty content with NO attachments is still rejected.
+    let err = ctx
+        .svc
+        .send_message(a, ch, "   ".into(), None, vec![], 4)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn get_messages_keyset_pagination_newest_first() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);
@@ -602,7 +705,7 @@ async fn get_messages_keyset_pagination_newest_first() {
     for i in 0..15u64 {
         sent.push(
             ctx.svc
-                .send_message(a, ch, format!("m{i}"), None, i)
+                .send_message(a, ch, format!("m{i}"), None, vec![], i)
                 .await
                 .unwrap(),
         );
@@ -718,7 +821,7 @@ async fn open_dm_is_idempotent_and_notifies_both_users() {
     let dch = ChannelId::from_raw(dm.id);
     let err = ctx
         .svc
-        .send_message(c, dch, "intrude".into(), None, 1)
+        .send_message(c, dch, "intrude".into(), None, vec![], 1)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotAMember), "{err:?}");
@@ -726,7 +829,7 @@ async fn open_dm_is_idempotent_and_notifies_both_users() {
     let mut dm_sub = ctx.bus.subscribe(Subject::DmMsg(dch)).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, dch, "dm hello".into(), None, 9)
+        .send_message(a, dch, "dm hello".into(), None, vec![], 9)
         .await
         .unwrap();
     let ev = next_event(&mut dm_sub).await;
@@ -848,7 +951,7 @@ async fn message_content_length_is_validated() {
     for bad in ["", "   \n\t ", too_long.as_str()] {
         let err = ctx
             .svc
-            .send_message(a, ch, bad.to_owned(), None, 1)
+            .send_message(a, ch, bad.to_owned(), None, vec![], 1)
             .await
             .unwrap_err();
         assert!(
@@ -860,13 +963,17 @@ async fn message_content_length_is_validated() {
 
     // Exactly 4000 CHARS (multi-byte) passes validation AND the DB CHECK.
     let content = "é".repeat(4000);
-    let msg = ctx.svc.send_message(a, ch, content, None, 5).await.unwrap();
+    let msg = ctx
+        .svc
+        .send_message(a, ch, content, None, vec![], 5)
+        .await
+        .unwrap();
     assert_eq!(msg.content.chars().count(), 4000);
 
     // Validation fires before channel resolution.
     let err = ctx
         .svc
-        .send_message(a, ChannelId::from_raw(1), "y".repeat(4001), None, 5)
+        .send_message(a, ChannelId::from_raw(1), "y".repeat(4001), None, vec![], 5)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");

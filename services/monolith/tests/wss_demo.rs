@@ -126,6 +126,13 @@ async fn spawn_env(tag: &str) -> Env {
             bus.clone(),
         )),
         chat: Arc::new(ChatService::new(pool.clone(), bus.clone(), ids.clone())),
+        media: Arc::new(media_service::MediaService::new(
+            pool.clone(),
+            Arc::new(media_service::LocalFsStore::new(
+                std::env::temp_dir().join(format!("dice-mono-media-{}", std::process::id())),
+            )),
+            ids.clone(),
+        )),
         presence: Arc::new(PresenceService::new(
             cache.clone(),
             bus.clone(),
@@ -470,6 +477,7 @@ async fn journey() {
                 channel_id: general.id,
                 content: "hello bob".into(),
                 reply_to_id: 0,
+                attachment_ids: Vec::new(),
             }),
         ))
         .await;
@@ -552,6 +560,7 @@ async fn journey() {
             channel_id: dm.id,
             content: "psst, alice".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
         }),
     ))
     .await;
@@ -615,6 +624,7 @@ async fn journey() {
             channel_id: general.id,
             content: "while you were away".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
         }),
     ))
     .await;
