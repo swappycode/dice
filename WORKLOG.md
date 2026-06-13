@@ -7,6 +7,51 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M2 (9/n): UI funk + theme pack + chime/toast + split-mode RPC — **M2 COMPLETE**
+
+**Branch:** `main`. Four commits (items 12–15). Full `just check` green (two new live RPC tests over
+real NATS), host clippy + tests (15 lib + 2 host_gate), frontend `tsc` + vite (CSS 48 KB). New host
+dep `tauri-plugin-notification`; new proto `dice/internal/v1/rpc.proto`. **This closes Milestone 2.**
+
+**12 — UI retro-funk pass.** The shared recipes now ease the bevel/ring/gloss changes in on hover/press
+(one-shot `var(--t-fast)`, killed under `prefers-reduced-motion`) instead of snapping, and the default
+action blooms a held accent glow on keyboard focus (the XP/Aqua "throb", no loop). All token-driven, so
+every theme inherits it. (Deliberately light + safe — no visual-feedback loop available; the deferred
+"unread divider line" stays deferred: `last_read` isn't exposed to the UI yet, that's its own vertical.)
+
+**13 — theme pack.** Curated **4 of the 6** explored themes (`docs/design/m2-theme-pack.md`) into drop-in
+`[data-theme]` token files — the app's first dark modes: **Midnight** (smoked-glass + ice-cyan; ships an
+additive `.gloss/.glass-panel` cool-down so glass isn't milky), **Nocturne** (charcoal + magenta neon),
+**Bubble** (bright Y2K aqua), **Phosphor** (CRT green + a static scanline veil `.crt-veil` at the app
+root, CSS-gated to Phosphor, killed under perf-mode/idle). `lib/theme.ts` is now data-driven (`THEMES`
+list → StatusBar dropdown + index.html pre-paint honors any stored theme); added a `--z-overlay` layer.
+
+**14 — chime + OS toast.** New messages NOT in the channel you're actively viewing get a synthesized
+two-note Web-Audio chime (`lib/chime.ts`, no asset, 1.5 s throttle) and — when the window is in the
+background — an OS toast via `tauri-plugin-notification` (host `notify` command using the plugin's Rust
+API; no extra npm dep). The ipc seam gains `notify()` (mock no-ops); the dispatcher gates both so a
+message in the focused, active channel stays silent.
+
+**15 — split-mode NATS RPC (LAST).** `dice-event-bus::rpc`: a generic request-reply layer —
+`dice.rpc.{service}.{method}`, queue group = service name (free load-balancing), reply framed by a
+hand-rolled 1-byte ok/fault tag (no envelope proto), method payloads protobuf. `RpcClient::{call,serve}`
++ `RpcFault` (service-defined code the client stub maps back to a typed error). **Presence is the first
+service fully over the wire**: `PresenceNatsClient` implements `Presence` via RPC (drops into
+`GatewayDeps.presence` unchanged in a split deploy) and `rpc::serve` runs the responder against any
+`Arc<dyn Presence>` — full `PresenceError` ⇄ code mapping. `rpc.proto` holds the presence payloads;
+Auth/Chat follow the identical pattern (the design's "minimal — demonstrably works split" bar). Two live
+NATS tests: the generic ok/fault round-trip + a complete Presence vertical (unit returns, typed errors,
+snapshot) through a mock `Presence` (no Postgres needed).
+
+**M2 is DONE.** All 15 items shipped: RAM/perf, profile polish, per-IP limiting, hb close code, cache
+hygiene, edit/delete, replies/reactions, attachments, avatars, notifications, read-markers, **auth
+hardening (2FA + verify + reset)**, **UI funk**, **theme pack**, **chime + OS toast**, **split-mode RPC**.
+Carried follow-ups (small, optional, post-M2): orphaned-media GC sweep; the "unread divider line" UI;
+split-mode RPC for Auth/Chat (same pattern as Presence) + the `src/bin/*.rs` split bins; email-verify as
+an enforced login gate; TOTP-secret encryption-at-rest. Next free Frame dispatch # = 117.
+
+---
+
 ## 2026-06-14 — M2 (8/n): auth hardening (TOTP 2FA + email-verify + password-reset)
 
 **Branch:** `main`. Five commits (11a wire+service / 11a login-ui / 11a settings-dialog / 11b
