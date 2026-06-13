@@ -23,7 +23,13 @@ import {
   resetMessages,
 } from "../stores/messages";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
-import { bumpUnread, markChannelRead, resetUnread, setAllUnread } from "../stores/unread";
+import {
+  bumpUnread,
+  clearUnread,
+  markChannelRead,
+  resetUnread,
+  setAllUnread,
+} from "../stores/unread";
 import { currentUser, session, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
 
@@ -60,6 +66,10 @@ function dispatch(ev: DiceEvent): void {
       break;
     case "presenceUpdate":
       setPresenceLocal(ev.userId, ev.status);
+      break;
+    case "readMarkerUpdate":
+      // Another of this user's devices read the channel — clear its badge here.
+      clearUnread(ev.channelId);
       break;
     case "userUpdate":
       applyUserUpdate(ev.user);

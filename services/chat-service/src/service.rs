@@ -770,6 +770,42 @@ impl Chat for ChatService {
         Ok(())
     }
 
+    async fn mark_read(&self, actor: UserId, channel: ChannelId) -> Result<(), ChatError> {
+        // Visibility check (errors NotFound / NotAMember).
+        self.channel_access(actor, channel).await?;
+        // The read marker tracks the channel's current newest message (0 if none).
+        let last = sqlx::query_scalar!(
+            "SELECT last_message_id FROM channels WHERE id = $1",
+            channel.as_i64()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .flatten()
+        .unwrap_or(0);
+        sqlx::query!(
+            "INSERT INTO read_markers (user_id, channel_id, last_read_message_id) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT (user_id, channel_id) DO UPDATE SET \
+                 last_read_message_id = GREATEST(read_markers.last_read_message_id, excluded.last_read_message_id), \
+                 updated_at = now()",
+            actor.as_i64(),
+            channel.as_i64(),
+            last
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        // Broadcast to the user's own subject: other devices clear the badge.
+        let payload = FramePayload::ReadMarkerUpdate(v1::ReadMarkerUpdate {
+            channel_id: channel.raw(),
+            last_read_message_id: last as u64,
+        });
+        let event = self.make_event(0, vec![actor.raw()], false, payload);
+        self.publish(Subject::User(actor), event).await;
+        Ok(())
+    }
+
     async fn set_avatar(
         &self,
         actor: UserId,

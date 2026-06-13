@@ -293,6 +293,11 @@ pub enum DiceEvent {
     #[serde(rename_all = "camelCase")]
     UserUpdate { user: UserDto },
     #[serde(rename_all = "camelCase")]
+    ReadMarkerUpdate {
+        channel_id: String,
+        last_read_message_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
     GuildCreate {
         guild: GuildDto,
         channels: Vec<ChannelDto>,

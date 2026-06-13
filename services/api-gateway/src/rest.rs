@@ -415,9 +415,10 @@ async fn unread_counts(
     proto_response(StatusCode::OK, &v1::UnreadCounts { entries })
 }
 
-/// `POST /v1/channels/{id}/read` (bearer): clear the caller's unread badge for
-/// the channel. 204. (Persistent last-read markers + multi-device sync are the
-/// item-10 follow-up; this clears the count that drives the badge.)
+/// `POST /v1/channels/{id}/read` (bearer): advance the caller's read marker to
+/// the channel's newest message and clear its unread badge. 204. chat-service
+/// persists the marker + broadcasts `ReadMarkerUpdate` (multi-device sync); the
+/// unread counter is cleared here.
 async fn mark_read(
     State(gw): State<Arc<Gateway>>,
     axum::Extension(Authed(user)): axum::Extension<Authed>,
@@ -426,13 +427,15 @@ async fn mark_read(
     let Ok(channel) = channel_id.parse::<ChannelId>() else {
         return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
     };
-    match gw.deps.unread.clear(user, channel).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => {
-            tracing::error!(%error, "unread clear failed");
-            error_response(ErrorCode::Internal, "internal error", 0)
-        }
+    if let Err(error) = gw.deps.chat.mark_read(user, channel).await {
+        return map_chat_error(error);
     }
+    // Marker is persisted + broadcast; a counter-clear hiccup is non-fatal (the
+    // ReadMarkerUpdate dispatch clears the badge on every device regardless).
+    if let Err(error) = gw.deps.unread.clear(user, channel).await {
+        tracing::warn!(%error, "unread clear failed (marker still recorded)");
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// `PUT /v1/users/@me/avatar` (bearer): set or clear the caller's avatar.

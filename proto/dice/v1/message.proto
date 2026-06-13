@@ -88,3 +88,10 @@ message UnreadEntry {
 message UnreadCounts {
   repeated UnreadEntry entries = 1;  // GET /v1/unread; non-zero channels only
 }
+
+// Read-marker advance (M2 item 10). Broadcast to the user's OWN subject so
+// their other devices clear the channel's unread badge in sync.
+message ReadMarkerUpdate {
+  fixed64 channel_id = 1;
+  fixed64 last_read_message_id = 2;
+}

@@ -150,6 +150,12 @@ pub trait Chat: Send + Sync {
     /// Membership check + ephemeral `TypingStart` publish. No DB row, ever.
     async fn typing(&self, actor: UserId, channel: ChannelId) -> Result<(), ChatError>;
 
+    /// Advance the caller's read marker for `channel` to its current last
+    /// message and persist it, then broadcast `ReadMarkerUpdate` to the
+    /// caller's OWN subject so their other devices clear the badge in sync.
+    /// Requires channel visibility (membership).
+    async fn mark_read(&self, actor: UserId, channel: ChannelId) -> Result<(), ChatError>;
+
     /// Set (or clear, `media = None`) the caller's avatar. A non-None media id
     /// must reference an image the caller uploaded. Publishes `UserUpdate` to
     /// the caller's own subject + every guild and DM they share, so peers update

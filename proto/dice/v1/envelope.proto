@@ -63,5 +63,6 @@ message Frame {
     DmChannelCreate dm_channel_create = 113;
     ReactionUpdate reaction_update = 114;
     UserUpdate user_update = 115;
+    ReadMarkerUpdate read_marker_update = 116;
   }
 }

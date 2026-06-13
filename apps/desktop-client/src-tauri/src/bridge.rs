@@ -414,6 +414,18 @@ impl Bridge {
                     );
                 }
             }
+            Payload::ReadMarkerUpdate(rm) => {
+                if let Err(error) = self.cache.apply_event(payload.clone()).await {
+                    tracing::warn!(%error, "read-marker cache write failed");
+                }
+                emit_dice(
+                    &self.emitter,
+                    &DiceEvent::ReadMarkerUpdate {
+                        channel_id: id_str(rm.channel_id),
+                        last_read_message_id: id_str(rm.last_read_message_id),
+                    },
+                );
+            }
             // Cache-only dispatches (no dedicated frontend event in M1).
             _ => {
                 if let Err(error) = self.cache.apply_event(payload).await {

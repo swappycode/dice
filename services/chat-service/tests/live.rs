@@ -695,6 +695,47 @@ async fn attachments_claim_validate_ownership_and_round_trip() {
 }
 
 #[tokio::test]
+async fn mark_read_persists_marker_and_broadcasts_to_self() {
+    let ctx = Ctx::new(3).await;
+    let (a, b, c) = (ctx.users[0], ctx.users[1], ctx.users[2]);
+    let guild = ctx.svc.create_guild(a, "read-test".into()).await.unwrap();
+    let ch = ChannelId::from_raw(guild.channels[0].id);
+    ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
+    let msg = ctx
+        .svc
+        .send_message(a, ch, "hi".into(), None, vec![], 1)
+        .await
+        .unwrap();
+
+    // mark_read broadcasts ReadMarkerUpdate to the reader's OWN subject.
+    let mut self_sub = ctx.bus.subscribe(Subject::User(b)).await.unwrap();
+    ctx.svc.mark_read(b, ch).await.unwrap();
+    let ev = next_event(&mut self_sub).await;
+    let frame::Payload::ReadMarkerUpdate(rm) = dispatch(&ev) else {
+        panic!("expected ReadMarkerUpdate, got {ev:?}");
+    };
+    assert_eq!(rm.channel_id, ch.raw());
+    assert_eq!(rm.last_read_message_id, msg.id, "marker = channel's newest");
+
+    // Persisted.
+    let stored = sqlx::query_scalar!(
+        "SELECT last_read_message_id FROM read_markers WHERE user_id = $1 AND channel_id = $2",
+        b.as_i64(),
+        ch.as_i64()
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, msg.id as i64);
+
+    // A non-member cannot mark the channel read.
+    let err = ctx.svc.mark_read(c, ch).await.unwrap_err();
+    assert!(matches!(err, ChatError::NotAMember), "{err:?}");
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn set_avatar_persists_validates_and_broadcasts_user_update() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);

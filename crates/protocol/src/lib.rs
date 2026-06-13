@@ -125,6 +125,7 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         DmChannelCreate(_) => 113,
         ReactionUpdate(_) => 114,
         UserUpdate(_) => 115,
+        ReadMarkerUpdate(_) => 116,
     }
 }
 

@@ -227,6 +227,15 @@ impl Cache {
                         upsert_user(&tx, user)?;
                     }
                 }
+                Payload::ReadMarkerUpdate(rm) => {
+                    tx.execute(
+                        "INSERT INTO read_markers(channel_id, last_read_message_id) VALUES (?1, ?2)
+                         ON CONFLICT(channel_id) DO UPDATE SET
+                             last_read_message_id =
+                                 max(last_read_message_id, excluded.last_read_message_id)",
+                        params![rm.channel_id as i64, rm.last_read_message_id as i64],
+                    )?;
+                }
                 _ => {}
             }
             tx.commit()
