@@ -7,13 +7,16 @@ import { execSync } from "node:child_process";
 const port = String(process.argv[2] ?? "1420");
 
 function pidsOnWindows() {
-  const out = execSync("netstat -ano -p tcp", { encoding: "utf8" });
-  const pids = new Set();
-  for (const line of out.split(/\r?\n/)) {
-    const m = line.match(/:(\d+)\s+\S+\s+LISTENING\s+(\d+)/i);
-    if (m && m[1] === port) pids.add(m[2]);
-  }
-  return [...pids];
+  // Get-NetTCPConnection sees BOTH IPv4 and IPv6 listeners; vite binds ::1 on
+  // Windows and `netstat -ano -p tcp` only lists IPv4 (so it would miss the
+  // orphan and the port stays held).
+  const ps =
+    `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue` +
+    ` | Select-Object -ExpandProperty OwningProcess -Unique`;
+  const out = execSync(`powershell -NoProfile -NonInteractive -Command "${ps}"`, {
+    encoding: "utf8",
+  });
+  return out.split(/\s+/).filter(Boolean);
 }
 
 function pidsOnUnix() {
