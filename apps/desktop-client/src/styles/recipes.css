@@ -12,6 +12,12 @@
   box-shadow:
     inset 1px 1px 0 var(--c-bevel-hi),
     inset -1px -1px 0 var(--c-bevel-lo);
+  /* One-shot retro feedback: the bevel/ring eases in on hover/press instead of
+     snapping. Motion is killed under prefers-reduced-motion (base.css). */
+  transition:
+    box-shadow var(--t-fast) ease,
+    background-color var(--t-fast) ease,
+    filter var(--t-fast) ease;
 }
 
 .bevel-raised:hover {
@@ -38,6 +44,18 @@
     inset 0 0 0 1px var(--c-default-ring);
 }
 
+/* Default button "throb", as a held one-shot glow (no loop): the accent ring
+   blooms outward when the default action is keyboard-focused. Every theme drives
+   it via --default-ring/--hover-ring, so Aqua/Nocturne/Phosphor all light up. */
+.btn-default:focus-visible {
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo),
+    inset 0 0 0 1px var(--c-default-ring),
+    0 0 0 3px var(--c-hover-ring);
+  outline: none;
+}
+
 /* ---- Sunken field (inputs, content wells) ---- */
 .bevel-sunken {
   border: 1px solid var(--c-bevel-lo);
@@ -59,6 +77,7 @@
   border: 1px solid rgba(0, 40, 80, 0.45);
   border-radius: var(--radius-control);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  transition: filter var(--t-fast) ease;
 }
 
 .gloss:hover {
