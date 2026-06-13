@@ -7,6 +7,32 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (7/n): read-markers sync
+
+**Branch:** `main`. One commit. Full `just check` green (new chat live test), host clippy + tests,
+frontend `tsc` + vite. Migration `0009_read_markers`. Completes the read path started in (6/n).
+
+Re-introduces the M1-cut **server** read-marker. `read_markers (user, channel, last_read_message_id)`.
+`Chat::mark_read` advances the marker to the channel's current newest message (`GREATEST`, so a slow
+device can't regress it) and broadcasts **`ReadMarkerUpdate(116)`** to the caller's OWN subject — the
+multi-device "sync": reading on one device clears the badge on the others. `POST /v1/channels/{id}/read`
+now persists+broadcasts via chat, THEN clears the unread counter (a counter-clear hiccup is non-fatal;
+the dispatch clears every device's badge regardless). The server derives `last_read` from
+`channels.last_message_id`, so the client sends no body.
+
+**Client.** `ReadMarkerUpdate` → cache `read_markers` upsert (the client table was unused since M1) +
+emit; the dispatcher clears the channel's unread badge. Live test: persist + self-broadcast +
+non-member rejected.
+
+**Deferred (small):** an "unread divider line" / jump-to-unread UI from the now-available
+`last_read_message_id` (the data is there; the rendering is a later polish). Item 14 = OS toast +
+chime. Orphaned-media GC still pending.
+
+**M2 done so far:** edit/delete/replies/reactions, attachments, avatars, notifications (unread),
+read-markers sync. Remaining: auth hardening, UI funk pass + theme pack, chime; split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (6/n): notifications (unread via a durable consumer)
 
 **Branch:** `main`. Three commits (notify backend / read+clear endpoints / client badges). Full
