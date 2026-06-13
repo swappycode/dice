@@ -3,11 +3,11 @@ import { ipc } from "../../lib/ipc";
 import type { TotpEnroll } from "../../lib/types";
 import styles from "./SecurityDialog.module.css";
 
-type Mode = "menu" | "enroll" | "recovery" | "disable";
+type Mode = "menu" | "verify" | "enroll" | "recovery" | "disable";
 
-/** Two-factor authentication management: set up (enroll → confirm → recovery
- *  codes) or turn off. The server is the source of truth — invalid operations
- *  (e.g. enrolling when already on) surface as an error here. */
+/** Account security: verify your email, and set up / turn off two-factor. The
+ *  server is the source of truth — invalid operations (e.g. enrolling when
+ *  already on) surface as an error here. */
 export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
   const [mode, setMode] = createSignal<Mode>("menu");
   const [enroll, setEnroll] = createSignal<TotpEnroll | null>(null);
@@ -15,6 +15,7 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
   const [recovery, setRecovery] = createSignal<string[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [notice, setNotice] = createSignal("");
 
   async function beginEnroll(): Promise<void> {
     if (busy()) return;
@@ -60,6 +61,43 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
     }
   }
 
+  async function resendVerification(): Promise<void> {
+    if (busy()) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await ipc.resendVerification();
+      setNotice("Verification email sent — check your inbox for the code.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmVerify(): Promise<void> {
+    if (busy()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await ipc.verifyEmail(code());
+      setNotice("Email verified ✓");
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That code didn't match.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function goto(next: Mode): void {
+    setError("");
+    setNotice("");
+    setCode("");
+    setMode(next);
+  }
+
   function onKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") props.onClose();
   }
@@ -75,7 +113,7 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
         onKeyDown={onKeyDown}
       >
         <header class={styles.titlebar}>
-          <span class={styles.titleText}>Two-factor authentication</span>
+          <span class={styles.titleText}>Account security</span>
           <button
             type="button"
             class={styles.closeBtn}
@@ -88,6 +126,16 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
 
         <div class={styles.body}>
           <Show when={mode() === "menu"}>
+            <p class={styles.lead}>Confirm your email address.</p>
+            <div class={styles.menuRow}>
+              <button
+                type="button"
+                class={`bevel-raised btn-default ${styles.btn}`}
+                onClick={() => goto("verify")}
+              >
+                Verify email
+              </button>
+            </div>
             <p class={styles.lead}>
               Add a second step to your login using an authenticator app (Aegis,
               Google Authenticator, 1Password, …).
@@ -99,19 +147,37 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
                 disabled={busy()}
                 onClick={() => void beginEnroll()}
               >
-                Set up
+                Set up 2FA
               </button>
-              <button
-                type="button"
-                class={`bevel-raised ${styles.btn}`}
-                onClick={() => {
-                  setError("");
-                  setCode("");
-                  setMode("disable");
-                }}
-              >
-                Turn off
+              <button type="button" class={`bevel-raised ${styles.btn}`} onClick={() => goto("disable")}>
+                Turn off 2FA
               </button>
+            </div>
+          </Show>
+
+          <Show when={mode() === "verify"}>
+            <p class={styles.lead}>
+              We email a code at sign-up. Resend it, then paste the code here.
+            </p>
+            <button
+              type="button"
+              class={`bevel-raised ${styles.btn}`}
+              disabled={busy()}
+              onClick={() => void resendVerification()}
+            >
+              Resend email
+            </button>
+            <div class={styles.field}>
+              <label class={styles.fieldLabel} for="email-verify">
+                Verification code
+              </label>
+              <input
+                id="email-verify"
+                class={`bevel-sunken ${styles.input}`}
+                type="text"
+                value={code()}
+                onInput={(e) => setCode(e.currentTarget.value)}
+              />
             </div>
           </Show>
 
@@ -176,6 +242,11 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
             </div>
           </Show>
 
+          <Show when={notice()}>
+            <p class={styles.notice} role="status">
+              {notice()}
+            </p>
+          </Show>
           <Show when={error()}>
             <p class={styles.error} role="alert">
               {error()}
@@ -184,6 +255,16 @@ export const SecurityDialog: Component<{ onClose: () => void }> = (props) => {
         </div>
 
         <footer class={styles.buttons}>
+          <Show when={mode() === "verify"}>
+            <button
+              type="button"
+              class={`bevel-raised btn-default ${styles.btn}`}
+              disabled={busy()}
+              onClick={() => void confirmVerify()}
+            >
+              Verify
+            </button>
+          </Show>
           <Show when={mode() === "enroll"}>
             <button
               type="button"

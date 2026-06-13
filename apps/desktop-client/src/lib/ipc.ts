@@ -43,6 +43,15 @@ export interface DiceIpc {
   /** Disable 2FA (requires a current TOTP or recovery code). */
   totpDisable(code: string): Promise<void>;
 
+  /** Confirm an email address with a mailed verification token. */
+  verifyEmail(token: string): Promise<void>;
+  /** Re-send the verification mail to the signed-in user. */
+  resendVerification(): Promise<void>;
+  /** Request a password-reset mail (always resolves; no account enumeration). */
+  requestPasswordReset(email: string): Promise<void>;
+  /** Set a new password from a reset token (logs all devices out). */
+  resetPassword(token: string, newPassword: string): Promise<void>;
+
   getBootstrap(): Promise<Bootstrap>;
 
   /** Optimistic send: caller generates the nonce, renders a pending row, and

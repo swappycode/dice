@@ -296,6 +296,30 @@ export function createMockIpc(): DiceIpc {
       recoveryCodes = [];
     },
 
+    async verifyEmail(token) {
+      await delay(120);
+      if (!token.trim().startsWith("dvt_")) throw new Error("That code doesn't look right.");
+      // mock: any well-formed token verifies
+    },
+
+    async resendVerification() {
+      await delay(120);
+      // mock: pretend a fresh mail went out
+    },
+
+    async requestPasswordReset(email) {
+      await delay(200);
+      if (!email.includes("@")) throw new Error("Enter a valid e-mail address.");
+      // mock: always "sends" (no enumeration)
+    },
+
+    async resetPassword(token, newPassword) {
+      await delay(200);
+      if (!token.trim().startsWith("drst_")) throw new Error("That reset code doesn't look right.");
+      if (newPassword.length < 8) throw new Error("Password must be at least 8 characters.");
+      // mock: accepts and resolves
+    },
+
     async register(email, username, _password) {
       await delay(300);
       if (!email.includes("@")) throw new Error("Enter a valid e-mail address.");

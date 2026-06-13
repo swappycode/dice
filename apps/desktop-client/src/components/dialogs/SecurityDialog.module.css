@@ -133,6 +133,16 @@
   color: var(--orb-dnd);
 }
 
+.notice {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+  background: var(--c-accent-soft);
+  border: 1px solid var(--c-bevel-lo);
+  border-radius: var(--radius-control);
+}
+
 .buttons {
   display: flex;
   justify-content: flex-end;

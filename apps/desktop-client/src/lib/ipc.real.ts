@@ -72,6 +72,10 @@ export function createTauriIpc(): DiceIpc {
     totpEnroll: () => call<TotpEnroll>("totp_enroll"),
     totpConfirm: (code) => call<string[]>("totp_confirm", { code }),
     totpDisable: (code) => call<void>("totp_disable", { code }),
+    verifyEmail: (token) => call<void>("verify_email", { token }),
+    resendVerification: () => call<void>("resend_verification"),
+    requestPasswordReset: (email) => call<void>("request_password_reset", { email }),
+    resetPassword: (token, newPassword) => call<void>("reset_password", { token, newPassword }),
     getBootstrap: () => call<Bootstrap>("get_bootstrap"),
     // The host returns the pending message row; the DiceIpc seam only needs
     // the promise (the UI renders its own optimistic row keyed by nonce).
