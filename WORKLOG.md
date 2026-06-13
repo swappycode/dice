@@ -7,6 +7,51 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (4/n): attachments (media-service + message attachments)
+
+**Branch:** `main`. Three commits (wire+service / client-host / client-ui). Full `just check` green
+(incl. new chat + media live tests), host clippy + tests (15 lib + 2 host_gate), frontend `tsc` +
+vite build (CSS 35 KB), `.sqlx` re-prepared, one new migration (`0007_attachments`).
+
+**Storage seam.** New `media-service` crate (was a placeholder dir). A `MediaStore` trait with a
+`LocalFsStore` dev impl (`DICE_MEDIA_DIR`, default `data/media`, gitignored); the S3/rustls-ring +
+SigV4 backend is the documented seam, **MinIO still deferred** (aws-lc gate forbids `aws-sdk-s3`).
+`MediaService` validates size (8 MiB cap)/filename/MIME, sniffs image `width`/`height` via `imagesize`
+(pure-Rust, header-only — a declared image that won't parse is rejected), writes bytes THEN the
+`media` row. Live tests: round-trip, dimension sniff, reject empty/oversize/corrupt, unknown→NotFound.
+
+**Wire/DB.** `Message.attachments` (+ `Attachment`), `SendMessageRequest.attachment_ids`,
+`UploadMediaRequest/Response`. Migration 0007: `media` + `message_attachments` (junction PK on
+`media_id` ⇒ one-shot use) and **relaxes the messages content CHECK to 0..4000** so attachment-only
+(empty content) messages are valid (the "content OR ≥1 attachment" rule is enforced in chat-service).
+`MediaId` added to dice-common. Adding `attachments` to `Message` rippled to every `v1::Message{}`
+literal across services + both client workspaces + all SendMessageRequest test literals.
+
+**Service.** `send_message` claims attachments one-shot in the send tx (each must be owned by the
+sender AND unused — a count-mismatch rejects foreign/used/duplicate ids); history joins attachments in
+display order. Live test covers ownership, one-shot, empty-content-with-attachment, order round-trip.
+
+**Transport.** Upload is a separate bearer `POST /v1/media` with its OWN larger body-limit layer
+(8 MiB + slack, ≠ the 1 MiB realtime/REST cap) — protobuf body, no multipart dep. Download is bearer
+`GET /v1/media/{id}` streaming the bytes + MIME. Channel-scoped download ACL is a future hardening
+(any authed user may fetch by the unguessable snowflake id today).
+
+**Client.** network-core `ApiClient::upload_media`/`download_media`; `Command::SendMessage` carries
+attachment_ids. Host: `upload_attachment` (base64 in → store) + `fetch_attachment` (→ `data:` URL;
+base64 keeps it compact over IPC, bounded by the cap — a streaming `dice-media:` URI scheme is a
+future optimisation). Cache v3 `message_attachments` table, stored from authoritative messages
+(create/echo/snapshot) but NOT on edit (preserve, like reply/reactions), joined on read. **Bonus fix:**
+`clear_all` now also purges `message_reactions` + `message_attachments` on logout/account-switch
+(reactions were previously left behind). UI: a 📎 button stages removable upload chips; images render
+inline (dims reserve layout space, click → full size), other files as download chips; mock keeps
+browser demos working via object URLs.
+
+**Chat completeness so far:** edit ✅ delete ✅ replies ✅ reactions ✅ attachments ✅. Remaining M2:
+avatars (re-introduce M1-cut fields on this media infra), notifications, read-markers sync, auth
+hardening, UI funk pass + theme pack, chime; split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (3/n): replies + reactions
 
 **Branch:** `main`. Full `just check` green (incl. the new chat live tests), host clippy + tests,
