@@ -1,7 +1,7 @@
 import { createSignal, Show, type Component } from "solid-js";
 import { runBootstrap } from "../../gateway/dispatcher";
-import { ipc } from "../../lib/ipc";
-import { setSession } from "../../stores/session";
+import { ipc, MOCK_IPC } from "../../lib/ipc";
+import { loginNotice, setLoginNotice, setSession } from "../../stores/session";
 import styles from "./LoginCard.module.css";
 
 /** XP Welcome-screen style login/register card on a full-bleed gradient. */
@@ -20,6 +20,7 @@ export const LoginCard: Component = () => {
     if (busy()) return;
     setBusy(true);
     setError("");
+    setLoginNotice("");
     try {
       const s = isRegister()
         ? await ipc.register(email(), username(), password())
@@ -54,6 +55,11 @@ export const LoginCard: Component = () => {
         </section>
         <section class={styles.formPane}>
           <h2 class={styles.heading}>{isRegister() ? "Create your account" : "Log in to Dice"}</h2>
+          <Show when={loginNotice()}>
+            <p class={styles.notice} role="status">
+              {loginNotice()}
+            </p>
+          </Show>
           <form class={styles.form} onSubmit={(e) => void submit(e)}>
             <label class={styles.label} for="auth-email">
               E-mail
@@ -120,7 +126,7 @@ export const LoginCard: Component = () => {
       <div class={styles.rule} />
       <footer class={styles.foot}>
         <span>Dice — retro chat for the comeback era</span>
-        <span>v0.1.0 (mock mode)</span>
+        <span>v0.1.0{MOCK_IPC ? " (mock mode)" : ""}</span>
       </footer>
     </div>
   );

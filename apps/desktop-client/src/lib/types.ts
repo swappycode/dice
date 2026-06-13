@@ -82,4 +82,5 @@ export type DiceEvent =
   | { type: "presenceUpdate"; userId: string; status: PresenceStatus }
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }
-  | { type: "connState"; state: ConnState; transport?: "quic" | "wss" | null };
+  | { type: "connState"; state: ConnState; transport?: "quic" | "wss" | null }
+  | { type: "sessionExpired" };

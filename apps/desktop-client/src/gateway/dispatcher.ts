@@ -7,10 +7,10 @@
 import { ipc } from "../lib/ipc";
 import type { DiceEvent } from "../lib/types";
 import { setConnState, setTransport } from "../stores/connection";
-import { addDm, addGuild, applyBootstrap } from "../stores/guilds";
-import { applyMessageCreate } from "../stores/messages";
-import { loadPresence, setPresenceLocal } from "../stores/presence";
-import { currentUser } from "../stores/session";
+import { addDm, addGuild, applyBootstrap, resetDirectory } from "../stores/guilds";
+import { applyMessageCreate, resetMessages } from "../stores/messages";
+import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
+import { currentUser, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
 
 function dispatch(ev: DiceEvent): void {
@@ -34,6 +34,17 @@ function dispatch(ev: DiceEvent): void {
     case "connState":
       setConnState(ev.state);
       setTransport(ev.state === "connected" ? (ev.transport ?? null) : null);
+      break;
+    case "sessionExpired":
+      // The host already cleared credentials + cache; drop to login cleanly
+      // instead of stranding the user on an "Offline" shell (Issue 1).
+      resetMessages();
+      resetPresence();
+      resetDirectory();
+      setConnState("idle");
+      setTransport(null);
+      setLoginNotice("Your session expired. Please log in again.");
+      setSession(null);
       break;
   }
 }

@@ -86,6 +86,17 @@
   color: var(--orb-dnd);
 }
 
+/* Informational notice (e.g. "your session expired"). */
+.notice {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+  background: var(--c-accent-soft);
+  border: 1px solid var(--c-bevel-lo);
+  border-radius: var(--radius-control);
+}
+
 .submit {
   margin-top: var(--sp-4);
   height: 26px;
