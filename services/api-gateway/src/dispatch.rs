@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use chat_service::ChatError;
-use dice_common::id::ChannelId;
+use dice_common::id::{ChannelId, MessageId};
 use dice_network_core::server::FramedTransport;
 use dice_protocol::v1::frame::Payload;
 use dice_protocol::v1::{self, ErrorCode, Frame};
@@ -78,7 +78,9 @@ impl TokenBucket {
 pub(crate) fn chat_error_code(error: &ChatError) -> ErrorCode {
     match error {
         ChatError::NotFound | ChatError::InvalidInvite => ErrorCode::NotFound,
-        ChatError::NotAMember | ChatError::PermissionDenied(_) => ErrorCode::PermissionDenied,
+        ChatError::NotAMember | ChatError::PermissionDenied(_) | ChatError::Forbidden(_) => {
+            ErrorCode::PermissionDenied
+        }
         ChatError::InvalidArgument(_) => ErrorCode::InvalidArgument,
         ChatError::Internal(_) => ErrorCode::Internal,
     }
@@ -154,6 +156,48 @@ pub(crate) async fn handle(
                 Err(error) => chat_error_frame(nonce, &error),
             };
             send_or_detach(transport, &reply).await
+        }
+
+        Some(Payload::EditMessage(req)) => {
+            if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
+                return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
+            }
+            // Success is confirmed by the broadcast MessageUpdate dispatch (the
+            // editor is subscribed to the channel subject), so reply only on error.
+            if let Err(error) = gw
+                .deps
+                .chat
+                .edit_message(
+                    st.user,
+                    ChannelId::from_raw(req.channel_id),
+                    MessageId::from_raw(req.message_id),
+                    req.content,
+                )
+                .await
+            {
+                return send_or_detach(transport, &chat_error_frame(nonce, &error)).await;
+            }
+            None
+        }
+
+        Some(Payload::DeleteMessage(req)) => {
+            if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
+                return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
+            }
+            // Confirmed by the broadcast MessageDelete dispatch; reply only on error.
+            if let Err(error) = gw
+                .deps
+                .chat
+                .delete_message(
+                    st.user,
+                    ChannelId::from_raw(req.channel_id),
+                    MessageId::from_raw(req.message_id),
+                )
+                .await
+            {
+                return send_or_detach(transport, &chat_error_frame(nonce, &error)).await;
+            }
+            None
         }
 
         Some(Payload::StartTyping(req)) => {

@@ -104,6 +104,8 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         SendMessage(_) => 30,
         StartTyping(_) => 31,
         UpdatePresence(_) => 32,
+        EditMessage(_) => 33,
+        DeleteMessage(_) => 34,
         SendMessageAck(_) => 50,
         MessageCreate(_) => 100,
         MessageUpdate(_) => 101,

@@ -22,6 +22,10 @@ pub enum ChatError {
     NotAMember,
     #[error("permission denied: {0}")]
     PermissionDenied(#[from] MissingPermissions),
+    /// Action forbidden for a reason not expressible as a permission bit
+    /// (e.g. editing someone else's message — author-only, even for mods).
+    #[error("{0}")]
+    Forbidden(String),
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
     #[error("invalid invite code")]
@@ -74,6 +78,27 @@ pub trait Chat: Send + Sync {
         cursor: HistoryCursor,
         limit: u8,
     ) -> Result<Vec<v1::Message>, ChatError>;
+
+    /// Edits a message's content. AUTHOR-ONLY (mods cannot edit others, even
+    /// with MANAGE_MESSAGES — matches Discord). Sets `edited_at` and publishes
+    /// `MessageUpdate` to the channel subject.
+    async fn edit_message(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+        content: String,
+    ) -> Result<v1::Message, ChatError>;
+
+    /// Deletes a message. The author may delete their own; in a guild channel a
+    /// member with MANAGE_MESSAGES may delete anyone's (DMs are author-only).
+    /// Publishes `MessageDelete` to the channel subject.
+    async fn delete_message(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), ChatError>;
 
     /// Creates the guild AND its `#general` channel in one transaction
     /// (integration critique #24e: there is no create-channel UI in M1).

@@ -39,6 +39,8 @@ message Frame {
     SendMessageRequest send_message = 30;
     StartTypingRequest start_typing = 31;
     UpdatePresenceRequest update_presence = 32;
+    EditMessageRequest edit_message = 33;
+    DeleteMessageRequest delete_message = 34;
     // -- server -> client replies (50-69) --
     SendMessageAck send_message_ack = 50;
     // -- sequenced dispatch events (100+) --

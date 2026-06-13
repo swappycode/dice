@@ -13,12 +13,23 @@ message SendMessageAck {
   Message message = 1;       // Frame.nonce echoes the request
 }
 
+// Edit: author-only. Delete: author, or MANAGE_MESSAGES in a guild channel.
+message EditMessageRequest {
+  fixed64 channel_id = 1;
+  fixed64 message_id = 2;
+  string content = 3;        // 1..4000 chars after trim
+}
+message DeleteMessageRequest {
+  fixed64 channel_id = 1;
+  fixed64 message_id = 2;
+}
+
 message MessageCreate {
   Message message = 1;
   uint64 nonce = 2;          // originating client's nonce; 0 for everyone else's sends
 }
 
-// RESERVED in M1 (no edit/delete UI); frame numbers 101/102 are held for these.
+// Edit broadcasts the full updated Message (edited_at_ms set); delete carries ids only.
 message MessageUpdate { Message message = 1; }
 message MessageDelete {
   fixed64 channel_id = 1;

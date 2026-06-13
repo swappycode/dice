@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use dice_common::time::now_ms;
-use dice_common::{ChannelId, GuildId, SnowflakeGenerator, UserId};
+use dice_common::{ChannelId, GuildId, MessageId, SnowflakeGenerator, UserId};
 use dice_event_bus::{BusEvent, EventBus, Subject};
 use dice_permissions::{DEFAULT_EVERYONE, Permissions, compute};
 use dice_protocol::internal::v1::bus_event::Payload as BusPayload;
@@ -262,16 +262,7 @@ impl Chat for ChatService {
             message: Some(message.clone()),
             nonce,
         });
-        match access {
-            ChannelAccess::Guild { guild_id, .. } => {
-                let event = self.make_event(guild_id.raw(), Vec::new(), false, payload);
-                self.publish(Subject::GuildMsg(guild_id), event).await;
-            }
-            ChannelAccess::Dm { recipient_ids } => {
-                let event = self.make_event(0, recipient_ids, false, payload);
-                self.publish(Subject::DmMsg(channel), event).await;
-            }
-        }
+        self.publish_to_channel(&access, channel, payload).await;
         Ok(message)
     }
 
@@ -335,6 +326,93 @@ impl Chat for ChatService {
             }
         };
         Ok(messages)
+    }
+
+    async fn edit_message(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+        content: String,
+    ) -> Result<v1::Message, ChatError> {
+        let content = validate_trimmed(&content, MAX_MESSAGE_CHARS, "message content")?;
+        let access = self.channel_access(actor, channel).await?;
+        let row = sqlx::query!(
+            "SELECT author_id FROM messages WHERE id = $1 AND channel_id = $2",
+            message.as_i64(),
+            channel.as_i64()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .ok_or(ChatError::NotFound)?;
+        // Edit is strictly author-only — MANAGE_MESSAGES does NOT grant it.
+        if row.author_id != actor.as_i64() {
+            return Err(ChatError::Forbidden(
+                "only the author can edit a message".to_owned(),
+            ));
+        }
+        let edited_at = sqlx::query_scalar!(
+            "UPDATE messages SET content = $1, edited_at = now() WHERE id = $2 RETURNING edited_at",
+            content.as_str(),
+            message.as_i64()
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(internal)?;
+
+        let message = v1::Message {
+            id: message.raw(),
+            channel_id: channel.raw(),
+            author_id: actor.raw(),
+            content,
+            edited_at_ms: edited_at.map_or(0, ms),
+        };
+        let payload = FramePayload::MessageUpdate(v1::MessageUpdate {
+            message: Some(message.clone()),
+        });
+        self.publish_to_channel(&access, channel, payload).await;
+        Ok(message)
+    }
+
+    async fn delete_message(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), ChatError> {
+        let access = self.channel_access(actor, channel).await?;
+        let row = sqlx::query!(
+            "SELECT author_id FROM messages WHERE id = $1 AND channel_id = $2",
+            message.as_i64(),
+            channel.as_i64()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .ok_or(ChatError::NotFound)?;
+        // Author always may; otherwise MANAGE_MESSAGES in a guild, never in a DM.
+        if row.author_id != actor.as_i64() {
+            match &access {
+                ChannelAccess::Guild { perms, .. } => perms.check(Permissions::MANAGE_MESSAGES)?,
+                ChannelAccess::Dm { .. } => {
+                    return Err(ChatError::Forbidden(
+                        "you can only delete your own messages".to_owned(),
+                    ));
+                }
+            }
+        }
+        sqlx::query!("DELETE FROM messages WHERE id = $1", message.as_i64())
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+
+        let payload = FramePayload::MessageDelete(v1::MessageDelete {
+            channel_id: channel.raw(),
+            message_id: message.raw(),
+        });
+        self.publish_to_channel(&access, channel, payload).await;
+        Ok(())
     }
 
     async fn create_guild(&self, actor: UserId, name: String) -> Result<v1::Guild, ChatError> {
@@ -786,6 +864,26 @@ impl ChatService {
     async fn publish(&self, subject: Subject, event: BusEvent) {
         if let Err(error) = self.bus.publish(subject, event).await {
             tracing::error!(%error, %subject, "post-commit bus publish failed");
+        }
+    }
+
+    /// Route a non-ephemeral message dispatch (create/update/delete) to the
+    /// channel's subject — guild members or DM recipients, identical fan-out.
+    async fn publish_to_channel(
+        &self,
+        access: &ChannelAccess,
+        channel: ChannelId,
+        payload: FramePayload,
+    ) {
+        match access {
+            ChannelAccess::Guild { guild_id, .. } => {
+                let event = self.make_event(guild_id.raw(), Vec::new(), false, payload);
+                self.publish(Subject::GuildMsg(*guild_id), event).await;
+            }
+            ChannelAccess::Dm { recipient_ids } => {
+                let event = self.make_event(0, recipient_ids.clone(), false, payload);
+                self.publish(Subject::DmMsg(channel), event).await;
+            }
         }
     }
 }

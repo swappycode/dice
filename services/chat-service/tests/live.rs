@@ -344,6 +344,130 @@ async fn send_message_requires_membership_and_send_permission() {
 }
 
 #[tokio::test]
+async fn edit_message_is_author_only_and_publishes_update() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let guild = ctx.svc.create_guild(a, "edit-test".into()).await.unwrap();
+    let gid = GuildId::from_raw(guild.id);
+    let ch = ChannelId::from_raw(guild.channels[0].id);
+    ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
+    let msg = ctx
+        .svc
+        .send_message(a, ch, "typo heer".into(), 1)
+        .await
+        .unwrap();
+
+    let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
+    let edited = ctx
+        .svc
+        .edit_message(a, ch, MessageId::from_raw(msg.id), "  fixed here  ".into())
+        .await
+        .unwrap();
+    assert_eq!(edited.id, msg.id);
+    assert_eq!(edited.content, "fixed here", "trimmed");
+    assert!(edited.edited_at_ms > 0, "edited_at stamped");
+
+    let ev = next_event(&mut sub).await;
+    assert!(!ev.ephemeral);
+    let frame::Payload::MessageUpdate(mu) = dispatch(&ev) else {
+        panic!("expected MessageUpdate, got {ev:?}");
+    };
+    assert_eq!(mu.message.as_ref().unwrap(), &edited);
+
+    // Another member (even editing is never allowed for non-authors).
+    let err = ctx
+        .svc
+        .edit_message(b, ch, MessageId::from_raw(msg.id), "hijack".into())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::Forbidden(_)), "{err:?}");
+
+    // Empty content is rejected.
+    let err = ctx
+        .svc
+        .edit_message(a, ch, MessageId::from_raw(msg.id), "   ".into())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");
+
+    // Unknown message id.
+    let err = ctx
+        .svc
+        .edit_message(a, ch, MessageId::from_raw(1), "x".into())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::NotFound), "{err:?}");
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
+async fn delete_message_allows_author_or_manage_messages() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let guild = ctx.svc.create_guild(a, "del-test".into()).await.unwrap();
+    let gid = GuildId::from_raw(guild.id);
+    let ch = ChannelId::from_raw(guild.channels[0].id);
+    ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
+
+    // A plain member cannot delete someone else's message.
+    let m1 = ctx
+        .svc
+        .send_message(a, ch, "a-one".into(), 1)
+        .await
+        .unwrap();
+    let err = ctx
+        .svc
+        .delete_message(b, ch, MessageId::from_raw(m1.id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ChatError::PermissionDenied(mp) if mp.missing.contains(Permissions::MANAGE_MESSAGES)),
+        "{err:?}"
+    );
+
+    // The author deletes their own; MessageDelete fans out with the ids.
+    let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
+    ctx.svc
+        .delete_message(a, ch, MessageId::from_raw(m1.id))
+        .await
+        .unwrap();
+    let ev = next_event(&mut sub).await;
+    let frame::Payload::MessageDelete(md) = dispatch(&ev) else {
+        panic!("expected MessageDelete, got {ev:?}");
+    };
+    assert_eq!(md.message_id, m1.id);
+    assert_eq!(md.channel_id, ch.raw());
+    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM messages WHERE id = $1", m1.id as i64)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, Some(0), "row gone");
+
+    // A moderator with MANAGE_MESSAGES deletes another user's message.
+    let m2 = ctx
+        .svc
+        .send_message(a, ch, "a-two".into(), 2)
+        .await
+        .unwrap();
+    sqlx::query!(
+        "UPDATE guild_members SET permissions = $1 WHERE guild_id = $2 AND user_id = $3",
+        (Permissions::VIEW_CHANNEL | Permissions::MANAGE_MESSAGES).to_db(),
+        guild.id as i64,
+        b.as_i64()
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    ctx.svc
+        .delete_message(b, ch, MessageId::from_raw(m2.id))
+        .await
+        .unwrap();
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn get_messages_keyset_pagination_newest_first() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);
