@@ -78,3 +78,13 @@ message MessageDelete {
 message MessageHistory {
   repeated Message messages = 1;  // descending by id (newest first)
 }
+
+// Unread badges (M2 notifications). Server-maintained per-channel counts for
+// the requesting user; POST /v1/channels/{id}/read clears one.
+message UnreadEntry {
+  fixed64 channel_id = 1;
+  uint64 count = 2;
+}
+message UnreadCounts {
+  repeated UnreadEntry entries = 1;  // GET /v1/unread; non-zero channels only
+}

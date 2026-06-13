@@ -65,6 +65,9 @@ pub struct GatewayDeps {
     pub jwt: std::sync::Arc<dice_auth_core::token::JwtKeys>,
     pub ids: std::sync::Arc<dice_common::SnowflakeGenerator>,
     pub rate: dice_cache::RateLimiter,
+    /// Per-user unread counts (maintained by notification-service; read by
+    /// `GET /v1/unread`, cleared by `POST /v1/channels/{id}/read`).
+    pub unread: dice_cache::UnreadStore,
 }
 
 /// Shared per-process gateway state (internal).

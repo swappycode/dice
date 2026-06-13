@@ -129,6 +129,7 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
         bus,
         jwt,
         ids,
+        unread: dice_cache::UnreadStore::new(cache.clone()),
         rate: RateLimiter::new(cache),
     };
 

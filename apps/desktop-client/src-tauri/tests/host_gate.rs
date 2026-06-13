@@ -136,6 +136,7 @@ async fn spawn_env(tag: &str) -> Env {
         bus,
         jwt,
         ids,
+        unread: dice_cache::UnreadStore::new(cache.clone()),
         rate: RateLimiter::new(cache),
     };
 

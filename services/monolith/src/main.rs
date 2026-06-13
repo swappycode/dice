@@ -92,6 +92,7 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
         bus,
         jwt,
         ids,
+        unread: dice_cache::UnreadStore::new(cache.clone()),
         rate,
     };
 

@@ -60,6 +60,8 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/guilds/join", post(join_guild))
         .route("/v1/channels", post(create_channel))
         .route("/v1/dms", post(open_dm))
+        .route("/v1/unread", get(unread_counts))
+        .route("/v1/channels/{channel_id}/read", post(mark_read))
         .route("/v1/users/@me/avatar", put(set_avatar))
         // Download is a GET (no request body), so it rides the 1 MiB limit fine.
         .route("/v1/media/{media_id}", get(serve_media))
@@ -374,6 +376,62 @@ async fn open_dm(
     {
         Ok(channel) => proto_response(StatusCode::OK, &channel),
         Err(error) => map_chat_error(error),
+    }
+}
+
+/// `GET /v1/unread` (bearer): the caller's non-zero per-channel unread counts.
+/// Channels come from the user's sync state; counts from notification-service.
+async fn unread_counts(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+) -> Response {
+    let state = match gw.deps.chat.sync_user_state(user).await {
+        Ok(state) => state,
+        Err(error) => return map_chat_error(error),
+    };
+    // Collect ids first so nothing borrows `state` across the await loop.
+    let channels: Vec<u64> = state
+        .guilds
+        .iter()
+        .flat_map(|g| g.channels.iter().map(|c| c.id))
+        .chain(state.dm_channels.iter().map(|c| c.id))
+        .collect();
+    let mut entries = Vec::new();
+    for channel in channels {
+        match gw
+            .deps
+            .unread
+            .count(user, ChannelId::from_raw(channel))
+            .await
+        {
+            Ok(0) => {}
+            Ok(count) => entries.push(v1::UnreadEntry {
+                channel_id: channel,
+                count,
+            }),
+            Err(error) => tracing::warn!(%error, channel, "unread count read failed"),
+        }
+    }
+    proto_response(StatusCode::OK, &v1::UnreadCounts { entries })
+}
+
+/// `POST /v1/channels/{id}/read` (bearer): clear the caller's unread badge for
+/// the channel. 204. (Persistent last-read markers + multi-device sync are the
+/// item-10 follow-up; this clears the count that drives the badge.)
+async fn mark_read(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(channel_id): Path<String>,
+) -> Response {
+    let Ok(channel) = channel_id.parse::<ChannelId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
+    };
+    match gw.deps.unread.clear(user, channel).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => {
+            tracing::error!(%error, "unread clear failed");
+            error_response(ErrorCode::Internal, "internal error", 0)
+        }
     }
 }
 
