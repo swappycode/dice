@@ -10,8 +10,8 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use dice_auth_core::password;
 use dice_auth_core::token::{self, ACCESS_TTL_SECS, JwtKeys};
+use dice_auth_core::{password, totp};
 use dice_cache::{Cache, RateLimiter};
 use dice_common::id::{SessionId, SnowflakeGenerator, UserId};
 use dice_common::time::now_ms;
@@ -20,7 +20,7 @@ use dice_protocol::internal::v1::{SessionRevoked, bus_event};
 use dice_protocol::v1::{AuthSuccess, User};
 use sqlx::PgPool;
 
-use crate::{Auth, AuthError, validate};
+use crate::{Auth, AuthError, LoginOutcome, TotpEnrollment, validate};
 
 /// Registration: 3 per hour per IP (`rl:auth.register:{ip}`).
 const REGISTER_SCOPE: &str = "auth.register";
@@ -32,6 +32,11 @@ const LOGIN_IP_LIMIT: u32 = 10;
 const LOGIN_EMAIL_SCOPE: &str = "auth.login.email";
 const LOGIN_EMAIL_LIMIT: u32 = 5;
 const LOGIN_WINDOW: Duration = Duration::from_secs(5 * 60);
+/// TOTP challenge: 5 code attempts per 5 min per user (brute-force guard on the
+/// second factor — the ticket already proves the password step passed).
+const TOTP_SCOPE: &str = "auth.totp";
+const TOTP_LIMIT: u32 = 5;
+const TOTP_WINDOW: Duration = Duration::from_secs(5 * 60);
 /// Rate-limit principal when the caller has no source address.
 const NO_IP: &str = "noip";
 /// `origin` field on every [`BusEvent`] this service publishes.
@@ -155,6 +160,28 @@ impl AuthService {
         };
         self.bus.publish(Subject::User(user), event).await
     }
+
+    /// Atomically claim one unused recovery code matching `code` for `user_id`
+    /// (high-entropy => a direct hashed lookup, like refresh tokens). `Ok(true)`
+    /// if one was consumed (marked used), `Ok(false)` if none matched.
+    async fn consume_recovery_code(&self, user_id: i64, code: &str) -> Result<bool, AuthError> {
+        let hash = totp::hash_recovery_code(code);
+        let consumed = sqlx::query!(
+            r#"UPDATE totp_recovery_codes SET used_at = now()
+               WHERE id = (
+                 SELECT id FROM totp_recovery_codes
+                 WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL
+                 LIMIT 1
+               )
+               RETURNING id"#,
+            user_id,
+            &hash[..],
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("consume recovery code", e))?;
+        Ok(consumed.is_some())
+    }
 }
 
 #[async_trait::async_trait]
@@ -208,7 +235,7 @@ impl Auth for AuthService {
         email: &str,
         password: &str,
         ip: Option<IpAddr>,
-    ) -> Result<AuthSuccess, AuthError> {
+    ) -> Result<LoginOutcome, AuthError> {
         self.check_limit(
             LOGIN_IP_SCOPE,
             &ip_principal(ip),
@@ -225,7 +252,7 @@ impl Auth for AuthService {
         .await?;
 
         let row = sqlx::query!(
-            "SELECT id, username, display_name, flags, avatar_media_id, password_hash \
+            "SELECT id, username, display_name, flags, avatar_media_id, password_hash, totp_enabled \
              FROM users WHERE LOWER(email) = LOWER($1)",
             email,
         )
@@ -253,6 +280,14 @@ impl Auth for AuthService {
             return Err(AuthError::InvalidCredentials);
         }
 
+        // Password OK. With 2FA on, hand back a short-lived ticket instead of a
+        // session — no token is issued until the second factor passes.
+        if row.totp_enabled {
+            let ticket = token::sign_totp_ticket(&self.jwt, UserId::from_i64(row.id))
+                .map_err(|e| internal("sign totp ticket", e))?;
+            return Ok(LoginOutcome::TotpRequired { ticket });
+        }
+
         let user = UserRow {
             id: row.id,
             username: row.username,
@@ -260,7 +295,217 @@ impl Auth for AuthService {
             flags: row.flags,
             avatar_media_id: row.avatar_media_id,
         };
-        self.mint_session(&user, ip).await
+        Ok(LoginOutcome::Success(Box::new(
+            self.mint_session(&user, ip).await?,
+        )))
+    }
+
+    async fn complete_totp_login(
+        &self,
+        ticket: &str,
+        code: &str,
+    ) -> Result<AuthSuccess, AuthError> {
+        let user_id =
+            token::verify_totp_ticket(&self.jwt, ticket).map_err(|_| AuthError::InvalidToken)?;
+        // Brute-force guard on the 6-digit second factor (per user).
+        self.check_limit(TOTP_SCOPE, &user_id.to_string(), TOTP_LIMIT, TOTP_WINDOW)
+            .await?;
+
+        let row = sqlx::query!(
+            "SELECT id, username, display_name, flags, avatar_media_id, \
+                    totp_enabled, totp_secret, totp_last_step \
+             FROM users WHERE id = $1",
+            user_id.as_i64(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("totp login user lookup", e))?
+        .ok_or(AuthError::InvalidToken)?;
+
+        // 2FA turned off (or never finished) since the ticket was minted.
+        if !row.totp_enabled {
+            return Err(AuthError::InvalidToken);
+        }
+        let secret = row
+            .totp_secret
+            .ok_or_else(|| internal_msg("totp_enabled row has no secret"))?;
+
+        let user = UserRow {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            flags: row.flags,
+            avatar_media_id: row.avatar_media_id,
+        };
+
+        let code = code.trim();
+        let now_step = now_ms() / 1000;
+        match totp::verify_code(&secret, code, now_step) {
+            Some(step) => {
+                let step = i64::try_from(step).unwrap_or(i64::MAX);
+                // Single-use: a code at a step we've already consumed is a replay.
+                if row.totp_last_step.is_some_and(|last| step <= last) {
+                    return Err(AuthError::InvalidTotp);
+                }
+                sqlx::query!(
+                    "UPDATE users SET totp_last_step = $2 WHERE id = $1",
+                    user.id,
+                    step,
+                )
+                .execute(&self.pool)
+                .await
+                .map_err(|e| internal("advance totp_last_step", e))?;
+            }
+            // Not a TOTP code — try a one-time recovery code.
+            None if self.consume_recovery_code(user.id, code).await? => {}
+            None => return Err(AuthError::InvalidTotp),
+        }
+
+        self.mint_session(&user, None).await
+    }
+
+    async fn totp_enroll(&self, user: UserId) -> Result<TotpEnrollment, AuthError> {
+        let row = sqlx::query!(
+            "SELECT username, totp_enabled FROM users WHERE id = $1",
+            user.as_i64(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("totp enroll lookup", e))?
+        .ok_or(AuthError::InvalidToken)?;
+        if row.totp_enabled {
+            return Err(AuthError::TotpAlreadyEnabled);
+        }
+
+        let enrollment = totp::enroll(&row.username);
+        // Persist the not-yet-active secret; reset the replay step for a clean
+        // start. Stays inactive until totp_confirm proves a code from it.
+        sqlx::query!(
+            "UPDATE users SET totp_secret = $2, totp_last_step = NULL WHERE id = $1",
+            user.as_i64(),
+            enrollment.secret,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| internal("persist totp secret", e))?;
+
+        Ok(TotpEnrollment {
+            secret: enrollment.secret,
+            otpauth_uri: enrollment.uri,
+        })
+    }
+
+    async fn totp_confirm(&self, user: UserId, code: &str) -> Result<Vec<String>, AuthError> {
+        let row = sqlx::query!(
+            "SELECT totp_secret, totp_enabled FROM users WHERE id = $1",
+            user.as_i64(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("totp confirm lookup", e))?
+        .ok_or(AuthError::InvalidToken)?;
+        if row.totp_enabled {
+            return Err(AuthError::TotpAlreadyEnabled);
+        }
+        // No secret => enrollment was never begun.
+        let secret = row.totp_secret.ok_or(AuthError::TotpNotEnabled)?;
+
+        let step = totp::verify_code(&secret, code.trim(), now_ms() / 1000)
+            .ok_or(AuthError::InvalidTotp)?;
+        let step = i64::try_from(step).unwrap_or(i64::MAX);
+
+        let codes = totp::generate_recovery_codes();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| internal("begin totp confirm tx", e))?;
+        // Activate, and record the confirm step so it can't be replayed at the
+        // first login.
+        sqlx::query!(
+            "UPDATE users SET totp_enabled = TRUE, totp_last_step = $2 WHERE id = $1",
+            user.as_i64(),
+            step,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("activate totp", e))?;
+        // Fresh enrollment owns a fresh recovery set.
+        sqlx::query!(
+            "DELETE FROM totp_recovery_codes WHERE user_id = $1",
+            user.as_i64(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("clear old recovery codes", e))?;
+        for code in &codes {
+            let hash = totp::hash_recovery_code(code);
+            sqlx::query!(
+                "INSERT INTO totp_recovery_codes (id, user_id, code_hash) VALUES ($1, $2, $3)",
+                self.ids.generate().as_i64(),
+                user.as_i64(),
+                &hash[..],
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| internal("insert recovery code", e))?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| internal("commit totp confirm tx", e))?;
+
+        Ok(codes)
+    }
+
+    async fn totp_disable(&self, user: UserId, code: &str) -> Result<(), AuthError> {
+        let row = sqlx::query!(
+            "SELECT totp_secret, totp_enabled FROM users WHERE id = $1",
+            user.as_i64(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("totp disable lookup", e))?
+        .ok_or(AuthError::InvalidToken)?;
+        if !row.totp_enabled {
+            return Err(AuthError::TotpNotEnabled);
+        }
+        let secret = row
+            .totp_secret
+            .ok_or_else(|| internal_msg("totp_enabled row has no secret"))?;
+
+        // Tearing down — any currently-valid TOTP code (replay step irrelevant)
+        // or an unused recovery code authorizes it.
+        let code = code.trim();
+        let ok = totp::verify_code(&secret, code, now_ms() / 1000).is_some()
+            || self.consume_recovery_code(user.as_i64(), code).await?;
+        if !ok {
+            return Err(AuthError::InvalidTotp);
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| internal("begin totp disable tx", e))?;
+        sqlx::query!(
+            "UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_last_step = NULL \
+             WHERE id = $1",
+            user.as_i64(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("clear totp", e))?;
+        sqlx::query!(
+            "DELETE FROM totp_recovery_codes WHERE user_id = $1",
+            user.as_i64(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("delete recovery codes", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| internal("commit totp disable tx", e))?;
+        Ok(())
     }
 
     async fn refresh(&self, refresh_token: &str) -> Result<AuthSuccess, AuthError> {
@@ -467,4 +712,11 @@ fn map_register_error(e: sqlx::Error) -> AuthError {
 fn internal(context: &'static str, e: impl std::error::Error + Send + Sync + 'static) -> AuthError {
     tracing::error!(error = %e, context, "auth-service internal error");
     AuthError::Internal(Box::new(e))
+}
+
+/// [`AuthError::Internal`] from a bare message — for "can't happen" invariants
+/// (e.g. an enabled-2FA row missing its secret) that have no source error.
+fn internal_msg(context: &'static str) -> AuthError {
+    tracing::error!(context, "auth-service internal invariant violated");
+    AuthError::Internal(context.into())
 }

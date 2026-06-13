@@ -79,8 +79,8 @@ mod tests {
         let versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
         assert_eq!(
             versions.len(),
-            9,
-            "expected 9 embedded migrations (M1 4 + M2 replies/reactions/attachments/avatars/read-markers), got {versions:?}"
+            10,
+            "expected 10 embedded migrations (M1 4 + M2 replies/reactions/attachments/avatars/read-markers/totp), got {versions:?}"
         );
         assert!(
             versions.windows(2).all(|w| w[0] < w[1]),
@@ -102,7 +102,8 @@ mod tests {
                 "reactions",
                 "attachments",
                 "avatars",
-                "read markers"
+                "read markers",
+                "totp"
             ]
         );
     }

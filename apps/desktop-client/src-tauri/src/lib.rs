@@ -121,6 +121,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::session_status,
             commands::login,
+            commands::complete_totp_login,
+            commands::totp_enroll,
+            commands::totp_confirm,
+            commands::totp_disable,
             commands::register,
             commands::logout,
             commands::get_bootstrap,

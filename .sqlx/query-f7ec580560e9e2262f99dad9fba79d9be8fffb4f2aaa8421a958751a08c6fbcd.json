@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE totp_recovery_codes SET used_at = now()\n               WHERE id = (\n                 SELECT id FROM totp_recovery_codes\n                 WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL\n                 LIMIT 1\n               )\n               RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f7ec580560e9e2262f99dad9fba79d9be8fffb4f2aaa8421a958751a08c6fbcd"
+}

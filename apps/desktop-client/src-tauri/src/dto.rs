@@ -249,6 +249,26 @@ pub struct SessionDto {
     pub user: UserDto,
 }
 
+/// `login` result: exactly one field is set — a `session` (fully authenticated)
+/// or a `totpTicket` (the account has 2FA; answer via `completeTotpLogin`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginResultDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub totp_ticket: Option<String>,
+}
+
+/// A fresh 2FA enrollment for the settings UI: the secret (manual entry) + the
+/// `otpauth://` URI (rendered as a QR).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TotpEnrollDto {
+    pub secret: String,
+    pub otpauth_uri: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapDto {

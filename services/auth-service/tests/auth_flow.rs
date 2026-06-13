@@ -13,12 +13,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use auth_service::{Auth, AuthError, AuthService};
+use auth_service::{Auth, AuthError, AuthService, LoginOutcome};
 use dice_auth_core::token::{JwtKeys, REFRESH_PREFIX, verify_access};
+use dice_auth_core::totp;
 use dice_cache::CacheConfig;
 use dice_common::id::{SnowflakeGenerator, UserId};
 use dice_event_bus::{BusConfig, BusEvent, EventBus, Subject};
 use dice_protocol::internal::v1::bus_event;
+use dice_protocol::v1::AuthSuccess;
 use sqlx::PgPool;
 
 /// Matches infrastructure/docker/docker-compose.yml + .env.example.
@@ -78,6 +80,23 @@ fn unique(prefix: &str) -> String {
 
 fn email_for(username: &str) -> String {
     format!("{username}@test.dice")
+}
+
+/// Current Unix seconds (for driving the TOTP verifier from the same clock).
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Unwrap a no-2FA login into its `AuthSuccess` (panics on an unexpected
+/// challenge).
+fn success(outcome: LoginOutcome) -> AuthSuccess {
+    match outcome {
+        LoginOutcome::Success(auth) => *auth,
+        LoginOutcome::TotpRequired { .. } => panic!("expected Success, got TotpRequired"),
+    }
 }
 
 async fn cleanup(pool: &PgPool, user_ids: &[u64]) {
@@ -150,7 +169,7 @@ async fn full_lifecycle_register_login_refresh_reuse_detection_logout() {
     ));
 
     // -- login -------------------------------------------------------------
-    let login = h.svc.login(&email, PASSWORD, None).await.unwrap();
+    let login = success(h.svc.login(&email, PASSWORD, None).await.unwrap());
     let login_claims = verify_access(&h.jwt, &login.access_token).unwrap();
     assert_eq!(login_claims.sub, reg_claims.sub);
     assert_ne!(
@@ -361,4 +380,107 @@ async fn register_rate_limit_per_ip_kicks_in_at_four() {
     assert_eq!(stored.as_deref(), Some("203.0.113.77"));
 
     cleanup(&h.pool, &created).await;
+}
+
+#[tokio::test]
+async fn totp_enroll_confirm_login_recovery_disable() {
+    let h = harness().await;
+    let username = unique("tp");
+    let email = email_for(&username);
+    let reg = h
+        .svc
+        .register(&email, &username, PASSWORD, None)
+        .await
+        .unwrap();
+    let uid = UserId::from_raw(reg.user.unwrap().id);
+
+    // No 2FA yet: login returns Success directly.
+    assert!(matches!(
+        h.svc.login(&email, PASSWORD, None).await.unwrap(),
+        LoginOutcome::Success(_)
+    ));
+
+    // Enroll: secret + otpauth URI, but 2FA stays INACTIVE until confirmed.
+    let enroll = h.svc.totp_enroll(uid).await.unwrap();
+    assert!(enroll.otpauth_uri.starts_with("otpauth://totp/"));
+    assert!(
+        matches!(
+            h.svc.login(&email, PASSWORD, None).await.unwrap(),
+            LoginOutcome::Success(_)
+        ),
+        "enrollment alone must not require 2FA at login"
+    );
+
+    // Confirm: a wrong code is rejected; the right one activates + yields codes.
+    assert!(matches!(
+        h.svc.totp_confirm(uid, "000000").await,
+        Err(AuthError::InvalidTotp)
+    ));
+    let code = totp::current_code(&enroll.secret, now_secs()).unwrap();
+    let recovery = h.svc.totp_confirm(uid, &code).await.unwrap();
+    assert_eq!(recovery.len(), 10);
+    // Re-enrolling once active is refused (must disable first).
+    assert!(matches!(
+        h.svc.totp_enroll(uid).await,
+        Err(AuthError::TotpAlreadyEnabled)
+    ));
+
+    // Login now yields a challenge, never a session.
+    let ticket = match h.svc.login(&email, PASSWORD, None).await.unwrap() {
+        LoginOutcome::TotpRequired { ticket } => ticket,
+        other => panic!("expected TotpRequired, got {other:?}"),
+    };
+    // Wrong code rejected. The confirm code is single-use, so re-presenting a
+    // code from that same step is rejected too (replay / out-of-window).
+    assert!(matches!(
+        h.svc.complete_totp_login(&ticket, "000000").await,
+        Err(AuthError::InvalidTotp)
+    ));
+    assert!(matches!(
+        h.svc.complete_totp_login(&ticket, &code).await,
+        Err(AuthError::InvalidTotp)
+    ));
+
+    // A recovery code completes the login; reusing it does not.
+    let ticket2 = match h.svc.login(&email, PASSWORD, None).await.unwrap() {
+        LoginOutcome::TotpRequired { ticket } => ticket,
+        other => panic!("expected TotpRequired, got {other:?}"),
+    };
+    let authed = h
+        .svc
+        .complete_totp_login(&ticket2, &recovery[0])
+        .await
+        .unwrap();
+    assert!(authed.refresh_token.starts_with(REFRESH_PREFIX));
+    assert!(matches!(
+        h.svc.complete_totp_login(&ticket2, &recovery[0]).await,
+        Err(AuthError::InvalidTotp)
+    ));
+
+    // A garbage ticket is rejected outright.
+    assert!(matches!(
+        h.svc
+            .complete_totp_login("not-a-ticket", &recovery[1])
+            .await,
+        Err(AuthError::InvalidToken)
+    ));
+
+    // Disable requires a valid factor; a fresh recovery code authorizes it.
+    assert!(matches!(
+        h.svc.totp_disable(uid, "000000").await,
+        Err(AuthError::InvalidTotp)
+    ));
+    h.svc.totp_disable(uid, &recovery[1]).await.unwrap();
+    assert!(matches!(
+        h.svc.totp_disable(uid, &recovery[2]).await,
+        Err(AuthError::TotpNotEnabled)
+    ));
+
+    // 2FA is gone: login is a plain Success again.
+    assert!(matches!(
+        h.svc.login(&email, PASSWORD, None).await.unwrap(),
+        LoginOutcome::Success(_)
+    ));
+
+    cleanup(&h.pool, &[uid.raw()]).await;
 }

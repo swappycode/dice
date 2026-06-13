@@ -18,10 +18,51 @@ message LoginRequest {
 message RefreshRequest { string refresh_token = 1; }
 message LogoutRequest { string refresh_token = 1; }
 
-// Returned by register, login, AND refresh (no GET /users/@me needed).
+// Returned by register AND refresh (no GET /users/@me needed). Login returns it
+// wrapped in LoginResponse so 2FA accounts can answer with a challenge instead.
 message AuthSuccess {
   string access_token = 1;        // JWT, ~600 s
   string refresh_token = 2;       // opaque drt_..., rotates on every refresh
   uint64 access_expires_in_s = 3;
   User user = 4;
 }
+
+// ---- TOTP 2FA (item 11a) ----
+
+// Reply to POST /v1/auth/login. Either the account is fully authenticated, or it
+// has 2FA on and the caller must answer the challenge at /v1/auth/login/totp.
+message LoginResponse {
+  oneof outcome {
+    AuthSuccess success = 1;
+    TotpChallenge totp_required = 2;
+  }
+}
+
+// Opaque short-lived (5 min) signed ticket proving the password step passed; it
+// is exchanged together with a TOTP/recovery code to complete the login. It is
+// NOT an access token (distinct JWT audience) and carries no session.
+message TotpChallenge { string ticket = 1; }
+
+// POST /v1/auth/login/totp -> AuthSuccess. `code` is a 6-digit TOTP or a
+// recovery code.
+message CompleteTotpRequest {
+  string ticket = 1;
+  string code = 2;
+}
+
+// POST /v1/users/@me/totp/enroll (bearer) -> begins enrollment, returns the new
+// secret for manual entry plus an otpauth:// URI the client renders as a QR.
+// Not active until confirmed.
+message TotpEnrollResponse {
+  string secret = 1;        // base32, for manual entry
+  string otpauth_uri = 2;   // otpauth://totp/... for QR
+}
+
+// POST /v1/users/@me/totp/confirm (bearer): activate 2FA by proving a code from
+// the freshly enrolled secret. Returns one-time recovery codes (shown ONCE).
+message TotpConfirmRequest { string code = 1; }
+message TotpConfirmResponse { repeated string recovery_codes = 1; }
+
+// POST /v1/users/@me/totp/disable (bearer): turn 2FA off; requires a current
+// TOTP or recovery code so a hijacked access token alone cannot remove it.
+message TotpDisableRequest { string code = 1; }

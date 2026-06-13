@@ -49,6 +49,14 @@ impl ApiError {
     }
 }
 
+/// Result of [`ApiClient::login`]: either fully authenticated, or a 2FA account
+/// that must answer the challenge via [`ApiClient::complete_totp_login`].
+#[derive(Debug)]
+pub enum LoginOutcome {
+    Success(v1::AuthSuccess),
+    TotpRequired { ticket: String },
+}
+
 /// Protobuf-over-HTTPS client for the gateway's REST surface.
 #[derive(Clone)]
 pub struct ApiClient {
@@ -95,15 +103,98 @@ impl ApiClient {
         .await
     }
 
-    pub async fn login(&self, email: &str, password: &str) -> Result<v1::AuthSuccess, ApiError> {
+    /// `POST /v1/auth/login`. Returns [`LoginOutcome::TotpRequired`] (a ticket
+    /// for [`Self::complete_totp_login`]) when the account has 2FA enabled.
+    pub async fn login(&self, email: &str, password: &str) -> Result<LoginOutcome, ApiError> {
+        let resp: v1::LoginResponse = self
+            .post_public(
+                "/v1/auth/login",
+                &v1::LoginRequest {
+                    email: email.to_owned(),
+                    password: password.to_owned(),
+                },
+            )
+            .await?;
+        match resp.outcome {
+            Some(v1::login_response::Outcome::Success(success)) => {
+                Ok(LoginOutcome::Success(success))
+            }
+            Some(v1::login_response::Outcome::TotpRequired(c)) => {
+                Ok(LoginOutcome::TotpRequired { ticket: c.ticket })
+            }
+            None => Err(ApiError::Api {
+                status: 502,
+                error: v1::Error {
+                    code: ErrorCode::Internal as i32,
+                    message: "login response carried no outcome".to_owned(),
+                    retry_after_ms: 0,
+                },
+            }),
+        }
+    }
+
+    /// `POST /v1/auth/login/totp` — finish a 2FA login with the challenge ticket
+    /// plus a TOTP or recovery `code`.
+    pub async fn complete_totp_login(
+        &self,
+        ticket: &str,
+        code: &str,
+    ) -> Result<v1::AuthSuccess, ApiError> {
         self.post_public(
-            "/v1/auth/login",
-            &v1::LoginRequest {
-                email: email.to_owned(),
-                password: password.to_owned(),
+            "/v1/auth/login/totp",
+            &v1::CompleteTotpRequest {
+                ticket: ticket.to_owned(),
+                code: code.to_owned(),
             },
         )
         .await
+    }
+
+    /// `POST /v1/users/@me/totp/enroll` (bearer, no body) — begin 2FA enrollment.
+    pub async fn totp_enroll(&self) -> Result<v1::TotpEnrollResponse, ApiError> {
+        let url = self.url("/v1/users/@me/totp/enroll")?;
+        let response = self
+            .bearer_send(|token| self.http.post(url.clone()).bearer_auth(token))
+            .await?;
+        decode_response(response).await
+    }
+
+    /// `POST /v1/users/@me/totp/confirm` (bearer) — activate 2FA; returns the
+    /// one-time recovery codes.
+    pub async fn totp_confirm(&self, code: &str) -> Result<Vec<String>, ApiError> {
+        let resp: v1::TotpConfirmResponse = self
+            .post_bearer(
+                "/v1/users/@me/totp/confirm",
+                &v1::TotpConfirmRequest {
+                    code: code.to_owned(),
+                },
+            )
+            .await?;
+        Ok(resp.recovery_codes)
+    }
+
+    /// `POST /v1/users/@me/totp/disable` (bearer) — turn 2FA off with a current
+    /// TOTP or recovery `code` (204).
+    pub async fn totp_disable(&self, code: &str) -> Result<(), ApiError> {
+        let url = self.url("/v1/users/@me/totp/disable")?;
+        let body = v1::TotpDisableRequest {
+            code: code.to_owned(),
+        }
+        .encode_to_vec();
+        let response = self
+            .bearer_send(|token| {
+                self.http
+                    .post(url.clone())
+                    .header(CONTENT_TYPE, PROTOBUF)
+                    .body(body.clone())
+                    .bearer_auth(token)
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
     }
 
     /// Rotates the refresh token; the old one is dead afterwards.

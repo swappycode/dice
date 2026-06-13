@@ -25,7 +25,7 @@ pub mod tls;
 pub mod token;
 pub mod transport;
 
-pub use api::{ApiClient, ApiError};
+pub use api::{ApiClient, ApiError, LoginOutcome};
 pub use gateway::{
     ClientEvent, Command, ConnState, ConnStateLite, GatewayClientConfig, GatewayHandle, SendError,
     connect,

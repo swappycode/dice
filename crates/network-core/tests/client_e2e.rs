@@ -25,8 +25,8 @@ use dice_event_bus::BusConfig;
 use dice_network_core::client::url::Url;
 use dice_network_core::client::{
     ApiClient, ApiError, ClientEvent, Command, ConnState, ConnStateLite, GatewayClientConfig,
-    GatewayHandle, PreferredTransport, QuicAddr, QuicEndpoint, QuicTransport, TlsOptions,
-    TokenError, TokenProvider, TransportKind, TransportPolicy, connect,
+    GatewayHandle, LoginOutcome, PreferredTransport, QuicAddr, QuicEndpoint, QuicTransport,
+    TlsOptions, TokenError, TokenProvider, TransportKind, TransportPolicy, connect,
 };
 use dice_network_core::tls::{generate_dev_certs, install_ring_provider};
 use dice_protocol::v1::frame::Payload;
@@ -335,9 +335,13 @@ async fn rest_auth_round_trip() {
     assert!(auth.access_expires_in_s > 0);
     assert_eq!(user.username, username);
 
-    // Login works; a wrong password maps to ApiError::Api{401, UNAUTHENTICATED}.
-    let again = api.login(&email, "correct-horse-battery").await.unwrap();
-    assert_eq!(again.user.unwrap().id, user.id);
+    // Login works (no 2FA => immediate Success); a wrong password maps to
+    // ApiError::Api{401, UNAUTHENTICATED}.
+    let again = match api.login(&email, "correct-horse-battery").await.unwrap() {
+        LoginOutcome::Success(auth) => auth,
+        other => panic!("expected Success, got {other:?}"),
+    };
+    assert_eq!(again.user.clone().unwrap().id, user.id);
     let denied = api.login(&email, "wrong-password").await.unwrap_err();
     match denied {
         ApiError::Api { status, error } => {

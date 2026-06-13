@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use dice_network_core::client::url::Url;
 use dice_network_core::client::{
-    ApiClient, ApiError, Command, ConnStateLite, GatewayClientConfig, PreferredTransport,
-    QuicEndpoint, TlsOptions, TransportPolicy, connect,
+    ApiClient, ApiError, Command, ConnStateLite, GatewayClientConfig, LoginOutcome,
+    PreferredTransport, QuicEndpoint, TlsOptions, TransportPolicy, connect,
 };
 use dice_protocol::v1;
 use dice_protocol::v1::frame::Payload;
@@ -21,8 +21,8 @@ use tokio::task::JoinHandle;
 use crate::bridge::{Bridge, PendingMap, PendingSend, PresenceMap, conn_state_str};
 use crate::cache::{Cache, CacheError};
 use crate::dto::{
-    BootstrapDto, ChannelDto, DiceEvent, GuildDto, MessageDto, SessionDto, UserDto, id_str,
-    parse_id, parse_presence, presence_str,
+    BootstrapDto, ChannelDto, DiceEvent, GuildDto, LoginResultDto, MessageDto, SessionDto,
+    TotpEnrollDto, UserDto, id_str, parse_id, parse_presence, presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
 use crate::keystore::KeyStore;
@@ -301,9 +301,50 @@ impl ClientCore {
 
     // ---------------------------------------------------------------- auth
 
-    pub async fn login(&self, email: &str, password: &str) -> Result<SessionDto, CoreError> {
-        let auth = self.api.login(email, password).await?;
+    /// Password step. Either installs the session (no 2FA) or returns a
+    /// challenge ticket the UI answers via [`Self::complete_totp_login`].
+    pub async fn login(&self, email: &str, password: &str) -> Result<LoginResultDto, CoreError> {
+        match self.api.login(email, password).await? {
+            LoginOutcome::Success(auth) => Ok(LoginResultDto {
+                session: Some(self.adopt_auth(auth).await?),
+                totp_ticket: None,
+            }),
+            LoginOutcome::TotpRequired { ticket } => Ok(LoginResultDto {
+                session: None,
+                totp_ticket: Some(ticket),
+            }),
+        }
+    }
+
+    /// Finish a 2FA login: exchange the challenge ticket + a TOTP/recovery code
+    /// for a session.
+    pub async fn complete_totp_login(
+        &self,
+        ticket: &str,
+        code: &str,
+    ) -> Result<SessionDto, CoreError> {
+        let auth = self.api.complete_totp_login(ticket, code).await?;
         self.adopt_auth(auth).await
+    }
+
+    /// Begin 2FA enrollment for the signed-in user (secret + `otpauth://` URI).
+    pub async fn totp_enroll(&self) -> Result<TotpEnrollDto, CoreError> {
+        let e = self.api.totp_enroll().await?;
+        Ok(TotpEnrollDto {
+            secret: e.secret,
+            otpauth_uri: e.otpauth_uri,
+        })
+    }
+
+    /// Activate 2FA with a code from the enrolled secret; returns recovery codes.
+    pub async fn totp_confirm(&self, code: &str) -> Result<Vec<String>, CoreError> {
+        Ok(self.api.totp_confirm(code).await?)
+    }
+
+    /// Disable 2FA (requires a current TOTP or recovery code).
+    pub async fn totp_disable(&self, code: &str) -> Result<(), CoreError> {
+        self.api.totp_disable(code).await?;
+        Ok(())
     }
 
     pub async fn register(

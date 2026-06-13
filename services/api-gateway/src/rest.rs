@@ -50,6 +50,7 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/healthz", get(healthz))
         .route("/v1/auth/register", post(register))
         .route("/v1/auth/login", post(login))
+        .route("/v1/auth/login/totp", post(complete_totp_login))
         .route("/v1/auth/refresh", post(refresh))
         .route("/v1/auth/logout", post(logout))
         .route("/gateway/v1", get(gateway_ws));
@@ -63,6 +64,9 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/unread", get(unread_counts))
         .route("/v1/channels/{channel_id}/read", post(mark_read))
         .route("/v1/users/@me/avatar", put(set_avatar))
+        .route("/v1/users/@me/totp/enroll", post(totp_enroll))
+        .route("/v1/users/@me/totp/confirm", post(totp_confirm))
+        .route("/v1/users/@me/totp/disable", post(totp_disable))
         // Download is a GET (no request body), so it rides the 1 MiB limit fine.
         .route("/v1/media/{media_id}", get(serve_media))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -145,10 +149,14 @@ fn error_response(code: ErrorCode, message: impl Into<String>, retry_after_ms: u
 
 fn map_auth_error(error: AuthError) -> Response {
     match error {
-        AuthError::EmailTaken | AuthError::UsernameTaken | AuthError::InvalidArgument(_) => {
+        AuthError::EmailTaken
+        | AuthError::UsernameTaken
+        | AuthError::InvalidArgument(_)
+        | AuthError::TotpAlreadyEnabled
+        | AuthError::TotpNotEnabled => {
             error_response(ErrorCode::InvalidArgument, error.to_string(), 0)
         }
-        AuthError::InvalidCredentials | AuthError::InvalidToken => {
+        AuthError::InvalidCredentials | AuthError::InvalidToken | AuthError::InvalidTotp => {
             error_response(ErrorCode::Unauthenticated, error.to_string(), 0)
         }
         AuthError::RateLimited { retry_after_ms } => {
@@ -273,10 +281,40 @@ async fn login(
     peer: Option<axum::Extension<PeerAddr>>,
     Proto(req): Proto<v1::LoginRequest>,
 ) -> Response {
+    use auth_service::LoginOutcome;
+    use v1::login_response::Outcome;
     match gw
         .deps
         .auth
         .login(&req.email, &req.password, client_ip(peer))
+        .await
+    {
+        Ok(LoginOutcome::Success(success)) => proto_response(
+            StatusCode::OK,
+            &v1::LoginResponse {
+                outcome: Some(Outcome::Success(*success)),
+            },
+        ),
+        Ok(LoginOutcome::TotpRequired { ticket }) => proto_response(
+            StatusCode::OK,
+            &v1::LoginResponse {
+                outcome: Some(Outcome::TotpRequired(v1::TotpChallenge { ticket })),
+            },
+        ),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+/// `POST /v1/auth/login/totp` (public): finish a 2FA login by presenting the
+/// challenge ticket + a TOTP or recovery code. Returns the full `AuthSuccess`.
+async fn complete_totp_login(
+    State(gw): State<Arc<Gateway>>,
+    Proto(req): Proto<v1::CompleteTotpRequest>,
+) -> Response {
+    match gw
+        .deps
+        .auth
+        .complete_totp_login(&req.ticket, &req.code)
         .await
     {
         Ok(success) => proto_response(StatusCode::OK, &success),
@@ -450,6 +488,52 @@ async fn set_avatar(
     match gw.deps.chat.set_avatar(user, media).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => map_chat_error(error),
+    }
+}
+
+/// `POST /v1/users/@me/totp/enroll` (bearer): begin 2FA enrollment; returns the
+/// new secret + `otpauth://` URI. Inactive until `confirm`.
+async fn totp_enroll(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+) -> Response {
+    match gw.deps.auth.totp_enroll(user).await {
+        Ok(e) => proto_response(
+            StatusCode::OK,
+            &v1::TotpEnrollResponse {
+                secret: e.secret,
+                otpauth_uri: e.otpauth_uri,
+            },
+        ),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+/// `POST /v1/users/@me/totp/confirm` (bearer): activate 2FA with a code from the
+/// enrolled secret; returns the one-time recovery codes.
+async fn totp_confirm(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::TotpConfirmRequest>,
+) -> Response {
+    match gw.deps.auth.totp_confirm(user, &req.code).await {
+        Ok(recovery_codes) => {
+            proto_response(StatusCode::OK, &v1::TotpConfirmResponse { recovery_codes })
+        }
+        Err(error) => map_auth_error(error),
+    }
+}
+
+/// `POST /v1/users/@me/totp/disable` (bearer): turn 2FA off, requiring a current
+/// TOTP or recovery code. 204.
+async fn totp_disable(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::TotpDisableRequest>,
+) -> Response {
+    match gw.deps.auth.totp_disable(user, &req.code).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_auth_error(error),
     }
 }
 

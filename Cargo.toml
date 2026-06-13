@@ -99,6 +99,10 @@ getrandom     = "0.3"
 sha2          = "0.10"
 subtle        = "2"
 base64        = "0.22"
+# RFC 6238 TOTP. default-features off drops the qr (image) + gen_secret (rand
+# 0.8) extras; we keep only `otpauth` (otpauth:// URI gen) and generate secrets
+# ourselves via getrandom. Pure Rust — no aws-lc (gated by `just gate-aws-lc`).
+totp-rs       = { version = "5", default-features = false, features = ["otpauth"] }
 
 # ---- observability ----
 tracing            = "0.1"

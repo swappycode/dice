@@ -47,6 +47,9 @@ pub enum TokenError {
     /// Signing failed, or the token is invalid/expired/tampered/mis-issued.
     #[error("jwt error: {0}")]
     Jwt(#[from] jsonwebtoken::errors::Error),
+    /// A verified token carried a claim that is not a well-formed id.
+    #[error("token claim is not a valid id")]
+    BadClaim,
 }
 
 /// Ed25519 key material for access JWTs.
@@ -202,6 +205,56 @@ pub fn verify_access(keys: &JwtKeys, jwt: &str) -> Result<AccessClaims, TokenErr
     Ok(data.claims)
 }
 
+/// `aud` on a TOTP login ticket. DISTINCT from [`AUD`] so a ticket can never be
+/// used where an access token is expected (and vice-versa) — the audience check
+/// rejects the crossover.
+pub const TOTP_TICKET_AUD: &str = "dice-totp";
+/// Login-ticket lifetime (5 minutes): the window to answer the 2FA challenge.
+pub const TOTP_TICKET_TTL_SECS: u64 = 300;
+
+/// Claims on a TOTP login ticket: a bare `sub` + lifetime, audience-tagged so it
+/// is only ever accepted by [`verify_totp_ticket`]. No `sid` — no session exists
+/// until the second factor passes.
+#[derive(Debug, Serialize, Deserialize)]
+struct TotpTicketClaims {
+    sub: String,
+    iat: u64,
+    exp: u64,
+    iss: String,
+    aud: String,
+}
+
+/// Sign a short-lived ticket proving `user` cleared the password step. Presented
+/// with a TOTP/recovery code to complete login. Fails [`TokenError::VerifyOnly`]
+/// without a private key (only auth-service mints these).
+pub fn sign_totp_ticket(keys: &JwtKeys, user: UserId) -> Result<String, TokenError> {
+    let encoding = keys.encoding.as_ref().ok_or(TokenError::VerifyOnly)?;
+    let iat = dice_common::time::now_ms() / 1000;
+    let claims = TotpTicketClaims {
+        sub: user.to_string(),
+        iat,
+        exp: iat + TOTP_TICKET_TTL_SECS,
+        iss: ISS.to_owned(),
+        aud: TOTP_TICKET_AUD.to_owned(),
+    };
+    Ok(jsonwebtoken::encode(
+        &Header::new(Algorithm::EdDSA),
+        &claims,
+        encoding,
+    )?)
+}
+
+/// Verify a TOTP login ticket (signature, `exp`, `iss`, the ticket `aud`) and
+/// return the bound user. An access token (different `aud`) is rejected here.
+pub fn verify_totp_ticket(keys: &JwtKeys, jwt: &str) -> Result<UserId, TokenError> {
+    let mut validation = Validation::new(Algorithm::EdDSA);
+    validation.validate_exp = true;
+    validation.set_issuer(&[ISS]);
+    validation.set_audience(&[TOTP_TICKET_AUD]);
+    let data = jsonwebtoken::decode::<TotpTicketClaims>(jwt, &keys.decoding, &validation)?;
+    data.claims.sub.parse().map_err(|_| TokenError::BadClaim)
+}
+
 /// Mint a refresh token. Returns `(token, sha256)` where `token` is
 /// `"drt_" + base64url-no-pad(32 random bytes)` (sent to the client once) and
 /// `sha256` is the SHA-256 of the FULL token string (the only thing the
@@ -331,6 +384,27 @@ mod tests {
             }
             other => panic!("expected expired-signature error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn totp_ticket_round_trip_and_audience_isolation() {
+        let keys = JwtKeys::generate_ephemeral();
+        let (user, session) = ids();
+        let ticket = sign_totp_ticket(&keys, user).unwrap();
+        assert_eq!(verify_totp_ticket(&keys, &ticket).unwrap(), user);
+
+        // A ticket is NOT an access token (wrong audience) and vice-versa.
+        assert!(verify_access(&keys, &ticket).is_err());
+        let access = sign_access(&keys, user, session).unwrap();
+        assert!(verify_totp_ticket(&keys, &access).is_err());
+
+        // verify_only cannot mint a ticket.
+        let (_, public_pem) = JwtKeys::generate_pems();
+        let gateway = JwtKeys::verify_only(public_pem.as_bytes()).unwrap();
+        assert!(matches!(
+            sign_totp_ticket(&gateway, user),
+            Err(TokenError::VerifyOnly)
+        ));
     }
 
     #[test]

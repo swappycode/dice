@@ -8,6 +8,7 @@ pub mod validate;
 
 use std::net::IpAddr;
 
+use dice_common::id::UserId;
 use dice_protocol::v1::AuthSuccess;
 
 pub use service::AuthService;
@@ -24,10 +25,33 @@ pub enum AuthError {
     InvalidCredentials,
     #[error("invalid or expired token")]
     InvalidToken,
+    #[error("invalid two-factor code")]
+    InvalidTotp,
+    #[error("two-factor authentication is already enabled")]
+    TotpAlreadyEnabled,
+    #[error("two-factor authentication is not enabled")]
+    TotpNotEnabled,
     #[error("rate limited; retry after {retry_after_ms} ms")]
     RateLimited { retry_after_ms: u32 },
     #[error("internal auth error")]
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+/// Outcome of [`Auth::login`]: either fully authenticated, or — for a 2FA
+/// account — a challenge the caller answers via [`Auth::complete_totp_login`].
+/// `Success` is boxed so the variants stay similarly sized.
+#[derive(Debug)]
+pub enum LoginOutcome {
+    Success(Box<AuthSuccess>),
+    TotpRequired { ticket: String },
+}
+
+/// A freshly begun TOTP enrollment (not yet active). The client shows
+/// [`otpauth_uri`](Self::otpauth_uri) as a QR and `secret` for manual entry.
+#[derive(Debug, Clone)]
+pub struct TotpEnrollment {
+    pub secret: String,
+    pub otpauth_uri: String,
 }
 
 /// All three success paths (register/login/refresh) return a full
@@ -42,12 +66,34 @@ pub trait Auth: Send + Sync {
         ip: Option<IpAddr>,
     ) -> Result<AuthSuccess, AuthError>;
 
+    /// Verify the password. Returns [`LoginOutcome::Success`] for a non-2FA
+    /// account, or [`LoginOutcome::TotpRequired`] (a short-lived ticket) when
+    /// 2FA is on — no session/token is issued until the second factor passes.
     async fn login(
         &self,
         email: &str,
         password: &str,
         ip: Option<IpAddr>,
-    ) -> Result<AuthSuccess, AuthError>;
+    ) -> Result<LoginOutcome, AuthError>;
+
+    /// Complete a 2FA login: verify `code` (TOTP or recovery) against the
+    /// ticket's user, then mint the session. Rate-limited per user.
+    async fn complete_totp_login(&self, ticket: &str, code: &str)
+    -> Result<AuthSuccess, AuthError>;
+
+    /// Begin 2FA enrollment for an authenticated user: generate + persist a
+    /// (not-yet-active) secret and return it with its `otpauth://` URI.
+    /// [`AuthError::TotpAlreadyEnabled`] if 2FA is already active.
+    async fn totp_enroll(&self, user: UserId) -> Result<TotpEnrollment, AuthError>;
+
+    /// Activate 2FA by proving a `code` from the enrolled secret. Returns the
+    /// one-time recovery codes (shown once). [`AuthError::InvalidTotp`] on a bad
+    /// code, [`AuthError::TotpNotEnabled`] if enrollment was never begun.
+    async fn totp_confirm(&self, user: UserId, code: &str) -> Result<Vec<String>, AuthError>;
+
+    /// Disable 2FA, requiring a current `code` (TOTP or recovery) so a stolen
+    /// access token alone cannot strip the second factor.
+    async fn totp_disable(&self, user: UserId, code: &str) -> Result<(), AuthError>;
 
     /// Rotation: marks the presented token used, mints a child in the same
     /// auth_session. Reuse of an already-rotated token revokes the whole

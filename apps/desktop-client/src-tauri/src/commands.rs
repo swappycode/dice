@@ -16,7 +16,8 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::dto::{
-    AttachmentDto, BootstrapDto, ChannelDto, GuildDto, MessageDto, SessionDto, UnreadDto,
+    AttachmentDto, BootstrapDto, ChannelDto, GuildDto, LoginResultDto, MessageDto, SessionDto,
+    TotpEnrollDto, UnreadDto,
 };
 use crate::state::{ClientCore, CoreError};
 
@@ -34,8 +35,36 @@ pub async fn session_status(core: Core<'_>) -> CmdResult<Option<SessionDto>> {
 }
 
 #[tauri::command]
-pub async fn login(core: Core<'_>, email: String, password: String) -> CmdResult<SessionDto> {
+pub async fn login(core: Core<'_>, email: String, password: String) -> CmdResult<LoginResultDto> {
     core.login(&email, &password).await.map_err(user)
+}
+
+/// Finish a 2FA login: the challenge ticket + a TOTP or recovery code.
+#[tauri::command]
+pub async fn complete_totp_login(
+    core: Core<'_>,
+    ticket: String,
+    code: String,
+) -> CmdResult<SessionDto> {
+    core.complete_totp_login(&ticket, &code).await.map_err(user)
+}
+
+/// Begin 2FA enrollment: returns the secret + `otpauth://` URI for the QR.
+#[tauri::command]
+pub async fn totp_enroll(core: Core<'_>) -> CmdResult<TotpEnrollDto> {
+    core.totp_enroll().await.map_err(user)
+}
+
+/// Activate 2FA with a code from the enrolled secret; returns recovery codes.
+#[tauri::command]
+pub async fn totp_confirm(core: Core<'_>, code: String) -> CmdResult<Vec<String>> {
+    core.totp_confirm(&code).await.map_err(user)
+}
+
+/// Disable 2FA (requires a current TOTP or recovery code).
+#[tauri::command]
+pub async fn totp_disable(core: Core<'_>, code: String) -> CmdResult<()> {
+    core.totp_disable(&code).await.map_err(user)
 }
 
 #[tauri::command]

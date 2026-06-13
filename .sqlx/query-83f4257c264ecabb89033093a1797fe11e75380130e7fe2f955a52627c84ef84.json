@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, username, display_name, flags, avatar_media_id, totp_enabled, totp_secret, totp_last_step FROM users WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "flags",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_media_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "totp_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "totp_secret",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "totp_last_step",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "83f4257c264ecabb89033093a1797fe11e75380130e7fe2f955a52627c84ef84"
+}
