@@ -6,11 +6,21 @@
 
 use std::time::Duration;
 
-use dice_common::id::UserId;
+use dice_common::id::{ChannelId, UserId};
 
 /// TTL for `presence:{user_id}` entries: 3 × the 30 s heartbeat interval, so
 /// presence dots die naturally when heartbeats stop.
 pub const PRESENCE_TTL: Duration = Duration::from_secs(90);
+
+/// TTL for `unread:{user}:{channel}` counters — long, so a badge survives a
+/// disconnect, but stale counters for abandoned channels eventually expire.
+pub const UNREAD_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// `unread:{user_id}:{channel_id}` → little-endian u64 unread message count,
+/// maintained by notification-service and cleared by the read-marker path.
+pub fn unread(user_id: UserId, channel_id: ChannelId) -> String {
+    format!("unread:{user_id}:{channel_id}")
+}
 
 /// `presence:{user_id}` → `dice.v1.PresenceUpdate` protobuf bytes,
 /// written with [`PRESENCE_TTL`] and refreshed on every heartbeat.
@@ -32,5 +42,9 @@ mod tests {
     fn key_formats_are_stable() {
         assert_eq!(presence(UserId::from_raw(42)), "presence:42");
         assert_eq!(rate_limit("send", "12345"), "rl:send:12345");
+        assert_eq!(
+            unread(UserId::from_raw(7), ChannelId::from_raw(9)),
+            "unread:7:9"
+        );
     }
 }

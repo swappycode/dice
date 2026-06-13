@@ -11,6 +11,7 @@ api-gateway      = { workspace = true }
 auth-service     = { workspace = true }
 chat-service     = { workspace = true }
 media-service    = { workspace = true }
+notification-service = { workspace = true }
 presence-service = { workspace = true }
 
 # internal crates

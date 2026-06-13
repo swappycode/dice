@@ -646,6 +646,7 @@ dependencies = [
  "dice-protocol",
  "futures-util",
  "media-service",
+ "notification-service",
  "presence-service",
  "prost",
  "reqwest",
@@ -1631,6 +1632,24 @@ dependencies = [
  "log",
  "rand 0.8.6",
  "signatory",
+]
+
+[[package]]
+name = "notification-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "dice-cache",
+ "dice-common",
+ "dice-database",
+ "dice-event-bus",
+ "dice-protocol",
+ "futures-util",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

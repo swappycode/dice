@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO guilds (id, name, owner_id, invite_code) VALUES ($1, 'ntfy', $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "438b8762e5c4ab4577c537fa191a7a3b916217548dea3af85031a549c9d44f37"
+}

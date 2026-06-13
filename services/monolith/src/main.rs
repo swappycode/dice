@@ -102,6 +102,25 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
 
     // --- gateway (REST + WSS on one TLS port, QUIC on UDP) ---
     let shutdown = Shutdown::new();
+
+    // notification-service: durable JetStream consumer that maintains per-user
+    // unread counts. Full profile only — dev-lite's in-process Local bus has no
+    // stream, so unread badges there come purely from the live client side.
+    if let dice_event_bus::BusConfig::Nats { url } = &cfg.bus {
+        let url = url.clone();
+        let pool = pool.clone();
+        let unread = dice_cache::UnreadStore::new(cache.clone());
+        let token = shutdown.child_token();
+        shutdown.tracker.spawn(async move {
+            if let Err(error) = notification_service::run(&url, pool, unread, token).await {
+                tracing::error!(%error, "notification-service consumer exited with error");
+            }
+        });
+        tracing::info!("notification-service: durable consumer on DICE_EVT started");
+    } else {
+        tracing::info!("notification-service skipped (dev-lite Local bus has no JetStream)");
+    }
+
     let started = api_gateway::start(
         GatewayConfig {
             rest_addr: cfg.rest_addr,

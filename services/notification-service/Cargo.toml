@@ -1,0 +1,23 @@
+[package]
+name = "notification-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dice-common = { workspace = true }
+dice-protocol = { workspace = true }
+dice-database = { workspace = true }
+dice-cache = { workspace = true }
+dice-event-bus = { workspace = true }
+async-nats = { workspace = true }
+futures-util = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

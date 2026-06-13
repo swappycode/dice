@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use dice_common::id::{ChannelId, UserId};
 
 pub use memory::MemoryCache;
 pub use redis_impl::RedisCache;
@@ -155,6 +156,59 @@ impl RateLimiter {
     }
 }
 
+/// Per-(user, channel) unread message counter over any [`Cache`] backend.
+///
+/// Stored in the value namespace as a little-endian `u64` (so it can be read
+/// back, unlike the increment-only counter primitive), with [`keys::UNREAD_TTL`].
+/// notification-service is the only writer that [`bump`](Self::bump)s; the
+/// read-marker path [`clear`](Self::clear)s. The bump's read-modify-write can
+/// race a concurrent clear, which is benign (a message arriving exactly as the
+/// channel is marked read may leave a count of 1) — acceptable eventual
+/// consistency for M2.
+#[derive(Clone)]
+pub struct UnreadStore {
+    cache: Arc<dyn Cache>,
+}
+
+impl UnreadStore {
+    pub fn new(cache: Arc<dyn Cache>) -> Self {
+        Self { cache }
+    }
+
+    /// Increment and return the new unread count for `(user, channel)`.
+    pub async fn bump(&self, user: UserId, channel: ChannelId) -> Result<u64, CacheError> {
+        let key = keys::unread(user, channel);
+        let next = self.read(&key).await?.saturating_add(1);
+        self.cache
+            .set(
+                &key,
+                Bytes::copy_from_slice(&next.to_le_bytes()),
+                Some(keys::UNREAD_TTL),
+            )
+            .await?;
+        Ok(next)
+    }
+
+    /// Current unread count for `(user, channel)` (0 if none).
+    pub async fn count(&self, user: UserId, channel: ChannelId) -> Result<u64, CacheError> {
+        self.read(&keys::unread(user, channel)).await
+    }
+
+    /// Reset the unread count for `(user, channel)` to zero.
+    pub async fn clear(&self, user: UserId, channel: ChannelId) -> Result<(), CacheError> {
+        self.cache.delete(&keys::unread(user, channel)).await
+    }
+
+    async fn read(&self, key: &str) -> Result<u64, CacheError> {
+        Ok(self
+            .cache
+            .get(key)
+            .await?
+            .and_then(|b| <[u8; 8]>::try_from(b.as_ref()).ok())
+            .map_or(0, u64::from_le_bytes))
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -230,6 +284,21 @@ mod tests {
         assert!(rl.check("b", "u1", 1, window).await.unwrap().allowed);
         // Original bucket is exhausted.
         assert!(!rl.check("a", "u1", 1, window).await.unwrap().allowed);
+    }
+
+    #[tokio::test]
+    async fn unread_store_bumps_counts_and_clears() {
+        let cache = connect(CacheConfig::Memory).await.unwrap();
+        let store = UnreadStore::new(cache);
+        let (u, c) = (UserId::from_raw(1), ChannelId::from_raw(7));
+        assert_eq!(store.count(u, c).await.unwrap(), 0, "fresh = 0");
+        assert_eq!(store.bump(u, c).await.unwrap(), 1);
+        assert_eq!(store.bump(u, c).await.unwrap(), 2);
+        assert_eq!(store.count(u, c).await.unwrap(), 2);
+        // Independent per (user, channel).
+        assert_eq!(store.count(u, ChannelId::from_raw(8)).await.unwrap(), 0);
+        store.clear(u, c).await.unwrap();
+        assert_eq!(store.count(u, c).await.unwrap(), 0, "cleared");
     }
 
     #[tokio::test]
