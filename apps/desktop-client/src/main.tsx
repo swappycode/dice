@@ -7,6 +7,10 @@ import "./styles/recipes.css";
 import "./styles/scrollbars.css";
 import "./themes/luna.css";
 import "./themes/aero.css";
+import "./themes/midnight.css";
+import "./themes/nocturne.css";
+import "./themes/bubble.css";
+import "./themes/phosphor.css";
 
 import App from "./App";
 import { installDispatcher } from "./gateway/dispatcher";

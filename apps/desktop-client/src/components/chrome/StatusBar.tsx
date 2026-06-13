@@ -1,6 +1,6 @@
-import { type Component, createMemo, Show } from "solid-js";
+import { type Component, createMemo, For, Show } from "solid-js";
 import { perfMode, setPerfMode } from "../../lib/perfMode";
-import { setTheme, theme, type Theme } from "../../lib/theme";
+import { setTheme, theme, THEMES, type Theme } from "../../lib/theme";
 import { connLabel, connState } from "../../stores/connection";
 import { directory, displayName } from "../../stores/guilds";
 import { presenceOf } from "../../stores/presence";
@@ -61,8 +61,7 @@ export const StatusBar: Component = () => {
           value={theme()}
           onChange={(e) => setTheme(e.currentTarget.value as Theme)}
         >
-          <option value="luna">Luna</option>
-          <option value="aero">Aero</option>
+          <For each={THEMES}>{(t) => <option value={t.id}>{t.label}</option>}</For>
         </select>
       </div>
     </footer>

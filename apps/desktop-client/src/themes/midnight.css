@@ -1,0 +1,101 @@
+/* Midnight Aero+ — Layer B overrides. Dark theme: deep blue-black frosted glass
+   with one cold ice-cyan accent (the premium dark twin of Aero). Same geometry
+   as Aero; glass is token-controlled so perf-mode (--glass-blur:0) drops it.
+   Source: docs/design/m2-theme-pack.md. */
+
+[data-theme="midnight"] {
+  --radius-window: 6px;
+  --scrollbar-w: 13px;
+
+  --font-ui: "Segoe UI", "SegoeUI", Tahoma, "Noto Sans", "Cantarell", -apple-system, sans-serif;
+
+  --c-window-face: #131a26;
+  --c-content: #0e131d;
+  --c-text: #e7eef7;
+  --c-text-dim: #8da3bd;
+  --c-text-invert: #0a0f17;
+
+  --c-bevel-hi: rgba(150, 200, 255, 0.22);
+  --c-bevel-lo: rgba(0, 0, 0, 0.55);
+  --c-bevel-dark: #060a12;
+
+  --c-accent: #4fd6ff; /* the one loud color: ice-cyan */
+  --c-accent-soft: #16344a;
+  --c-accent-border: #2f8fc4;
+  --c-link: #74d8ff;
+  --c-titlebar-text: #dcebfb;
+
+  --grad-titlebar: linear-gradient(
+    180deg,
+    rgba(56, 78, 110, 0.55) 0%,
+    rgba(26, 38, 58, 0.62) 50%,
+    rgba(14, 22, 36, 0.72) 100%
+  );
+  --grad-button: linear-gradient(180deg, #2b3849 0%, #222d3c 49%, #18212e 51%, #131b27 100%);
+  --grad-button-pressed: linear-gradient(180deg, #111925 0%, #18212e 51%, #1c2738 100%);
+  --grad-selection: linear-gradient(180deg, #1d4f6e, #123349);
+  --grad-rail: linear-gradient(160deg, rgba(28, 40, 60, 0.92), rgba(14, 22, 36, 0.96));
+  --grad-start: linear-gradient(180deg, #5fe0ff 0%, #34b8e6 49%, #1f93c4 51%, #2aa6d6 100%);
+  --grad-page: radial-gradient(130% 100% at 32% 22%, #20405e 0%, #11253b 45%, #060c16 100%);
+  --grad-caption: linear-gradient(
+    180deg,
+    rgba(74, 96, 126, 0.55) 0%,
+    rgba(40, 56, 80, 0.55) 49%,
+    rgba(22, 32, 48, 0.6) 51%,
+    rgba(34, 48, 70, 0.6) 100%
+  );
+  --grad-close: var(--grad-caption);
+  --grad-close-hover: radial-gradient(ellipse at 50% 120%, #ff7a68, #d63a26 65%);
+  --c-caption-glyph: #cfe2f5;
+
+  --glass-blur: 16px;
+  --c-glass-edge: rgba(120, 180, 240, 0.2);
+
+  --orb-online: #3dd64f;
+  --orb-idle: #ffc23a;
+  --orb-dnd: #ff5a47;
+  --orb-off: #5a6b80;
+
+  --focus-marquee: 1px dotted #cfe2f5;
+  --focus-marquee-offset: -3px;
+  --c-focus-field: var(--c-accent);
+  --c-default-ring: #4fd6ff;
+  --c-hover-ring: rgba(79, 214, 255, 0.55);
+  --c-active-ring: #4fd6ff;
+
+  --c-window-frame: #0a1422;
+  --c-tooltip-bg: #1b2433;
+  --c-tooltip-border: #3a5168;
+  --c-unread: #4fd6ff;
+  --c-titlebar-shadow: rgba(0, 0, 0, 0.6);
+  --titlebar-text-glow: 0 1px 2px var(--c-titlebar-shadow);
+  --c-scrim: rgba(0, 4, 10, 0.62);
+  --c-shadow-soft: rgba(0, 0, 0, 0.45);
+  --c-well-shadow: rgba(0, 0, 0, 0.5);
+
+  --c-select-bg: var(--c-accent-border);
+  --c-select-text: #eaf6ff;
+}
+
+/* The shared .gloss / .glass-panel recipes hardcode bright-white stops that read
+   too hot on midnight glass. These additive overrides (Luna/Aero untouched) cool
+   them to smoked-glass + a signature ice halo. */
+[data-theme="midnight"] .glass-panel {
+  background: linear-gradient(160deg, rgba(40, 58, 84, 0.55), rgba(16, 26, 42, 0.45));
+}
+
+[data-theme="midnight"] .gloss {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(150, 200, 255, 0.3) 0%,
+      rgba(150, 200, 255, 0.12) 49%,
+      rgba(0, 0, 0, 0.1) 51%,
+      rgba(120, 170, 230, 0.1) 100%
+    ),
+    var(--c-accent-border);
+  border: 1px solid rgba(120, 180, 240, 0.45);
+  box-shadow:
+    inset 0 0 0 1px rgba(150, 200, 255, 0.25),
+    0 0 10px rgba(79, 214, 255, 0.22); /* ice halo */
+}

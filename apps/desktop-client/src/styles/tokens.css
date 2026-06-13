@@ -28,6 +28,7 @@
 
   /* z-layers */
   --z-chrome: 10;
+  --z-overlay: 30; /* decorative full-screen overlays (e.g. Phosphor CRT veil) */
   --z-tooltip: 40;
   --z-dialog: 50;
 

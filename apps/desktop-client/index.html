@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dice</title>
     <script>
+      var themes = ["luna", "aero", "midnight", "nocturne", "bubble", "phosphor"];
       var t = localStorage.getItem("dice.theme");
-      document.documentElement.dataset.theme = t === "aero" ? "aero" : "luna";
+      document.documentElement.dataset.theme = themes.indexOf(t) >= 0 ? t : "luna";
       if (localStorage.getItem("dice.perfMode") === "1")
         document.documentElement.classList.add("perf-mode");
     </script>

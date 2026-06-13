@@ -26,11 +26,16 @@ const App: Component = () => {
   });
 
   return (
-    <Show when={!booting()}>
-      <Show when={session()} fallback={<LoginCard />}>
-        <AppShell />
+    <>
+      {/* Decorative full-screen overlay; only the Phosphor theme renders it
+          (CSS-gated), so it's inert under every other theme. */}
+      <div class="crt-veil" aria-hidden="true" />
+      <Show when={!booting()}>
+        <Show when={session()} fallback={<LoginCard />}>
+          <AppShell />
+        </Show>
       </Show>
-    </Show>
+    </>
   );
 };
 
