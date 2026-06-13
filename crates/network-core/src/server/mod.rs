@@ -9,7 +9,7 @@
 mod https;
 mod quic;
 
-pub use https::{ServeError, serve_https, serve_https_on};
+pub use https::{PeerAddr, ServeError, serve_https, serve_https_on};
 pub use quic::{QuicAcceptor, QuicTransport};
 
 use dice_protocol::v1::Frame;

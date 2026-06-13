@@ -5,11 +5,19 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hyper::service::Service as _;
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
+
+/// The TLS peer's socket address, injected into every request's extensions by
+/// the accept loop. Handlers read it (via `axum::Extension<PeerAddr>`) for
+/// per-IP logic such as auth rate limiting. This is the REAL socket peer —
+/// `X-Forwarded-For` is deliberately NOT trusted (no proxy in front yet).
+#[derive(Debug, Clone, Copy)]
+pub struct PeerAddr(pub SocketAddr);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -61,7 +69,7 @@ pub async fn serve_https_on(
             },
         };
         let acceptor = acceptor.clone();
-        let service = TowerToHyperService::new(router.clone());
+        let router = router.clone();
         tokio::spawn(async move {
             let tls_stream = match acceptor.accept(stream).await {
                 Ok(s) => s,
@@ -70,6 +78,15 @@ pub async fn serve_https_on(
                     return;
                 }
             };
+            // Inject the peer address into every request's extensions before
+            // handing off to axum, so REST handlers can do per-IP rate limiting.
+            // WS-upgrade requests carry it too (currently unused there).
+            let inner = TowerToHyperService::new(router);
+            let service =
+                hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                    req.extensions_mut().insert(PeerAddr(peer));
+                    inner.call(req)
+                });
             // `with_upgrades` is what lets `axum::extract::ws` complete the
             // WebSocket upgrade on this hand-rolled stack.
             let conn = hyper::server::conn::http1::Builder::new()

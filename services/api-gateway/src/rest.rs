@@ -3,10 +3,13 @@
 //! middleware on everything except `/v1/auth/*`, `/healthz` and the WS
 //! upgrade. Served over the hand-rolled TLS loop in `dice-network-core`.
 //!
-//! Client IP: the accept loop does not thread the peer address through
-//! hyper, so auth calls receive `None` (X-Forwarded-For is deliberately NOT
-//! trusted in M1).
+//! Client IP: the accept loop injects the TLS peer address as a `PeerAddr`
+//! request extension, so the auth endpoints pass the real source IP into the
+//! per-IP rate limiter (X-Forwarded-For is deliberately NOT trusted — no proxy
+//! in front yet). Requests served without the extension (none today) degrade
+//! to `None` = the shared `noip` bucket.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use auth_service::AuthError;
@@ -19,7 +22,7 @@ use axum::routing::{get, post};
 use bytes::Bytes;
 use chat_service::HistoryCursor;
 use dice_common::id::{ChannelId, GuildId, UserId};
-use dice_network_core::server::FramedTransport;
+use dice_network_core::server::{FramedTransport, PeerAddr};
 use dice_protocol::MAX_FRAME_BYTES;
 use dice_protocol::v1::{self, ErrorCode};
 use prost::Message;
@@ -198,14 +201,21 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
+/// The client IP for per-IP rate limiting, from the `PeerAddr` extension the
+/// TLS accept loop injects. `None` (extension absent) shares the `noip` bucket.
+fn client_ip(peer: Option<axum::Extension<PeerAddr>>) -> Option<IpAddr> {
+    peer.map(|axum::Extension(PeerAddr(addr))| addr.ip())
+}
+
 async fn register(
     State(gw): State<Arc<Gateway>>,
+    peer: Option<axum::Extension<PeerAddr>>,
     Proto(req): Proto<v1::RegisterRequest>,
 ) -> Response {
     match gw
         .deps
         .auth
-        .register(&req.email, &req.username, &req.password, None)
+        .register(&req.email, &req.username, &req.password, client_ip(peer))
         .await
     {
         Ok(success) => proto_response(StatusCode::OK, &success),
@@ -213,8 +223,17 @@ async fn register(
     }
 }
 
-async fn login(State(gw): State<Arc<Gateway>>, Proto(req): Proto<v1::LoginRequest>) -> Response {
-    match gw.deps.auth.login(&req.email, &req.password, None).await {
+async fn login(
+    State(gw): State<Arc<Gateway>>,
+    peer: Option<axum::Extension<PeerAddr>>,
+    Proto(req): Proto<v1::LoginRequest>,
+) -> Response {
+    match gw
+        .deps
+        .auth
+        .login(&req.email, &req.password, client_ip(peer))
+        .await
+    {
         Ok(success) => proto_response(StatusCode::OK, &success),
         Err(error) => map_auth_error(error),
     }

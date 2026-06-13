@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use dice_network_core::server::{
-    FramedTransport as _, QuicAcceptor, TransportKind, serve_https_on,
+    FramedTransport as _, PeerAddr, QuicAcceptor, TransportKind, serve_https_on,
 };
 use dice_network_core::tls::{
     DevCertPaths, generate_dev_certs, install_ring_provider, load_server_config, quic_server_config,
@@ -223,6 +223,53 @@ async fn serve_https_healthz_over_tls() {
     assert!(text.ends_with("ok"), "unexpected body: {text}");
 
     // Graceful: cancel stops accepting and the serve future returns Ok.
+    ct.cancel();
+    server.await.unwrap().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// The accept loop must inject the TLS peer address as a `PeerAddr` extension
+/// so handlers can do per-IP logic. Regression guard: if a future refactor
+/// drops the injection, the gateway silently reverts to one shared rate-limit
+/// bucket for all unauthenticated clients.
+#[tokio::test]
+async fn serve_https_injects_peer_addr() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    install_ring_provider();
+    let dir = temp_dir("https-peer");
+    let paths = generate_dev_certs(&dir).unwrap();
+
+    let tls = load_server_config(&paths.server_cert, &paths.server_key, &[]).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = axum::Router::new().route(
+        "/whoami",
+        axum::routing::get(|peer: axum::Extension<PeerAddr>| async move {
+            peer.0.0.ip().to_string()
+        }),
+    );
+    let ct = CancellationToken::new();
+    let server = tokio::spawn(serve_https_on(listener, tls, router, ct.clone()));
+
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(client_tls_config(&paths, &[])));
+    let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let server_name = rustls_pki_types::ServerName::try_from("localhost").unwrap();
+    let mut stream = connector.connect(server_name, tcp).await.unwrap();
+    stream
+        .write_all(b"GET /whoami HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.starts_with("HTTP/1.1 200"), "unexpected response: {text}");
+    // The loopback client connects from 127.0.0.1, so the handler must echo it.
+    assert!(
+        text.ends_with("127.0.0.1"),
+        "handler did not see the peer IP: {text}"
+    );
+
     ct.cancel();
     server.await.unwrap().unwrap();
     let _ = fs::remove_dir_all(&dir);
