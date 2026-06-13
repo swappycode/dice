@@ -25,7 +25,7 @@ pub mod state;
 
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::emit::{Emitter, TauriEmitter};
 use crate::keystore::{KeyStore, OsKeyring};
@@ -93,6 +93,21 @@ pub fn run() {
                 });
             }
             app.manage(core);
+
+            // Create the main window HERE (not in tauri.conf.json) so the
+            // managed `ClientCore` is guaranteed present before the webview's
+            // first IPC call, and so the WebView2 browser args are tunable at
+            // runtime via `DICE_WEBVIEW_ARGS` (one build, many RAM experiments).
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                .title("Dice")
+                .inner_size(1100.0, 720.0)
+                .min_inner_size(800.0, 560.0)
+                .resizable(true)
+                .decorations(false)
+                .shadow(true)
+                .transparent(false)
+                .additional_browser_args(&webview_args())
+                .build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -126,6 +141,42 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_target(true)
         .init();
+}
+
+/// WebView2 browser arguments, applied at webview creation. Tuned for RAM:
+/// M2 measurements (see WORKLOG) took the release client's idle login screen
+/// from ~164 MB → ~117 MB private commit, almost entirely via `--in-process-gpu`.
+///
+/// Because we set `additional_browser_args` ourselves, wry stops applying its
+/// own default (`--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`),
+/// so we re-include those three and fold every feature-disable into the SINGLE
+/// `--disable-features=` list Chromium honours (a second occurrence would
+/// replace, not merge).
+///
+/// `--in-process-gpu` is the headline win: it folds the separate GPU process
+/// (~47 MB private) into the browser process WHILE KEEPING hardware
+/// acceleration — strictly better for us than `--disable-gpu` (software
+/// rendering would punish the Aero glass blur for a ~3 MB smaller footprint).
+/// The accepted tradeoff: a GPU driver crash takes the whole webview down
+/// instead of being isolated. Override the whole string via `DICE_WEBVIEW_ARGS`.
+const DEFAULT_WEBVIEW_ARGS: &str = concat!(
+    "--disable-features=",
+    "msWebOOUI,msPdfOOUI,msSmartScreenProtection,",
+    "Translate,MediaRouter,OptimizationHints,OptimizationGuideModelDownloading,",
+    "AutofillServerCommunication,InterestFeedContentSuggestions",
+    " --disable-background-networking",
+    " --disable-component-update",
+    " --disable-sync",
+    " --in-process-gpu",
+);
+
+/// WebView2 args: `DICE_WEBVIEW_ARGS` overrides wholesale (for measurement),
+/// else [`DEFAULT_WEBVIEW_ARGS`]. Empty/whitespace env value falls back too.
+fn webview_args() -> String {
+    match std::env::var("DICE_WEBVIEW_ARGS") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => DEFAULT_WEBVIEW_ARGS.to_owned(),
+    }
 }
 
 /// The active dev profile: `--profile <name>` / `--profile=<name>` on the

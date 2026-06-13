@@ -55,12 +55,21 @@ client:
     $env:DICE_DEV_CA = "$PWD/dev/certs/dev-ca.pem"; $env:DICE_API_URL = "https://localhost:8443"; $env:DICE_GATEWAY_QUIC = "localhost:8444"; $env:DICE_GATEWAY_WSS = "wss://localhost:8443/gateway/v1"; cd apps/desktop-client; npm run tauri dev
 
 # Build the desktop client once (release exe, embedded UI) for the two-user demo.
+# `--features custom-protocol` selects a PRODUCTION build so the exe serves its
+# embedded UI instead of trying the dev server (localhost:1420).
 client-build:
     cd apps/desktop-client; npm run build
-    cd apps/desktop-client/src-tauri; cargo build --release
+    cd apps/desktop-client/src-tauri; cargo build --release --features custom-protocol
 
 # Launch a built client under an ISOLATED profile (own cache + keyring + window),
 # for local two-user testing. Run `just client-build` first, then e.g.
 # `just client-as alice` and (second terminal) `just client-as bob`.
 client-as name:
     $env:DICE_DEV_CA = "$PWD/dev/certs/dev-ca.pem"; $env:DICE_API_URL = "https://localhost:8443"; $env:DICE_GATEWAY_QUIC = "localhost:8444"; $env:DICE_GATEWAY_WSS = "wss://localhost:8443/gateway/v1"; & "apps/desktop-client/src-tauri/target/release/dice-desktop.exe" --profile {{name}}
+
+# Measure idle RAM of the release client at the login screen (private commit,
+# summed over host + WebView2 tree; compare to the <100 MB M2 goal). Run
+# `just client-build` first. A/B a browser-arg experiment by setting the env
+# first, e.g.: $env:DICE_WEBVIEW_ARGS = "--in-process-gpu ..."; just client-measure
+client-measure idle="30":
+    powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop-client/scripts/measure-ram.ps1 -Idle {{idle}}

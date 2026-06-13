@@ -17,6 +17,13 @@ description = "Dice desktop client host (Tauri 2)"
 name = "dice_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# DO NOT REMOVE — enabled by `tauri build` (and our `just client-build`) to
+# select a PRODUCTION build. Without it `tauri::is_dev()` is true, so the
+# release exe loads `devUrl` (localhost:1420) instead of the embedded UI and
+# shows "can't reach this page". Dev (`tauri dev`) deliberately leaves it off.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -14,20 +14,7 @@
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data:"
     },
-    "windows": [
-      {
-        "label": "main",
-        "title": "Dice",
-        "width": 1100,
-        "height": 720,
-        "minWidth": 800,
-        "minHeight": 560,
-        "resizable": true,
-        "decorations": false,
-        "shadow": true,
-        "transparent": false
-      }
-    ]
+    "windows": []
   },
   "bundle": {
     "active": true,
