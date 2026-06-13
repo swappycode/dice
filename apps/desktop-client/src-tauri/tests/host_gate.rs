@@ -516,3 +516,71 @@ async fn host_gate_full_journey_and_offline_restart() {
     let _ = std::fs::remove_file(&cache_path);
     let _ = std::fs::remove_dir_all(&env.cert_dir);
 }
+
+/// Issue 1 regression: a stored session the server no longer accepts must
+/// drop the client to login (clear credentials + emit `sessionExpired`),
+/// never hang on an "Offline" shell. Reproduces the dev-loop case where a
+/// monolith restart wiped the server-side session the client still holds.
+#[tokio::test]
+async fn expired_session_routes_to_login_instead_of_hanging_offline() {
+    let env = spawn_env("expire").await;
+    let cache_path = temp_cache("expire");
+
+    // A real account whose refresh token we then REVOKE server-side, so any
+    // refresh the client attempts comes back 401 (the "server lost my
+    // session" condition).
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+    let (username, email) = unique("ex");
+    let auth = api
+        .register(&email, &username, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+    api.logout(&auth.refresh_token).await.unwrap(); // revoke the family
+
+    // Stored (now-dead) refresh token + a cached user row → `session_status`
+    // returns Some and the UI renders the shell (cache-first).
+    let keys: Arc<MemoryKeyStore> = Arc::default();
+    keys.set(&auth.refresh_token).unwrap();
+    let cfg = CoreConfig {
+        api_url: env.base.clone(),
+        wss_url: env.wss.clone(),
+        quic: None,
+        policy: dice_network_core::client::TransportPolicy::WssOnly,
+        tls: env.tls.clone(),
+        cache_path: cache_path.clone(),
+    };
+    let (emitter, mut events) = test_emitter();
+    let core = ClientCore::new(
+        cfg,
+        keys.clone() as Arc<dyn KeyStore>,
+        emitter,
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap();
+    core.cache().set_current_user(user.clone()).await.unwrap();
+
+    let resumed = core.session_status().await.unwrap();
+    assert!(
+        resumed.is_some(),
+        "cache-first: the shell renders before the gateway proves liveness"
+    );
+    assert!(core.has_stored_session());
+
+    // The gateway driver refreshes → 401 → AuthExpired → the bridge clears
+    // credentials and tells the webview to show login.
+    expect_emitted(&mut events, "sessionExpired", |p| {
+        (p["type"] == "sessionExpired").then_some(())
+    })
+    .await;
+    assert!(
+        !core.has_stored_session(),
+        "credentials cleared so the next launch shows login, not an Offline shell"
+    );
+
+    core.shutdown_gateway().await;
+    drop(core);
+    cleanup(&env.pool, &[user.id]).await;
+    let _ = std::fs::remove_file(&cache_path);
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}

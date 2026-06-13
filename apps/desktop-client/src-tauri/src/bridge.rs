@@ -18,6 +18,14 @@ use crate::dto::{
     ChannelDto, DiceEvent, GuildDto, MessageDto, RESYNC_CHANNEL, id_str, presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
+use crate::session::SessionManager;
+
+/// Whether the pump should keep running after an event.
+enum Pump {
+    Continue,
+    /// Terminal: tear the driver down and end the bridge task.
+    Stop,
+}
 
 /// Presence updates are batched on this tick to keep webview wakeups low.
 const PRESENCE_TICK: Duration = Duration::from_millis(100);
@@ -50,6 +58,8 @@ pub fn conn_state_str(state: ConnStateLite) -> &'static str {
 pub struct Bridge {
     cache: Cache,
     emitter: Arc<dyn Emitter>,
+    /// Cleared (keyring + RAM) when the gateway reports the session is dead.
+    session: Arc<SessionManager>,
     presence: PresenceMap,
     pending: PendingMap,
     current_user: Arc<StdMutex<Option<v1::User>>>,
@@ -67,6 +77,7 @@ impl Bridge {
     pub fn new(
         cache: Cache,
         emitter: Arc<dyn Emitter>,
+        session: Arc<SessionManager>,
         presence: PresenceMap,
         pending: PendingMap,
         current_user: Arc<StdMutex<Option<v1::User>>>,
@@ -76,6 +87,7 @@ impl Bridge {
         Self {
             cache,
             emitter,
+            session,
             presence,
             pending,
             current_user,
@@ -102,7 +114,14 @@ impl Bridge {
                 cmd = cmds.recv() => Next::Cmd(cmd),
             };
             match next {
-                Next::Event(Some(event)) => self.on_event(event).await,
+                Next::Event(Some(event)) => {
+                    if let Pump::Stop = self.on_event(event).await {
+                        // Terminal (session expired): stop the parked driver
+                        // so the gateway slot frees up for the next login.
+                        handle.shutdown().await;
+                        return;
+                    }
+                }
                 Next::Event(None) => return, // driver gone
                 Next::Cmd(None) | Next::Cmd(Some(Command::Shutdown)) => {
                     handle.shutdown().await;
@@ -117,15 +136,21 @@ impl Bridge {
         }
     }
 
-    async fn on_event(&mut self, event: ClientEvent) {
+    async fn on_event(&mut self, event: ClientEvent) -> Pump {
         match event {
             ClientEvent::Ready(ready) => self.on_ready(*ready).await,
             ClientEvent::Resumed { .. } => {} // replayed dispatches follow normally
             ClientEvent::SessionInvalidated => {
+                // NOT terminal: the resume token was stale but a fresh Identify
+                // is in flight on the same connection. Just mark caches stale.
                 if let Err(error) = self.cache.mark_all_stale().await {
                     tracing::warn!(%error, "mark_all_stale failed");
                 }
                 self.resync_pending = true;
+            }
+            ClientEvent::AuthExpired { reason } => {
+                self.on_auth_expired(reason).await;
+                return Pump::Stop;
             }
             ClientEvent::Ack { nonce, message } => self.on_ack(nonce, message).await,
             ClientEvent::RequestError { nonce, error } => {
@@ -171,6 +196,23 @@ impl Bridge {
                 );
             }
         }
+        Pump::Continue
+    }
+
+    /// The server rejected the stored session for good (Issue 1). Clear
+    /// credentials + the cache locally and tell the webview to show login,
+    /// so a monolith restart that wiped server-side sessions can't leave the
+    /// client stranded on an "Offline" shell with no way back.
+    async fn on_auth_expired(&mut self, reason: String) {
+        tracing::warn!(%reason, "gateway session expired; clearing local credentials");
+        self.session.clear().await;
+        if let Err(error) = self.cache.wipe().await {
+            tracing::warn!(%error, "cache wipe after session expiry failed");
+        }
+        self.pending.lock().expect("pending lock").clear();
+        self.presence.lock().expect("presence lock").clear();
+        *self.current_user.lock().expect("user lock") = None;
+        emit_dice(&self.emitter, &DiceEvent::SessionExpired);
     }
 
     async fn on_ready(&mut self, ready: v1::Ready) {

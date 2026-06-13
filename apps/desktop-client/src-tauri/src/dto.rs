@@ -228,6 +228,10 @@ pub enum DiceEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         transport: Option<String>,
     },
+    /// The stored session was rejected by the server (terminal). The host has
+    /// already cleared credentials + cache; the webview must route to login.
+    #[serde(rename_all = "camelCase")]
+    SessionExpired,
 }
 
 #[cfg(test)]
@@ -260,6 +264,9 @@ mod tests {
         })
         .unwrap();
         assert!(idle.get("transport").is_none());
+
+        let expired = serde_json::to_value(DiceEvent::SessionExpired).unwrap();
+        assert_eq!(expired["type"], "sessionExpired");
     }
 
     #[test]

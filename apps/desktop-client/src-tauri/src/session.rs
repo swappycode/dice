@@ -108,11 +108,16 @@ impl SessionManager {
                 .map_err(|e| TokenError::Refresh(format!("keyring read: {e}")))?
                 .ok_or(TokenError::NoCredentials)?,
         };
-        let auth = self
-            .api
-            .refresh(&refresh)
-            .await
-            .map_err(|e| TokenError::Refresh(e.to_string()))?;
+        let auth = self.api.refresh(&refresh).await.map_err(|e| {
+            // A 4xx means the server refused this refresh token (revoked,
+            // rotated, expired) — terminal, the host must re-authenticate.
+            // 5xx / transport errors are transient and stay retryable.
+            if matches!(e.status(), Some(status) if (400..500).contains(&status)) {
+                TokenError::Rejected(e.to_string())
+            } else {
+                TokenError::Refresh(e.to_string())
+            }
+        })?;
         // Rotation: persist the NEW refresh token before handing anything out.
         if let Err(error) = self.keys.set(&auth.refresh_token) {
             tracing::warn!(%error, "keyring write failed; rotated token is RAM-only");

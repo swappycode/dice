@@ -250,6 +250,7 @@ impl ClientCore {
         let bridge = Bridge::new(
             self.cache.clone(),
             Arc::clone(&self.emitter),
+            Arc::clone(&self.session),
             Arc::clone(&self.presence),
             Arc::clone(&self.pending),
             Arc::clone(&self.current_user),
