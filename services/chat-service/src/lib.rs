@@ -61,12 +61,14 @@ pub trait Chat: Send + Sync {
     async fn sync_user_state(&self, user: UserId) -> Result<UserSyncState, ChatError>;
 
     /// Persists and publishes `MessageCreate{message, nonce}` to the channel's
-    /// subject. Returns the message for the gateway's `SendMessageAck`.
+    /// subject. `reply_to` (when set) is stored as `reply_to_id`. Returns the
+    /// message for the gateway's `SendMessageAck`.
     async fn send_message(
         &self,
         actor: UserId,
         channel: ChannelId,
         content: String,
+        reply_to: Option<MessageId>,
         nonce: u64,
     ) -> Result<v1::Message, ChatError>;
 
@@ -98,6 +100,26 @@ pub trait Chat: Send + Sync {
         actor: UserId,
         channel: ChannelId,
         message: MessageId,
+    ) -> Result<(), ChatError>;
+
+    /// Add the actor's `emoji` reaction (idempotent). On a real change,
+    /// broadcasts a `ReactionUpdate{added:true}` delta to the channel.
+    async fn add_reaction(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: String,
+    ) -> Result<(), ChatError>;
+
+    /// Remove the actor's `emoji` reaction (idempotent). On a real change,
+    /// broadcasts a `ReactionUpdate{added:false}` delta to the channel.
+    async fn remove_reaction(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: String,
     ) -> Result<(), ChatError>;
 
     /// Creates the guild AND its `#general` channel in one transaction

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, author_id, content, edited_at FROM messages WHERE channel_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
+  "query": "SELECT id, author_id, content, edited_at, reply_to_id FROM messages WHERE channel_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "edited_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "reply_to_id",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -35,8 +40,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "a7f93a87766ee809191095b8e17c36a73aae4b004467957eaf7382bce2868ea8"
+  "hash": "279a14aa3a9597cfa48f99dff0951f04539d8502ca9accbf7ec086951985a611"
 }

@@ -75,12 +75,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrator_embeds_four_migrations_with_strictly_increasing_versions() {
+    fn migrator_embeds_migrations_with_strictly_increasing_versions() {
         let versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
         assert_eq!(
             versions.len(),
-            4,
-            "expected exactly 4 embedded migrations, got {versions:?}"
+            6,
+            "expected 6 embedded migrations (M1 4 + M2 replies/reactions), got {versions:?}"
         );
         assert!(
             versions.windows(2).all(|w| w[0] < w[1]),
@@ -89,11 +89,18 @@ mod tests {
     }
 
     #[test]
-    fn migration_descriptions_match_the_m1_schema_files() {
+    fn migration_descriptions_match_the_schema_files() {
         let descriptions: Vec<&str> = MIGRATOR.iter().map(|m| m.description.as_ref()).collect();
         assert_eq!(
             descriptions,
-            ["users", "auth sessions", "guilds channels", "messages"]
+            [
+                "users",
+                "auth sessions",
+                "guilds channels",
+                "messages",
+                "replies",
+                "reactions"
+            ]
         );
     }
 
@@ -108,7 +115,7 @@ mod tests {
     /// `cargo test -p dice-database -- --ignored`.
     #[tokio::test]
     #[ignore = "requires live Postgres (just infra-up + DATABASE_URL)"]
-    async fn migrate_creates_all_eight_tables() {
+    async fn migrate_creates_all_tables() {
         let cfg = DbConfig::from_env().expect("DATABASE_URL must be set for this test");
         let pool = connect(&cfg).await.expect("connect to Postgres");
         migrate(&pool).await.expect("run embedded migrations");
@@ -122,6 +129,7 @@ mod tests {
             "channels",
             "channel_recipients",
             "messages",
+            "message_reactions",
         ]
         .iter()
         .map(|s| (*s).to_owned())

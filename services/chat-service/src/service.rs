@@ -46,6 +46,7 @@ const MEMBER_CAP: i64 = 100;
 
 const MAX_MESSAGE_CHARS: usize = 4000;
 const MAX_NAME_CHARS: usize = 100;
+const MAX_EMOJI_CHARS: usize = 64; // matches the message_reactions CHECK
 
 /// The Postgres-backed [`Chat`] implementation used by the monolith and the
 /// split-mode chat bin.
@@ -221,6 +222,7 @@ impl Chat for ChatService {
         actor: UserId,
         channel: ChannelId,
         content: String,
+        reply_to: Option<MessageId>,
         nonce: u64,
     ) -> Result<v1::Message, ChatError> {
         let content = validate_trimmed(&content, MAX_MESSAGE_CHARS, "message content")?;
@@ -230,13 +232,18 @@ impl Chat for ChatService {
         }
 
         let id = self.ids.generate();
+        // reply_to_id is a plain column (no FK): a since-deleted parent is fine,
+        // it just renders as "original message" client-side.
+        let reply_to_id = reply_to.map(|m| m.as_i64());
         let mut tx = self.pool.begin().await.map_err(internal)?;
         sqlx::query!(
-            "INSERT INTO messages (id, channel_id, author_id, content) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO messages (id, channel_id, author_id, content, reply_to_id) \
+             VALUES ($1, $2, $3, $4, $5)",
             id.as_i64(),
             channel.as_i64(),
             actor.as_i64(),
-            content.as_str()
+            content.as_str(),
+            reply_to_id
         )
         .execute(&mut *tx)
         .await
@@ -257,6 +264,8 @@ impl Chat for ChatService {
             author_id: actor.raw(),
             content,
             edited_at_ms: 0,
+            reply_to_id: reply_to.map_or(0, |m| m.raw()),
+            reactions: Vec::new(),
         };
         let payload = FramePayload::MessageCreate(v1::MessageCreate {
             message: Some(message.clone()),
@@ -277,9 +286,9 @@ impl Chat for ChatService {
         self.channel_access(actor, channel).await?;
         let n = i64::from(limit.clamp(1, 100));
 
-        let messages = match cursor {
+        let mut messages = match cursor {
             HistoryCursor::Latest => sqlx::query!(
-                "SELECT id, author_id, content, edited_at FROM messages \
+                "SELECT id, author_id, content, edited_at, reply_to_id FROM messages \
                  WHERE channel_id = $1 ORDER BY id DESC LIMIT $2",
                 channel.as_i64(),
                 n
@@ -288,10 +297,19 @@ impl Chat for ChatService {
             .await
             .map_err(internal)?
             .into_iter()
-            .map(|r| message_row(channel, r.id, r.author_id, r.content, r.edited_at))
+            .map(|r| {
+                message_row(
+                    channel,
+                    r.id,
+                    r.author_id,
+                    r.content,
+                    r.edited_at,
+                    r.reply_to_id,
+                )
+            })
             .collect(),
             HistoryCursor::Before(before) => sqlx::query!(
-                "SELECT id, author_id, content, edited_at FROM messages \
+                "SELECT id, author_id, content, edited_at, reply_to_id FROM messages \
                  WHERE channel_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
                 channel.as_i64(),
                 before.as_i64(),
@@ -301,7 +319,16 @@ impl Chat for ChatService {
             .await
             .map_err(internal)?
             .into_iter()
-            .map(|r| message_row(channel, r.id, r.author_id, r.content, r.edited_at))
+            .map(|r| {
+                message_row(
+                    channel,
+                    r.id,
+                    r.author_id,
+                    r.content,
+                    r.edited_at,
+                    r.reply_to_id,
+                )
+            })
             .collect(),
             HistoryCursor::After(after) => {
                 // Fetched ASCENDING so the keyset picks the n oldest rows
@@ -309,7 +336,7 @@ impl Chat for ChatService {
                 // so the return contract stays NEWEST-FIRST for every cursor
                 // variant.
                 let mut rows: Vec<v1::Message> = sqlx::query!(
-                    "SELECT id, author_id, content, edited_at FROM messages \
+                    "SELECT id, author_id, content, edited_at, reply_to_id FROM messages \
                      WHERE channel_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3",
                     channel.as_i64(),
                     after.as_i64(),
@@ -319,12 +346,22 @@ impl Chat for ChatService {
                 .await
                 .map_err(internal)?
                 .into_iter()
-                .map(|r| message_row(channel, r.id, r.author_id, r.content, r.edited_at))
+                .map(|r| {
+                    message_row(
+                        channel,
+                        r.id,
+                        r.author_id,
+                        r.content,
+                        r.edited_at,
+                        r.reply_to_id,
+                    )
+                })
                 .collect();
                 rows.reverse();
                 rows
             }
         };
+        self.attach_reactions(actor, &mut messages).await?;
         Ok(messages)
     }
 
@@ -367,6 +404,10 @@ impl Chat for ChatService {
             author_id: actor.raw(),
             content,
             edited_at_ms: edited_at.map_or(0, ms),
+            // The client MERGES updates (keeps its cached reply/reactions), so an
+            // edit need not re-fetch them — these stay zero/empty on the wire.
+            reply_to_id: 0,
+            reactions: Vec::new(),
         };
         let payload = FramePayload::MessageUpdate(v1::MessageUpdate {
             message: Some(message.clone()),
@@ -412,6 +453,61 @@ impl Chat for ChatService {
             message_id: message.raw(),
         });
         self.publish_to_channel(&access, channel, payload).await;
+        Ok(())
+    }
+
+    async fn add_reaction(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: String,
+    ) -> Result<(), ChatError> {
+        let emoji = validate_trimmed(&emoji, MAX_EMOJI_CHARS, "reaction")?;
+        let access = self.channel_access(actor, channel).await?;
+        self.require_message_in_channel(channel, message).await?;
+        let changed = sqlx::query!(
+            "INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) \
+             ON CONFLICT DO NOTHING",
+            message.as_i64(),
+            actor.as_i64(),
+            emoji.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        // Only fan out a delta when the state actually changed (no double-add).
+        if changed > 0 {
+            self.broadcast_reaction(&access, channel, message, &emoji, actor, true)
+                .await;
+        }
+        Ok(())
+    }
+
+    async fn remove_reaction(
+        &self,
+        actor: UserId,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: String,
+    ) -> Result<(), ChatError> {
+        let emoji = validate_trimmed(&emoji, MAX_EMOJI_CHARS, "reaction")?;
+        let access = self.channel_access(actor, channel).await?;
+        let changed = sqlx::query!(
+            "DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3",
+            message.as_i64(),
+            actor.as_i64(),
+            emoji.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if changed > 0 {
+            self.broadcast_reaction(&access, channel, message, &emoji, actor, false)
+                .await;
+        }
         Ok(())
     }
 
@@ -886,6 +982,87 @@ impl ChatService {
             }
         }
     }
+
+    /// Confirm a message exists in this channel before reacting to it (a
+    /// reaction to an unknown/foreign message is a clean `NotFound`).
+    async fn require_message_in_channel(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), ChatError> {
+        let exists = sqlx::query_scalar!(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE id = $1 AND channel_id = $2)",
+            message.as_i64(),
+            channel.as_i64()
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(internal)?;
+        if exists == Some(true) {
+            Ok(())
+        } else {
+            Err(ChatError::NotFound)
+        }
+    }
+
+    /// Broadcast a reaction DELTA to the channel (each client adjusts its own
+    /// aggregate and flips `me` when `user_id` is itself).
+    async fn broadcast_reaction(
+        &self,
+        access: &ChannelAccess,
+        channel: ChannelId,
+        message: MessageId,
+        emoji: &str,
+        actor: UserId,
+        added: bool,
+    ) {
+        let payload = FramePayload::ReactionUpdate(v1::ReactionUpdate {
+            channel_id: channel.raw(),
+            message_id: message.raw(),
+            emoji: emoji.to_owned(),
+            user_id: actor.raw(),
+            added,
+        });
+        self.publish_to_channel(access, channel, payload).await;
+    }
+
+    /// Populate each message's `reactions` with the per-emoji aggregate from
+    /// the requesting user's perspective (one grouped query for the whole page).
+    async fn attach_reactions(
+        &self,
+        actor: UserId,
+        messages: &mut [v1::Message],
+    ) -> Result<(), ChatError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<i64> = messages.iter().map(|m| m.id as i64).collect();
+        let rows = sqlx::query!(
+            r#"SELECT message_id, emoji, COUNT(*) AS "count!", BOOL_OR(user_id = $2) AS "me!"
+               FROM message_reactions WHERE message_id = ANY($1)
+               GROUP BY message_id, emoji ORDER BY message_id, MIN(created_at)"#,
+            &ids[..],
+            actor.as_i64()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut by_msg: std::collections::HashMap<i64, Vec<v1::Reaction>> =
+            std::collections::HashMap::new();
+        for r in rows {
+            by_msg.entry(r.message_id).or_default().push(v1::Reaction {
+                emoji: r.emoji,
+                count: u32::try_from(r.count).unwrap_or(u32::MAX),
+                me: r.me,
+            });
+        }
+        for m in messages.iter_mut() {
+            if let Some(reactions) = by_msg.remove(&(m.id as i64)) {
+                m.reactions = reactions;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn internal<E>(e: E) -> ChatError
@@ -976,6 +1153,7 @@ fn message_row(
     author_id: i64,
     content: String,
     edited_at: Option<OffsetDateTime>,
+    reply_to_id: Option<i64>,
 ) -> v1::Message {
     v1::Message {
         id: id as u64,
@@ -983,6 +1161,9 @@ fn message_row(
         author_id: author_id as u64,
         content,
         edited_at_ms: edited_at.map_or(0, ms),
+        reply_to_id: reply_to_id.map_or(0, |v| v as u64),
+        // Filled by `attach_reactions` after the page is built.
+        reactions: Vec::new(),
     }
 }
 

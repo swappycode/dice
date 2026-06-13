@@ -472,6 +472,7 @@ async fn wss_end_to_end_gate_rehearsal() {
         Payload::SendMessage(v1::SendMessageRequest {
             channel_id: general.id,
             content: "first message".into(),
+            reply_to_id: 0,
         }),
     ))
     .await;
@@ -616,6 +617,7 @@ async fn wss_end_to_end_gate_rehearsal() {
         Payload::SendMessage(v1::SendMessageRequest {
             channel_id: general.id,
             content: "while you were away".into(),
+            reply_to_id: 0,
         }),
     ))
     .await;

@@ -166,6 +166,7 @@ mod tests {
             Payload::SendMessage(v1::SendMessageRequest {
                 channel_id: 1,
                 content: "x".repeat(MAX_FRAME_BYTES + 1),
+                reply_to_id: 0,
             }),
         );
         let mut buf = BytesMut::new();

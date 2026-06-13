@@ -432,6 +432,8 @@ mod tests {
                         author_id: 1,
                         content: content.to_owned(),
                         edited_at_ms: 0,
+                        reply_to_id: 0,
+                        reactions: Vec::new(),
                     }),
                     nonce: 0,
                 },

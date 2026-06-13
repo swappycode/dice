@@ -47,5 +47,14 @@ message Message {
   fixed64 channel_id = 2;
   fixed64 author_id = 3;
   string content = 4;
-  uint64 edited_at_ms = 5;       // 0 = never edited (editing itself is post-M1)
+  uint64 edited_at_ms = 5;       // 0 = never edited
+  fixed64 reply_to_id = 6;       // 0 = not a reply; parent may have been deleted
+  repeated Reaction reactions = 7; // aggregated for the requesting user (history/Ready)
+}
+
+// One emoji's aggregate on a message, from the requesting user's perspective.
+message Reaction {
+  string emoji = 1;
+  uint32 count = 2;
+  bool me = 3;                   // the requesting user reacted with this emoji
 }

@@ -136,6 +136,7 @@ pub(crate) async fn handle(
             if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
                 return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
             }
+            let reply_to = (req.reply_to_id != 0).then(|| MessageId::from_raw(req.reply_to_id));
             let result = gw
                 .deps
                 .chat
@@ -143,6 +144,7 @@ pub(crate) async fn handle(
                     st.user,
                     ChannelId::from_raw(req.channel_id),
                     req.content,
+                    reply_to,
                     nonce,
                 )
                 .await;
@@ -192,6 +194,46 @@ pub(crate) async fn handle(
                     st.user,
                     ChannelId::from_raw(req.channel_id),
                     MessageId::from_raw(req.message_id),
+                )
+                .await
+            {
+                return send_or_detach(transport, &chat_error_frame(nonce, &error)).await;
+            }
+            None
+        }
+
+        Some(Payload::AddReaction(req)) => {
+            if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
+                return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
+            }
+            if let Err(error) = gw
+                .deps
+                .chat
+                .add_reaction(
+                    st.user,
+                    ChannelId::from_raw(req.channel_id),
+                    MessageId::from_raw(req.message_id),
+                    req.emoji,
+                )
+                .await
+            {
+                return send_or_detach(transport, &chat_error_frame(nonce, &error)).await;
+            }
+            None
+        }
+
+        Some(Payload::RemoveReaction(req)) => {
+            if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
+                return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
+            }
+            if let Err(error) = gw
+                .deps
+                .chat
+                .remove_reaction(
+                    st.user,
+                    ChannelId::from_raw(req.channel_id),
+                    MessageId::from_raw(req.message_id),
+                    req.emoji,
                 )
                 .await
             {

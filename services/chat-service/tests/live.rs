@@ -258,7 +258,7 @@ async fn send_message_dispatches_with_nonce_and_updates_last_message_id() {
     let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, general, "  hello dice  ".into(), 42)
+        .send_message(a, general, "  hello dice  ".into(), None, 42)
         .await
         .unwrap();
     assert_eq!(msg.content, "hello dice", "content is trimmed");
@@ -298,7 +298,7 @@ async fn send_message_requires_membership_and_send_permission() {
     // Non-member.
     let err = ctx
         .svc
-        .send_message(b, general, "hi".into(), 1)
+        .send_message(b, general, "hi".into(), None, 1)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotAMember), "{err:?}");
@@ -306,7 +306,7 @@ async fn send_message_requires_membership_and_send_permission() {
     // Unknown channel (snowflakes are never 1).
     let err = ctx
         .svc
-        .send_message(a, ChannelId::from_raw(1), "hi".into(), 1)
+        .send_message(a, ChannelId::from_raw(1), "hi".into(), None, 1)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotFound), "{err:?}");
@@ -324,7 +324,7 @@ async fn send_message_requires_membership_and_send_permission() {
     .unwrap();
     match ctx
         .svc
-        .send_message(b, general, "hi".into(), 1)
+        .send_message(b, general, "hi".into(), None, 1)
         .await
         .unwrap_err()
     {
@@ -336,7 +336,7 @@ async fn send_message_requires_membership_and_send_permission() {
 
     // The owner always passes (compute() owner override).
     ctx.svc
-        .send_message(a, general, "owner ok".into(), 2)
+        .send_message(a, general, "owner ok".into(), None, 2)
         .await
         .unwrap();
 
@@ -353,7 +353,7 @@ async fn edit_message_is_author_only_and_publishes_update() {
     ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, ch, "typo heer".into(), 1)
+        .send_message(a, ch, "typo heer".into(), None, 1)
         .await
         .unwrap();
 
@@ -413,7 +413,7 @@ async fn delete_message_allows_author_or_manage_messages() {
     // A plain member cannot delete someone else's message.
     let m1 = ctx
         .svc
-        .send_message(a, ch, "a-one".into(), 1)
+        .send_message(a, ch, "a-one".into(), None, 1)
         .await
         .unwrap();
     let err = ctx
@@ -447,7 +447,7 @@ async fn delete_message_allows_author_or_manage_messages() {
     // A moderator with MANAGE_MESSAGES deletes another user's message.
     let m2 = ctx
         .svc
-        .send_message(a, ch, "a-two".into(), 2)
+        .send_message(a, ch, "a-two".into(), None, 2)
         .await
         .unwrap();
     sqlx::query!(
@@ -468,6 +468,130 @@ async fn delete_message_allows_author_or_manage_messages() {
 }
 
 #[tokio::test]
+async fn reply_to_id_round_trips_through_history() {
+    let ctx = Ctx::new(1).await;
+    let a = ctx.users[0];
+    let guild = ctx.svc.create_guild(a, "reply-test".into()).await.unwrap();
+    let ch = ChannelId::from_raw(guild.channels[0].id);
+    let parent = ctx
+        .svc
+        .send_message(a, ch, "original".into(), None, 1)
+        .await
+        .unwrap();
+    let reply = ctx
+        .svc
+        .send_message(
+            a,
+            ch,
+            "a reply".into(),
+            Some(MessageId::from_raw(parent.id)),
+            2,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.reply_to_id, parent.id);
+
+    let page = ctx
+        .svc
+        .get_messages(a, ch, HistoryCursor::Latest, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.iter().find(|m| m.id == reply.id).unwrap().reply_to_id,
+        parent.id,
+        "history preserves reply_to_id"
+    );
+    assert_eq!(
+        page.iter().find(|m| m.id == parent.id).unwrap().reply_to_id,
+        0,
+        "a non-reply is 0"
+    );
+    ctx.finish().await;
+}
+
+#[tokio::test]
+async fn reactions_aggregate_in_history_and_broadcast_deltas() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let guild = ctx.svc.create_guild(a, "react-test".into()).await.unwrap();
+    let gid = GuildId::from_raw(guild.id);
+    let ch = ChannelId::from_raw(guild.channels[0].id);
+    ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
+    let msg = ctx
+        .svc
+        .send_message(a, ch, "react to me".into(), None, 1)
+        .await
+        .unwrap();
+    let mid = MessageId::from_raw(msg.id);
+
+    let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
+    ctx.svc.add_reaction(a, ch, mid, "👍".into()).await.unwrap();
+    let ev = next_event(&mut sub).await;
+    let frame::Payload::ReactionUpdate(ru) = dispatch(&ev) else {
+        panic!("expected ReactionUpdate, got {ev:?}");
+    };
+    assert_eq!(
+        (ru.message_id, ru.emoji.as_str(), ru.user_id, ru.added),
+        (msg.id, "👍", a.raw(), true)
+    );
+
+    // Idempotent re-add fans out nothing.
+    ctx.svc.add_reaction(a, ch, mid, "👍".into()).await.unwrap();
+    expect_silence(&mut sub).await;
+
+    ctx.svc.add_reaction(b, ch, mid, "👍".into()).await.unwrap();
+    let _ = next_event(&mut sub).await;
+
+    // History aggregate from a's perspective: 👍 ×2, me = true.
+    let page = ctx
+        .svc
+        .get_messages(a, ch, HistoryCursor::Latest, 10)
+        .await
+        .unwrap();
+    let got = page.iter().find(|m| m.id == msg.id).unwrap();
+    assert_eq!(got.reactions.len(), 1);
+    assert_eq!(
+        (
+            got.reactions[0].emoji.as_str(),
+            got.reactions[0].count,
+            got.reactions[0].me
+        ),
+        ("👍", 2, true)
+    );
+
+    ctx.svc
+        .remove_reaction(a, ch, mid, "👍".into())
+        .await
+        .unwrap();
+    let ev = next_event(&mut sub).await;
+    let frame::Payload::ReactionUpdate(ru) = dispatch(&ev) else {
+        panic!("expected ReactionUpdate");
+    };
+    assert!(!ru.added);
+    let page2 = ctx
+        .svc
+        .get_messages(a, ch, HistoryCursor::Latest, 10)
+        .await
+        .unwrap();
+    let got2 = page2.iter().find(|m| m.id == msg.id).unwrap();
+    assert_eq!(
+        (got2.reactions[0].count, got2.reactions[0].me),
+        (1, false),
+        "a's reaction removed"
+    );
+
+    // Reacting to an unknown message is NotFound.
+    let err = ctx
+        .svc
+        .add_reaction(a, ch, MessageId::from_raw(1), "x".into())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::NotFound), "{err:?}");
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn get_messages_keyset_pagination_newest_first() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);
@@ -478,7 +602,7 @@ async fn get_messages_keyset_pagination_newest_first() {
     for i in 0..15u64 {
         sent.push(
             ctx.svc
-                .send_message(a, ch, format!("m{i}"), i)
+                .send_message(a, ch, format!("m{i}"), None, i)
                 .await
                 .unwrap(),
         );
@@ -594,7 +718,7 @@ async fn open_dm_is_idempotent_and_notifies_both_users() {
     let dch = ChannelId::from_raw(dm.id);
     let err = ctx
         .svc
-        .send_message(c, dch, "intrude".into(), 1)
+        .send_message(c, dch, "intrude".into(), None, 1)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotAMember), "{err:?}");
@@ -602,7 +726,7 @@ async fn open_dm_is_idempotent_and_notifies_both_users() {
     let mut dm_sub = ctx.bus.subscribe(Subject::DmMsg(dch)).await.unwrap();
     let msg = ctx
         .svc
-        .send_message(a, dch, "dm hello".into(), 9)
+        .send_message(a, dch, "dm hello".into(), None, 9)
         .await
         .unwrap();
     let ev = next_event(&mut dm_sub).await;
@@ -724,7 +848,7 @@ async fn message_content_length_is_validated() {
     for bad in ["", "   \n\t ", too_long.as_str()] {
         let err = ctx
             .svc
-            .send_message(a, ch, bad.to_owned(), 1)
+            .send_message(a, ch, bad.to_owned(), None, 1)
             .await
             .unwrap_err();
         assert!(
@@ -736,13 +860,13 @@ async fn message_content_length_is_validated() {
 
     // Exactly 4000 CHARS (multi-byte) passes validation AND the DB CHECK.
     let content = "é".repeat(4000);
-    let msg = ctx.svc.send_message(a, ch, content, 5).await.unwrap();
+    let msg = ctx.svc.send_message(a, ch, content, None, 5).await.unwrap();
     assert_eq!(msg.content.chars().count(), 4000);
 
     // Validation fires before channel resolution.
     let err = ctx
         .svc
-        .send_message(a, ChannelId::from_raw(1), "y".repeat(4001), 5)
+        .send_message(a, ChannelId::from_raw(1), "y".repeat(4001), None, 5)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");

@@ -7,6 +7,29 @@ import "dice/v1/common.proto";
 message SendMessageRequest {
   fixed64 channel_id = 1;
   string content = 2;        // 1..4000 chars after trim
+  fixed64 reply_to_id = 3;   // 0 = not a reply
+}
+
+// Reactions (M2): toggle one emoji on one message.
+message AddReactionRequest {
+  fixed64 channel_id = 1;
+  fixed64 message_id = 2;
+  string emoji = 3;
+}
+message RemoveReactionRequest {
+  fixed64 channel_id = 1;
+  fixed64 message_id = 2;
+  string emoji = 3;
+}
+
+// Broadcast DELTA (not a full snapshot): each client adjusts its own aggregate
+// and flips `me` when user_id is itself. History/Ready carry the snapshot.
+message ReactionUpdate {
+  fixed64 channel_id = 1;
+  fixed64 message_id = 2;
+  string emoji = 3;
+  fixed64 user_id = 4;
+  bool added = 5;            // true = added, false = removed
 }
 
 message SendMessageAck {

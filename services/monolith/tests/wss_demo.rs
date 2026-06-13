@@ -342,8 +342,9 @@ fn pick_message_create(f: Frame) -> Option<(u64, v1::MessageCreate)> {
 
 #[tokio::test]
 async fn wss_demo_phase2_gate() {
-    // One hard deadline over the whole journey (assignment: 30 s).
-    tokio::time::timeout(Duration::from_secs(30), journey())
+    // One hard deadline over the whole journey (assignment: 30 s). Box::pin —
+    // the journey future is large (grew with the M2 Message fields).
+    tokio::time::timeout(Duration::from_secs(30), Box::pin(journey()))
         .await
         .expect("the demo journey must finish within 30 s");
 }
@@ -468,6 +469,7 @@ async fn journey() {
             Payload::SendMessage(v1::SendMessageRequest {
                 channel_id: general.id,
                 content: "hello bob".into(),
+                reply_to_id: 0,
             }),
         ))
         .await;
@@ -549,6 +551,7 @@ async fn journey() {
         Payload::SendMessage(v1::SendMessageRequest {
             channel_id: dm.id,
             content: "psst, alice".into(),
+            reply_to_id: 0,
         }),
     ))
     .await;
@@ -611,6 +614,7 @@ async fn journey() {
         Payload::SendMessage(v1::SendMessageRequest {
             channel_id: general.id,
             content: "while you were away".into(),
+            reply_to_id: 0,
         }),
     ))
     .await;

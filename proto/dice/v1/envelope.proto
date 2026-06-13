@@ -41,6 +41,8 @@ message Frame {
     UpdatePresenceRequest update_presence = 32;
     EditMessageRequest edit_message = 33;
     DeleteMessageRequest delete_message = 34;
+    AddReactionRequest add_reaction = 35;
+    RemoveReactionRequest remove_reaction = 36;
     // -- server -> client replies (50-69) --
     SendMessageAck send_message_ack = 50;
     // -- sequenced dispatch events (100+) --
@@ -58,5 +60,6 @@ message Frame {
     GuildMemberAdd member_add = 111;
     GuildMemberRemove member_remove = 112;
     DmChannelCreate dm_channel_create = 113;
+    ReactionUpdate reaction_update = 114;
   }
 }

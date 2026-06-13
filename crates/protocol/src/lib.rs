@@ -106,6 +106,8 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         UpdatePresence(_) => 32,
         EditMessage(_) => 33,
         DeleteMessage(_) => 34,
+        AddReaction(_) => 35,
+        RemoveReaction(_) => 36,
         SendMessageAck(_) => 50,
         MessageCreate(_) => 100,
         MessageUpdate(_) => 101,
@@ -121,6 +123,7 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         MemberAdd(_) => 111,
         MemberRemove(_) => 112,
         DmChannelCreate(_) => 113,
+        ReactionUpdate(_) => 114,
     }
 }
 
