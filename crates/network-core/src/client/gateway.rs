@@ -168,6 +168,8 @@ pub enum Command {
         content: String,
         /// 0 = not a reply.
         reply_to_id: u64,
+        /// Pre-uploaded media ids to attach (empty = none).
+        attachment_ids: Vec<u64>,
         nonce: u64,
     },
     /// Edit (author-only) — confirmed by the broadcast MessageUpdate dispatch.
@@ -963,6 +965,7 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
             channel_id,
             content,
             reply_to_id,
+            attachment_ids,
             nonce,
         } => Some(Frame::with_nonce(
             *nonce,
@@ -970,8 +973,7 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
                 channel_id: *channel_id,
                 content: content.clone(),
                 reply_to_id: *reply_to_id,
-                // Wired through to the Command in the client-host change.
-                attachment_ids: Vec::new(),
+                attachment_ids: attachment_ids.clone(),
             }),
         )),
         Command::AddReaction {

@@ -488,6 +488,7 @@ async fn gateway_journey() {
             channel_id: general.id,
             content: "hello bob".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
             nonce,
         })
         .await
@@ -596,6 +597,7 @@ async fn gateway_journey() {
             channel_id: 0xFFFF_FFFF_FFFF,
             content: "into the void".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
             nonce: bad_nonce,
         })
         .await
@@ -624,6 +626,7 @@ async fn gateway_journey() {
         channel_id: general.id,
         content: "while you were away".into(),
         reply_to_id: 0,
+        attachment_ids: Vec::new(),
         nonce: nonce2,
     })
     .await
@@ -886,6 +889,7 @@ async fn quic_only_happy_path_send_and_ack() {
             channel_id: general.id,
             content: "over quic".into(),
             reply_to_id: 0,
+            attachment_ids: Vec::new(),
             nonce,
         })
         .await

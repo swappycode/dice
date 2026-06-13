@@ -120,6 +120,13 @@ async fn spawn_env(tag: &str) -> Env {
             bus.clone(),
         )),
         chat: Arc::new(ChatService::new(pool.clone(), bus.clone(), ids.clone())),
+        media: Arc::new(media_service::MediaService::new(
+            pool.clone(),
+            Arc::new(media_service::LocalFsStore::new(
+                std::env::temp_dir().join(format!("dice-host-gate-media-{}", std::process::id())),
+            )),
+            ids.clone(),
+        )),
         presence: Arc::new(presence_service::PresenceService::new(
             cache.clone(),
             bus.clone(),
@@ -350,7 +357,7 @@ async fn host_gate_full_journey_and_offline_restart() {
     // ---- optimistic send: pending sqlite row → ack reconciles ----
     let channel_id: u64 = general.id.parse().unwrap();
     let pending = core
-        .send_message(&general.id, "hello from the host", None, "nonce-a1")
+        .send_message(&general.id, "hello from the host", None, &[], "nonce-a1")
         .await
         .unwrap();
     assert_eq!(pending.pending, Some(true), "send returns the PENDING row");
@@ -420,6 +427,7 @@ async fn host_gate_full_journey_and_offline_restart() {
         channel_id,
         content: "hello from the raw client".into(),
         reply_to_id: 0,
+        attachment_ids: Vec::new(),
         nonce: 0xB0B,
     })
     .await

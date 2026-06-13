@@ -83,6 +83,24 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_reactions_msg ON message_reactions(message_id, ord);
     ",
+    // v3: attachments (M2). One row per attached media, in display `position`
+    // order. Metadata only (filename/type/size/dims); the bytes are fetched
+    // on demand from GET /v1/media/{id}. Stored for REAL messages only (pending
+    // rows show attachments via the frontend's optimistic copy until the echo).
+    "
+    CREATE TABLE message_attachments (
+        message_id INTEGER NOT NULL,
+        media_id INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        width INTEGER NOT NULL DEFAULT 0,
+        height INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (message_id, media_id)
+    );
+    CREATE INDEX idx_attachments_msg ON message_attachments(message_id, position);
+    ",
 ];
 
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {

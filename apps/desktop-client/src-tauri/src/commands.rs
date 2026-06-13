@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::dto::{BootstrapDto, ChannelDto, GuildDto, MessageDto, SessionDto};
+use crate::dto::{AttachmentDto, BootstrapDto, ChannelDto, GuildDto, MessageDto, SessionDto};
 use crate::state::{ClientCore, CoreError};
 
 type Core<'a> = State<'a, Arc<ClientCore>>;
@@ -66,11 +66,38 @@ pub async fn send_message(
     channel_id: String,
     content: String,
     reply_to_id: Option<String>,
+    attachment_ids: Option<Vec<String>>,
     nonce: String,
 ) -> CmdResult<MessageDto> {
-    core.send_message(&channel_id, &content, reply_to_id.as_deref(), &nonce)
+    core.send_message(
+        &channel_id,
+        &content,
+        reply_to_id.as_deref(),
+        &attachment_ids.unwrap_or_default(),
+        &nonce,
+    )
+    .await
+    .map_err(user)
+}
+
+/// Upload one file ahead of a send. `data_base64` is the raw bytes base64'd
+/// (the JS side strips the `data:` prefix). Returns the stored attachment.
+#[tauri::command]
+pub async fn upload_attachment(
+    core: Core<'_>,
+    filename: String,
+    content_type: String,
+    data_base64: String,
+) -> CmdResult<AttachmentDto> {
+    core.upload_attachment(&filename, &content_type, &data_base64)
         .await
         .map_err(user)
+}
+
+/// Fetch an attachment's bytes as a `data:` URL the webview renders directly.
+#[tauri::command]
+pub async fn fetch_attachment(core: Core<'_>, media_id: String) -> CmdResult<String> {
+    core.fetch_attachment(&media_id).await.map_err(user)
 }
 
 /// Toggle a reaction emoji on a message (server enforces membership).

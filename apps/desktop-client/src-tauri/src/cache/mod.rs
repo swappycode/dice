@@ -15,7 +15,8 @@ use dice_protocol::v1::frame::Payload;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::dto::{
-    BootstrapDto, ChannelDto, GuildDto, MemberDto, MessageDto, ReactionDto, UserDto, snowflake_ms,
+    AttachmentDto, BootstrapDto, ChannelDto, GuildDto, MemberDto, MessageDto, ReactionDto, UserDto,
+    snowflake_ms,
 };
 
 /// Pending rows older than this at open are marked failed (design §3.3).
@@ -168,6 +169,7 @@ impl Cache {
                 Payload::MessageCreate(mc) => {
                     if let Some(message) = &mc.message {
                         upsert_message(&tx, message, None)?;
+                        replace_attachments(&tx, message)?;
                         advance_cursor(&tx, message.channel_id, message.id)?;
                     }
                 }
@@ -251,6 +253,9 @@ impl Cache {
             edited_at_ms: None,
             reply_to_id: reply_to.map(|r| r.to_string()),
             reactions: Vec::new(),
+            // The optimistic copy in the frontend store carries the just-uploaded
+            // attachments; the real set lands when the echo reconciles by nonce.
+            attachments: Vec::new(),
             nonce: Some(client_nonce.clone()),
             pending: Some(true),
             failed: None,
@@ -281,6 +286,7 @@ impl Cache {
                 params![client_nonce],
             )?;
             upsert_message(&tx, &message, Some(&client_nonce))?;
+            replace_attachments(&tx, &message)?;
             advance_cursor(&tx, message.channel_id, message.id)?;
             tx.commit()
         })
@@ -354,6 +360,7 @@ impl Cache {
                 }
             }
             load_reactions_into(conn, &mut out)?;
+            load_attachments_into(conn, &mut out)?;
             Ok(out)
         })
         .await
@@ -452,6 +459,7 @@ impl Cache {
             for message in &messages {
                 upsert_message(&tx, message, None)?;
                 replace_reactions(&tx, message)?;
+                replace_attachments(&tx, message)?;
             }
             let newest = messages.iter().map(|m| m.id as i64).max();
             let oldest = messages.iter().map(|m| m.id as i64).min();
@@ -514,6 +522,7 @@ impl Cache {
             for message in &messages {
                 upsert_message(&tx, message, None)?;
                 replace_reactions(&tx, message)?;
+                replace_attachments(&tx, message)?;
             }
             if let Some(oldest) = messages.iter().map(|m| m.id as i64).min() {
                 tx.execute(
@@ -722,7 +731,9 @@ fn clear_all(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "DELETE FROM meta; DELETE FROM users; DELETE FROM guilds;
          DELETE FROM channels; DELETE FROM dm_participants; DELETE FROM members;
-         DELETE FROM messages; DELETE FROM channel_sync; DELETE FROM read_markers;",
+         DELETE FROM messages; DELETE FROM message_reactions;
+         DELETE FROM message_attachments; DELETE FROM channel_sync;
+         DELETE FROM read_markers;",
     )
 }
 
@@ -769,8 +780,9 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDto> {
         created_at_ms: row.get::<_, i64>(4)? as u64,
         edited_at_ms: row.get::<_, Option<i64>>(5)?.map(|v| v as u64),
         reply_to_id: row.get::<_, Option<i64>>(9)?.map(|v| v.to_string()),
-        // Filled by page_messages via a separate reactions query.
+        // Filled by page_messages via separate reactions/attachments queries.
         reactions: Vec::new(),
+        attachments: Vec::new(),
         nonce: row.get(6)?,
         pending: pending.then_some(true),
         failed: failed.then_some(true),
@@ -798,6 +810,34 @@ fn load_reactions_into(conn: &Connection, messages: &mut [MessageDto]) -> rusqli
             })
         })?;
         m.reactions = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    }
+    Ok(())
+}
+
+/// Fill each (non-pending) message's `attachments` from the cache, in order.
+fn load_attachments_into(conn: &Connection, messages: &mut [MessageDto]) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT media_id, filename, content_type, size_bytes, width, height
+         FROM message_attachments WHERE message_id = ?1 ORDER BY position",
+    )?;
+    for m in messages.iter_mut() {
+        let Ok(id) = m.id.parse::<i64>() else {
+            continue;
+        };
+        if id < 0 {
+            continue; // pending rows carry attachments only in the optimistic copy
+        }
+        let rows = stmt.query_map(params![id], |row| {
+            Ok(AttachmentDto {
+                id: row.get::<_, i64>(0)?.to_string(),
+                filename: row.get(1)?,
+                content_type: row.get(2)?,
+                size_bytes: row.get::<_, i64>(3)? as u64,
+                width: row.get::<_, i64>(4)? as u32,
+                height: row.get::<_, i64>(5)? as u32,
+            })
+        })?;
+        m.attachments = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     }
     Ok(())
 }
@@ -955,6 +995,33 @@ fn replace_reactions(conn: &Connection, message: &v1::Message) -> rusqlite::Resu
     Ok(())
 }
 
+/// Replace a message's cached attachments from an authoritative wire `Message`
+/// (history snapshot / MessageCreate / ack echo). Edits never call this — their
+/// broadcast carries empty attachments and must not wipe the cached set.
+fn replace_attachments(conn: &Connection, message: &v1::Message) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM message_attachments WHERE message_id = ?1",
+        params![message.id as i64],
+    )?;
+    for (pos, a) in message.attachments.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO message_attachments(message_id, media_id, position, filename, content_type, size_bytes, width, height)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                message.id as i64,
+                a.id as i64,
+                pos as i64,
+                a.filename,
+                a.content_type,
+                a.size_bytes as i64,
+                a.width as i64,
+                a.height as i64,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 /// Live event: extend the contiguous window upward + bump last_message_id.
 fn advance_cursor(conn: &Connection, channel_id: u64, message_id: u64) -> rusqlite::Result<()> {
     conn.execute(
@@ -1053,6 +1120,7 @@ mod tests {
             edited_at_ms: 0,
             reply_to_id: 0,
             reactions: Vec::new(),
+            attachments: Vec::new(),
         }
     }
 

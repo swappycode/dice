@@ -472,6 +472,7 @@ impl ClientCore {
         channel_id: &str,
         content: &str,
         reply_to: Option<&str>,
+        attachment_ids: &[String],
         nonce: &str,
     ) -> Result<MessageDto, CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
@@ -479,6 +480,10 @@ impl ClientCore {
             Some(s) => Some(parse_id(s).ok_or_else(|| CoreError::BadId(s.into()))?),
             None => None,
         };
+        let attachments: Vec<u64> = attachment_ids
+            .iter()
+            .map(|s| parse_id(s).ok_or_else(|| CoreError::BadId(s.clone())))
+            .collect::<Result<_, _>>()?;
         let author = self
             .current_user
             .lock()
@@ -516,6 +521,7 @@ impl ClientCore {
                 channel_id: channel,
                 content: content.to_owned(),
                 reply_to_id: reply_to.unwrap_or(0),
+                attachment_ids: attachments,
                 nonce: wire_nonce,
             })
             .await
@@ -524,6 +530,36 @@ impl ClientCore {
             return self.fail_send(wire_nonce, nonce).await;
         }
         Ok(pending_dto)
+    }
+
+    /// Upload one attachment ahead of a send. `data_base64` is the raw file
+    /// bytes base64-encoded (the JS side reads the File and strips the data-URL
+    /// prefix). Returns the stored attachment metadata whose id the caller then
+    /// passes to `send_message`.
+    pub async fn upload_attachment(
+        &self,
+        filename: &str,
+        content_type: &str,
+        data_base64: &str,
+    ) -> Result<crate::dto::AttachmentDto, CoreError> {
+        use base64::Engine as _;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(data_base64.as_bytes())
+            .map_err(|e| CoreError::Internal(format!("bad attachment base64: {e}")))?;
+        let attachment = self.api.upload_media(filename, content_type, data).await?;
+        Ok(crate::dto::AttachmentDto::from(&attachment))
+    }
+
+    /// Fetch one attachment's bytes as a `data:` URL the webview can render
+    /// directly (`<img src>` / a download link). Base64 keeps it compact over
+    /// IPC vs. a JSON number array; the 8 MiB upload cap bounds the cost. A
+    /// streaming custom-URI-scheme handler is a future optimisation.
+    pub async fn fetch_attachment(&self, media_id: &str) -> Result<String, CoreError> {
+        use base64::Engine as _;
+        let id = parse_id(media_id).ok_or_else(|| CoreError::BadId(media_id.into()))?;
+        let (content_type, bytes) = self.api.download_media(id).await?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(format!("data:{content_type};base64,{b64}"))
     }
 
     /// Toggle a reaction. `add=true` reacts, `add=false` un-reacts. Confirmed by

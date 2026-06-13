@@ -195,6 +195,54 @@ impl ApiClient {
             .await
     }
 
+    /// `POST /v1/media` — upload one file (protobuf body, larger limit than the
+    /// realtime path). Returns the stored attachment metadata; its id is then
+    /// referenced in `SendMessage { attachment_ids }`.
+    pub async fn upload_media(
+        &self,
+        filename: &str,
+        content_type: &str,
+        data: Vec<u8>,
+    ) -> Result<v1::Attachment, ApiError> {
+        let resp: v1::UploadMediaResponse = self
+            .post_bearer(
+                "/v1/media",
+                &v1::UploadMediaRequest {
+                    filename: filename.to_owned(),
+                    content_type: content_type.to_owned(),
+                    data: data.into(),
+                },
+            )
+            .await?;
+        resp.attachment.ok_or_else(|| ApiError::Api {
+            status: 502,
+            error: v1::Error {
+                code: ErrorCode::Internal as i32,
+                message: "upload response missing attachment".to_owned(),
+                retry_after_ms: 0,
+            },
+        })
+    }
+
+    /// `GET /v1/media/{id}` — fetch the raw bytes + their MIME type for display.
+    pub async fn download_media(&self, id: u64) -> Result<(String, bytes::Bytes), ApiError> {
+        let url = self.url(&format!("/v1/media/{id}"))?;
+        let response = self
+            .bearer_send(|token| self.http.get(url.clone()).bearer_auth(token))
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(error_from(status, response.bytes().await?.as_ref()));
+        }
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_owned();
+        Ok((content_type, response.bytes().await?))
+    }
+
     // ------------------------------------------------------------ plumbing
 
     fn url(&self, path: &str) -> Result<url::Url, ApiError> {

@@ -166,6 +166,31 @@ impl From<&v1::Reaction> for ReactionDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AttachmentDto {
+    pub id: String,
+    pub filename: String,
+    pub content_type: String,
+    pub size_bytes: u64,
+    /// 0 for non-images (the frontend uses these to reserve layout space).
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<&v1::Attachment> for AttachmentDto {
+    fn from(a: &v1::Attachment) -> Self {
+        Self {
+            id: id_str(a.id),
+            filename: a.filename.clone(),
+            content_type: a.content_type.clone(),
+            size_bytes: a.size_bytes,
+            width: a.width,
+            height: a.height,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageDto {
     pub id: String,
     pub channel_id: String,
@@ -177,6 +202,8 @@ pub struct MessageDto {
     pub reply_to_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<ReactionDto>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -196,6 +223,7 @@ impl MessageDto {
             edited_at_ms: (m.edited_at_ms != 0).then_some(m.edited_at_ms),
             reply_to_id: (m.reply_to_id != 0).then(|| id_str(m.reply_to_id)),
             reactions: m.reactions.iter().map(ReactionDto::from).collect(),
+            attachments: m.attachments.iter().map(AttachmentDto::from).collect(),
             nonce,
             pending: None,
             failed: None,
@@ -319,6 +347,7 @@ mod tests {
             edited_at_ms: 0,
             reply_to_id: 0,
             reactions: Vec::new(),
+            attachments: Vec::new(),
         };
         let dto = MessageDto::from_wire(&m, None);
         assert_eq!(dto.created_at_ms, 1234 + dice_common::time::DICE_EPOCH_MS);
