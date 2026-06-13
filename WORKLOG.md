@@ -7,6 +7,49 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (2/n): carried gaps cleared + message edit/delete
+
+**Branch:** `main`. All gates green: full `just check` (fmt, clippy -D warnings, ~200 tests, aws-lc
+clean), host clippy + `cargo test` (15 lib + 2 host_gate), frontend `tsc` + vite build, `.sqlx`
+re-prepared. Continues from the M2 (1/n) RAM entry below.
+
+**Carried M1 gaps — done (4 of the 5; split-mode NATS RPC deferred to last per the user):**
+- **`--profile` polish** — a named profile now titles its window `Dice — <name>` so two side-by-side
+  instances are tellable apart in Alt-Tab. (The bigger `--profile` blocker — the release exe loading
+  an error page — was the custom-protocol fix in the RAM entry.)
+- **Per-IP rate limiting** — auth-service already had per-IP limits but the gateway always passed
+  `ip=None`, so every unauthenticated client shared one `noip` bucket (one attacker exhausts
+  everyone's login budget). The TLS accept loop now injects the socket peer as a `PeerAddr` request
+  extension; `login`/`register` read it and pass the real IP. X-Forwarded-For stays untrusted.
+  Regression test `serve_https_injects_peer_addr`.
+- **Dedicated heartbeat-timeout close code** — `ERROR_CODE_HEARTBEAT_TIMEOUT=12` (→ 4012), distinct
+  from GOING_AWAY (4011, shutdown) for observability; client maps `4010..=4012` to resume.
+  Protocol §8 + `close_code_mapping` test updated.
+- **Per-account cache hygiene** — `apply_ready` only diffed shared guilds, so logout→login as a
+  different account in the same data dir left the prior account's messages/users/read-markers in the
+  local cache. It now purges all tables on a `current_user_id` mismatch (shares `clear_all` with
+  `wipe`). Test `ready_for_a_different_user_purges_the_previous_account`.
+
+**Chat completeness — message edit + delete (full vertical):**
+- Proto: `EditMessageRequest(33)`/`DeleteMessageRequest(34)` requests; `MessageUpdate(101)`/
+  `MessageDelete(102)` dispatch events (reserved since M1) now live.
+- chat-service: `edit_message` (AUTHOR-ONLY, even for mods — Discord semantics) + `delete_message`
+  (author, or MANAGE_MESSAGES in a guild; DMs author-only). New `ChatError::Forbidden`. Both publish
+  via a shared `publish_to_channel` (refactored `send_message` onto it). Live tests for author-only
+  edit, MANAGE_MESSAGES delete, and the dispatched events (13 chat live tests green).
+- Gateway dispatch arms reply only on error — success is confirmed by the broadcast dispatch the
+  requester also receives (so edit/delete are non-optimistic, no rollback logic).
+- Client: network-core `EditMessage`/`DeleteMessage` commands; host bridge/cache/state/commands/DTO
+  plumbing (cache `MessageUpdate` upserts via ON CONFLICT, `MessageDelete` drops the row); UI hover
+  Edit/Delete on own messages, inline editor (Enter saves / Esc cancels), `(edited)` label; mock IPC
+  implements both for browser demos.
+
+**Next:** replies (`reply_to_id`, reserved in `0004_messages.sql`) + reactions (new table) →
+attachments (media-service + MinIO) → notifications (notification-service + JetStream) → read-markers
+sync → auth hardening → UI funk pass + theme pack. Split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (1/n): WebView2 RAM −44% + release-load fix + perf-mode
 
 **Branch:** `main`. First M2 item — the headline carried gap (idle RAM <100 MB). Host compiles +
