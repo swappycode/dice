@@ -8,6 +8,7 @@ message User {
   string username = 2;
   string display_name = 3;
   uint32 flags = 4;
+  fixed64 avatar_id = 5;   // media id of the avatar image; 0 = none (initials)
 }
 
 enum ChannelKind {

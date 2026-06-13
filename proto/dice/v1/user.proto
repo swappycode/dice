@@ -1,0 +1,17 @@
+// User profile mutations + the user-update dispatch (M2 avatars).
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/common.proto";
+
+// PUT /v1/users/@me/avatar — set or clear the caller's avatar. `media_id`
+// references an already-uploaded image (POST /v1/media); 0 clears the avatar.
+message SetAvatarRequest {
+  fixed64 media_id = 1;
+}
+
+// Broadcast when a user's profile changes (avatar today). Fanned out to the
+// user's own subject + every guild and DM they share, so peers update live.
+message UserUpdate {
+  User user = 1;
+}

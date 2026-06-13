@@ -149,4 +149,14 @@ pub trait Chat: Send + Sync {
 
     /// Membership check + ephemeral `TypingStart` publish. No DB row, ever.
     async fn typing(&self, actor: UserId, channel: ChannelId) -> Result<(), ChatError>;
+
+    /// Set (or clear, `media = None`) the caller's avatar. A non-None media id
+    /// must reference an image the caller uploaded. Publishes `UserUpdate` to
+    /// the caller's own subject + every guild and DM they share, so peers update
+    /// live. Returns the updated user.
+    async fn set_avatar(
+        &self,
+        actor: UserId,
+        media: Option<MediaId>,
+    ) -> Result<v1::User, ChatError>;
 }

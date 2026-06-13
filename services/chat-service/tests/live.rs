@@ -695,6 +695,53 @@ async fn attachments_claim_validate_ownership_and_round_trip() {
 }
 
 #[tokio::test]
+async fn set_avatar_persists_validates_and_broadcasts_user_update() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let guild = ctx.svc.create_guild(a, "avatar-test".into()).await.unwrap();
+    let gid = GuildId::from_raw(guild.id);
+    ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
+
+    let img = insert_media(&ctx.pool, a, "me.png", "image/png", 10, 8, 8).await;
+    let not_image = insert_media(&ctx.pool, a, "doc.txt", "text/plain", 4, 0, 0).await;
+    let b_img = insert_media(&ctx.pool, b, "b.png", "image/png", 5, 2, 2).await;
+
+    // A non-image, and another user's media, are both rejected (no broadcast).
+    assert!(matches!(
+        ctx.svc.set_avatar(a, Some(not_image)).await.unwrap_err(),
+        ChatError::InvalidArgument(_)
+    ));
+    assert!(matches!(
+        ctx.svc.set_avatar(a, Some(b_img)).await.unwrap_err(),
+        ChatError::InvalidArgument(_)
+    ));
+
+    let mut gsub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
+    let user = ctx.svc.set_avatar(a, Some(img)).await.unwrap();
+    assert_eq!(user.avatar_id, img.raw());
+
+    // UserUpdate fans out on the shared guild subject (b sees a's new avatar).
+    let ev = next_event(&mut gsub).await;
+    let frame::Payload::UserUpdate(uu) = dispatch(&ev) else {
+        panic!("expected UserUpdate, got {ev:?}");
+    };
+    let updated = uu.user.as_ref().unwrap();
+    assert_eq!(updated.id, a.raw());
+    assert_eq!(updated.avatar_id, img.raw());
+
+    // Reflected in a fresh sync snapshot for the other member.
+    let state = ctx.svc.sync_user_state(b).await.unwrap();
+    let seen = state.users.iter().find(|u| u.id == a.raw()).unwrap();
+    assert_eq!(seen.avatar_id, img.raw());
+
+    // Clearing sets it back to 0.
+    let cleared = ctx.svc.set_avatar(a, None).await.unwrap();
+    assert_eq!(cleared.avatar_id, 0);
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn get_messages_keyset_pagination_newest_first() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);

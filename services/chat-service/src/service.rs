@@ -195,7 +195,7 @@ impl Chat for ChatService {
 
         let id_list: Vec<i64> = user_ids.into_iter().collect();
         let users = sqlx::query!(
-            r#"SELECT id, username, display_name, flags FROM users
+            r#"SELECT id, username, display_name, flags, avatar_media_id FROM users
                WHERE id = ANY($1::bigint[]) ORDER BY id"#,
             &id_list[..]
         )
@@ -208,6 +208,7 @@ impl Chat for ChatService {
             username: r.username,
             display_name: r.display_name.unwrap_or_default(),
             flags: r.flags as u32,
+            avatar_id: r.avatar_media_id.map_or(0, |v| v as u64),
         })
         .collect();
 
@@ -768,9 +769,97 @@ impl Chat for ChatService {
         }
         Ok(())
     }
+
+    async fn set_avatar(
+        &self,
+        actor: UserId,
+        media: Option<MediaId>,
+    ) -> Result<v1::User, ChatError> {
+        // A non-None avatar must be an image the caller uploaded.
+        if let Some(m) = media {
+            let row = sqlx::query!(
+                "SELECT content_type FROM media WHERE id = $1 AND uploader_id = $2",
+                m.as_i64(),
+                actor.as_i64()
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| {
+                ChatError::InvalidArgument("avatar media not found or not yours".to_owned())
+            })?;
+            if !row.content_type.starts_with("image/") {
+                return Err(ChatError::InvalidArgument(
+                    "avatar must be an image".to_owned(),
+                ));
+            }
+        }
+        sqlx::query!(
+            "UPDATE users SET avatar_media_id = $1, updated_at = now() WHERE id = $2",
+            media.map(|m| m.as_i64()),
+            actor.as_i64()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+
+        let user = self.load_user(actor).await?;
+        self.broadcast_user_update(actor, &user).await;
+        Ok(user)
+    }
 }
 
 impl ChatService {
+    /// Fan a `UserUpdate` to the user's own subject + every guild and DM they
+    /// share, so peers see profile changes (avatar) without a reconnect.
+    async fn broadcast_user_update(&self, actor: UserId, user: &v1::User) {
+        let payload = FramePayload::UserUpdate(v1::UserUpdate {
+            user: Some(user.clone()),
+        });
+        // Self subject (covers a user with no guilds/DMs).
+        let event = self.make_event(0, vec![actor.raw()], false, payload.clone());
+        self.publish(Subject::User(actor), event).await;
+
+        let guild_ids = sqlx::query_scalar!(
+            "SELECT guild_id FROM guild_members WHERE user_id = $1",
+            actor.as_i64()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        for gid in guild_ids {
+            let event = self.make_event(gid as u64, Vec::new(), false, payload.clone());
+            self.publish(Subject::GuildMsg(GuildId::from_i64(gid)), event)
+                .await;
+        }
+
+        let dm_ids = sqlx::query_scalar!(
+            r#"SELECT c.id FROM channels c
+               JOIN channel_recipients cr ON cr.channel_id = c.id
+               WHERE cr.user_id = $1 AND c.channel_type = $2"#,
+            actor.as_i64(),
+            KIND_DM
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        for cid in dm_ids {
+            let recipients = sqlx::query_scalar!(
+                "SELECT user_id FROM channel_recipients WHERE channel_id = $1",
+                cid
+            )
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| v as u64)
+            .collect();
+            let event = self.make_event(0, recipients, false, payload.clone());
+            self.publish(Subject::DmMsg(ChannelId::from_i64(cid)), event)
+                .await;
+        }
+    }
+
     /// Resolve a channel and what `actor` may do in it.
     async fn channel_access(
         &self,
@@ -887,7 +976,7 @@ impl ChatService {
 
     async fn load_user(&self, user: UserId) -> Result<v1::User, ChatError> {
         let r = sqlx::query!(
-            "SELECT id, username, display_name, flags FROM users WHERE id = $1",
+            "SELECT id, username, display_name, flags, avatar_media_id FROM users WHERE id = $1",
             user.as_i64()
         )
         .fetch_optional(&self.pool)
@@ -899,6 +988,7 @@ impl ChatService {
             username: r.username,
             display_name: r.display_name.unwrap_or_default(),
             flags: r.flags as u32,
+            avatar_id: r.avatar_media_id.map_or(0, |v| v as u64),
         })
     }
 

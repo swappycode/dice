@@ -18,7 +18,7 @@ use axum::extract::{DefaultBodyLimit, FromRequest, Path, RawQuery, Request, Stat
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use bytes::Bytes;
 use chat_service::HistoryCursor;
 use dice_common::id::{ChannelId, GuildId, MediaId, UserId};
@@ -60,6 +60,7 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/guilds/join", post(join_guild))
         .route("/v1/channels", post(create_channel))
         .route("/v1/dms", post(open_dm))
+        .route("/v1/users/@me/avatar", put(set_avatar))
         // Download is a GET (no request body), so it rides the 1 MiB limit fine.
         .route("/v1/media/{media_id}", get(serve_media))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -372,6 +373,21 @@ async fn open_dm(
         .await
     {
         Ok(channel) => proto_response(StatusCode::OK, &channel),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// `PUT /v1/users/@me/avatar` (bearer): set or clear the caller's avatar.
+/// `media_id = 0` clears it. The `UserUpdate` broadcast (incl. the caller's own
+/// subject) propagates the change, so this just returns 204.
+async fn set_avatar(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::SetAvatarRequest>,
+) -> Response {
+    let media = (req.media_id != 0).then(|| MediaId::from_raw(req.media_id));
+    match gw.deps.chat.set_avatar(user, media).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => map_chat_error(error),
     }
 }

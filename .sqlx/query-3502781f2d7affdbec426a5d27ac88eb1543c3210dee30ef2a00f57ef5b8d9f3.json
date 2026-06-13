@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, display_name, flags FROM users\n               WHERE id = ANY($1::bigint[]) ORDER BY id",
+  "query": "SELECT id, username, display_name, flags, avatar_media_id, password_hash FROM users WHERE LOWER(email) = LOWER($1)",
   "describe": {
     "columns": [
       {
@@ -22,19 +22,31 @@
         "ordinal": 3,
         "name": "flags",
         "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_media_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "password_hash",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8Array"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
       true,
+      false,
+      true,
       false
     ]
   },
-  "hash": "a5b538a1fdc6575a18efeae2e553bf9469356b84bfd7c1683d90f97b0595ea03"
+  "hash": "3502781f2d7affdbec426a5d27ac88eb1543c3210dee30ef2a00f57ef5b8d9f3"
 }

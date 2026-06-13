@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET avatar_media_id = $1, updated_at = now() WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5cf58e4979af36546fc9d78cacf0d1aef347a802a2e13a69a1231c2e5717ea19"
+}

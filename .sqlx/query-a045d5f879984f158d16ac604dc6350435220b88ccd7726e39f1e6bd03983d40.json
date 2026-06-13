@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO users (id, username, display_name, email, password_hash) VALUES ($1, $2, $2, $3, $4) RETURNING id, username, display_name, flags",
+  "query": "SELECT id, username, display_name, flags, avatar_media_id FROM users WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -22,22 +22,25 @@
         "ordinal": 3,
         "name": "flags",
         "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_media_id",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
       false,
       false,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "e7c3bad5cafff01d766ce70674e863b2b3e102b9f63fe48393bfe2eb66a2dc2b"
+  "hash": "a045d5f879984f158d16ac604dc6350435220b88ccd7726e39f1e6bd03983d40"
 }

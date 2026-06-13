@@ -190,7 +190,7 @@ impl Auth for AuthService {
             UserRow,
             "INSERT INTO users (id, username, display_name, email, password_hash) \
              VALUES ($1, $2, $2, $3, $4) \
-             RETURNING id, username, display_name, flags",
+             RETURNING id, username, display_name, flags, avatar_media_id",
             user_id.as_i64(),
             username,
             email,
@@ -225,7 +225,7 @@ impl Auth for AuthService {
         .await?;
 
         let row = sqlx::query!(
-            "SELECT id, username, display_name, flags, password_hash \
+            "SELECT id, username, display_name, flags, avatar_media_id, password_hash \
              FROM users WHERE LOWER(email) = LOWER($1)",
             email,
         )
@@ -258,6 +258,7 @@ impl Auth for AuthService {
             username: row.username,
             display_name: row.display_name,
             flags: row.flags,
+            avatar_media_id: row.avatar_media_id,
         };
         self.mint_session(&user, ip).await
     }
@@ -276,7 +277,8 @@ impl Auth for AuthService {
                       s.user_id AS "user_id!",
                       u.username AS "username!",
                       u.display_name AS "display_name?",
-                      u.flags AS "flags!"
+                      u.flags AS "flags!",
+                      u.avatar_media_id AS "avatar_media_id?"
                FROM refresh_tokens rt
                JOIN auth_sessions s ON s.id = rt.session_id
                JOIN users u ON u.id = s.user_id
@@ -380,6 +382,7 @@ impl Auth for AuthService {
             username: row.username,
             display_name: row.display_name,
             flags: row.flags,
+            avatar_media_id: row.avatar_media_id,
         };
         Ok(auth_success(access_token, new_token, &user))
     }
@@ -420,6 +423,7 @@ struct UserRow {
     username: String,
     display_name: Option<String>,
     flags: i64,
+    avatar_media_id: Option<i64>,
 }
 
 fn auth_success(access_token: String, refresh_token: String, user: &UserRow) -> AuthSuccess {
@@ -435,6 +439,7 @@ fn auth_success(access_token: String, refresh_token: String, user: &UserRow) -> 
                 .clone()
                 .unwrap_or_else(|| user.username.clone()),
             flags: u32::try_from(user.flags).unwrap_or(0),
+            avatar_id: user.avatar_media_id.map_or(0, |v| v as u64),
         }),
     }
 }

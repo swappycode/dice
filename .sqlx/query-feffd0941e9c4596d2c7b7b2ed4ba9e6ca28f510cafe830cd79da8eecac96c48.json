@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id FROM channels c\n               JOIN channel_recipients cr ON cr.channel_id = c.id\n               WHERE cr.user_id = $1 AND c.channel_type = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "feffd0941e9c4596d2c7b7b2ed4ba9e6ca28f510cafe830cd79da8eecac96c48"
+}

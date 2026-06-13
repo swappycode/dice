@@ -15,6 +15,7 @@ import "dice/v1/gateway.proto";
 import "dice/v1/message.proto";
 import "dice/v1/guild.proto";
 import "dice/v1/presence.proto";
+import "dice/v1/user.proto";
 
 message Frame {
   // Per-session monotonic sequence, gateway-assigned. >0 ONLY on sequenced
@@ -61,5 +62,6 @@ message Frame {
     GuildMemberRemove member_remove = 112;
     DmChannelCreate dm_channel_create = 113;
     ReactionUpdate reaction_update = 114;
+    UserUpdate user_update = 115;
   }
 }
