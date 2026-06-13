@@ -110,6 +110,14 @@ html.app-idle *::after {
   animation-play-state: paused !important;
 }
 
+/* ---- Perf mode: the performance escape hatch ----
+   Kills the GPU-backed backdrop-filter (glass) regardless of theme, and is the
+   hook decorative overlays (e.g. the CRT veil) check before rendering. The
+   !important guarantees it wins over any theme's `--glass-blur`. */
+html.perf-mode {
+  --glass-blur: 0px !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
