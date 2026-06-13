@@ -10,7 +10,7 @@
 //! Backoff is full-jitter `rand(0..=min(30 s, 500 ms·2^attempt))`; the
 //! attempt counter resets only after a connection stayed Ready ≥ 60 s.
 //! `Error{INVALID_SESSION}` while resuming degrades to a fresh `Identify`
-//! on the SAME connection (protocol §3); close codes 4010/4011 are resumable;
+//! on the SAME connection (protocol §3); close codes 4010/4011/4012 are resumable;
 //! 4001/4002 during the handshake call the [`TokenProvider`] once more and
 //! then fail for good.
 
@@ -803,11 +803,12 @@ impl Driver {
         }
     }
 
-    /// Map a close while Ready (4010/4011 resumable per protocol §8).
+    /// Map a close while Ready (4010/4011/4012 resumable per protocol §8).
     fn close_code_flow(&mut self, code: u16) -> Flow {
         match code {
-            // Slow consumer / going away: reconnect with backoff and resume.
-            4010 | 4011 => Flow::Retry { delay: None },
+            // Slow consumer / going away / heartbeat timeout: reconnect with
+            // backoff and resume.
+            4010..=4012 => Flow::Retry { delay: None },
             // Revoked mid-session: the resume token is dead; re-identify
             // with whatever the provider gives next (repeated rejection at
             // the handshake fails for good via `handshake_close`).
@@ -1111,6 +1112,11 @@ mod tests {
             Flow::Retry { delay: None }
         ));
         assert!(driver.resume.is_some(), "going away is resumable");
+        assert!(matches!(
+            driver.close_code_flow(4012),
+            Flow::Retry { delay: None }
+        ));
+        assert!(driver.resume.is_some(), "heartbeat timeout is resumable");
         assert!(matches!(
             driver.close_code_flow(4001),
             Flow::Retry { delay: None }

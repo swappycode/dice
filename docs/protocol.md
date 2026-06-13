@@ -135,11 +135,13 @@ dedupes the other by message id. Errors (permission, rate limit) come as `Error{
 
 `ErrorCode`: `UNSPECIFIED=0, UNAUTHENTICATED=1, INVALID_SESSION=2, RATE_LIMITED=3,
 PERMISSION_DENIED=4, NOT_FOUND=5, INVALID_ARGUMENT=6, UNKNOWN_OPCODE=7, PAYLOAD_TOO_LARGE=8,
-INTERNAL=9, SLOW_CONSUMER=10, GOING_AWAY=11`.
+INTERNAL=9, SLOW_CONSUMER=10, GOING_AWAY=11, HEARTBEAT_TIMEOUT=12`.
 
-WS close code = QUIC application close code = `4000 + ErrorCode`. **4010 (slow consumer) and
-4011 (going away/shutdown) are resumable** — client reconnects with backoff and attempts Resume.
-There is no `Reconnect` frame; graceful shutdown sends `Close{GOING_AWAY}` then closes.
+WS close code = QUIC application close code = `4000 + ErrorCode`. **4010 (slow consumer),
+4011 (going away/shutdown) and 4012 (heartbeat timeout) are resumable** — client reconnects
+with backoff and attempts Resume. HEARTBEAT_TIMEOUT is distinct from GOING_AWAY (server
+shutdown) purely for observability; both behave identically on the client. There is no
+`Reconnect` frame; graceful shutdown sends `Close{GOING_AWAY}` then closes.
 Slow consumer: per-session outbound queue is bounded (128); on overflow the gateway closes with
 `SLOW_CONSUMER` rather than buffering — resume heals the gap.
 

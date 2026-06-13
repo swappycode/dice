@@ -77,4 +77,7 @@ enum ErrorCode {
   ERROR_CODE_INTERNAL = 9;
   ERROR_CODE_SLOW_CONSUMER = 10;
   ERROR_CODE_GOING_AWAY = 11;
+  // Server closed because the client missed 2 heartbeats. Distinct from
+  // GOING_AWAY (server shutdown) for observability; both are resumable.
+  ERROR_CODE_HEARTBEAT_TIMEOUT = 12;
 }

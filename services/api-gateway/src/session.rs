@@ -459,9 +459,10 @@ async fn ready_loop(
             Wake::In(Ok(None)) => return LoopEnd::CleanClose,
             Wake::In(Err(error)) => return close_on_transport_error(transport, error).await,
             Wake::HbTimeout => {
-                // 2 missed beats. GOING_AWAY (4011) is the resumable
-                // reconnect hint (protocol §8); the client resumes.
-                close_with(transport, ErrorCode::GoingAway, "heartbeat timeout").await;
+                // 2 missed beats. Dedicated HEARTBEAT_TIMEOUT (4012) — distinct
+                // from GOING_AWAY (server shutdown) for observability; the
+                // client treats it as resumable (protocol §8) and reconnects.
+                close_with(transport, ErrorCode::HeartbeatTimeout, "heartbeat timeout").await;
                 return LoopEnd::Detach;
             }
         }
