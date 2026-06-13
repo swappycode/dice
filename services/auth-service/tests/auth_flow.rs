@@ -32,6 +32,32 @@ struct Harness {
     jwt: Arc<JwtKeys>,
     bus: Arc<dyn EventBus>,
     pool: PgPool,
+    mailer: CaptureMailer,
+}
+
+/// Test mailer that records every message so a test can pull the token out of
+/// the body it would have mailed.
+#[derive(Clone, Default)]
+struct CaptureMailer(Arc<std::sync::Mutex<Vec<auth_service::Mail>>>);
+
+#[async_trait::async_trait]
+impl auth_service::Mailer for CaptureMailer {
+    async fn send(&self, mail: auth_service::Mail) -> Result<(), auth_service::MailError> {
+        self.0.lock().unwrap().push(mail);
+        Ok(())
+    }
+}
+
+impl CaptureMailer {
+    /// The most recent token that begins with `prefix` (e.g. "dvt_"/"drst_").
+    fn last_token(&self, prefix: &str) -> Option<String> {
+        self.0.lock().unwrap().iter().rev().find_map(|m| {
+            m.body
+                .split_whitespace()
+                .find(|w| w.starts_with(prefix))
+                .map(str::to_owned)
+        })
+    }
 }
 
 async fn harness() -> Harness {
@@ -50,18 +76,21 @@ async fn harness() -> Harness {
     let bus = dice_event_bus::connect(BusConfig::Local { capacity: 64 })
         .await
         .unwrap();
+    let mailer = CaptureMailer::default();
     let svc = AuthService::new(
         pool.clone(),
         cache,
         Arc::clone(&jwt),
         Arc::clone(&ids),
         Arc::clone(&bus),
-    );
+    )
+    .with_mailer(Arc::new(mailer.clone()));
     Harness {
         svc,
         jwt,
         bus,
         pool,
+        mailer,
     }
 }
 
@@ -479,6 +508,90 @@ async fn totp_enroll_confirm_login_recovery_disable() {
     // 2FA is gone: login is a plain Success again.
     assert!(matches!(
         h.svc.login(&email, PASSWORD, None).await.unwrap(),
+        LoginOutcome::Success(_)
+    ));
+
+    cleanup(&h.pool, &[uid.raw()]).await;
+}
+
+#[tokio::test]
+async fn email_verify_and_password_reset() {
+    let h = harness().await;
+    let username = unique("ev");
+    let email = email_for(&username);
+    let reg = h
+        .svc
+        .register(&email, &username, PASSWORD, None)
+        .await
+        .unwrap();
+    let uid = UserId::from_raw(reg.user.unwrap().id);
+
+    // -- email verification ----------------------------------------------
+    // Register mails a verify token; the account starts unverified.
+    let verified: bool = sqlx::query_scalar("SELECT email_verified FROM users WHERE id = $1")
+        .bind(uid.raw() as i64)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert!(!verified, "fresh accounts are unverified");
+    let vtoken = h
+        .mailer
+        .last_token("dvt_")
+        .expect("register mails a verify token");
+
+    assert!(matches!(
+        h.svc.verify_email("dvt_garbage").await,
+        Err(AuthError::InvalidToken)
+    ));
+    h.svc.verify_email(&vtoken).await.unwrap();
+    let verified: bool = sqlx::query_scalar("SELECT email_verified FROM users WHERE id = $1")
+        .bind(uid.raw() as i64)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert!(verified, "the token flips email_verified");
+    // Single-use.
+    assert!(matches!(
+        h.svc.verify_email(&vtoken).await,
+        Err(AuthError::InvalidToken)
+    ));
+
+    // -- password reset ---------------------------------------------------
+    // A live session, to prove a reset kills it.
+    let login = success(h.svc.login(&email, PASSWORD, None).await.unwrap());
+
+    // Unknown address: still Ok (no enumeration), nothing mailed.
+    h.svc
+        .request_password_reset(&email_for(&unique("nobody")), None)
+        .await
+        .unwrap();
+    // Real request mails a reset token.
+    h.svc.request_password_reset(&email, None).await.unwrap();
+    let rtoken = h.mailer.last_token("drst_").expect("reset mails a token");
+
+    // A weak password is rejected BEFORE the single-use token is spent.
+    assert!(matches!(
+        h.svc.reset_password(&rtoken, "short").await,
+        Err(AuthError::InvalidArgument(_))
+    ));
+    const NEWPW: &str = "an entirely different passphrase";
+    h.svc.reset_password(&rtoken, NEWPW).await.unwrap();
+    assert!(matches!(
+        h.svc.reset_password(&rtoken, NEWPW).await,
+        Err(AuthError::InvalidToken)
+    ));
+
+    // The pre-reset session is revoked, and only the new password works.
+    assert!(matches!(
+        h.svc.refresh(&login.refresh_token).await,
+        Err(AuthError::InvalidToken)
+    ));
+    assert!(matches!(
+        h.svc.login(&email, PASSWORD, None).await,
+        Err(AuthError::InvalidCredentials)
+    ));
+    assert!(matches!(
+        h.svc.login(&email, NEWPW, None).await.unwrap(),
         LoginOutcome::Success(_)
     ));
 

@@ -3,6 +3,7 @@
 //! The [`Auth`] trait below is the BINDING contract consumed by api-gateway's
 //! REST layer and by the monolith. Implementations must not change signatures.
 
+pub mod mailer;
 mod service;
 pub mod validate;
 
@@ -11,6 +12,7 @@ use std::net::IpAddr;
 use dice_common::id::UserId;
 use dice_protocol::v1::AuthSuccess;
 
+pub use mailer::{LogMailer, Mail, MailError, Mailer};
 pub use service::AuthService;
 
 #[derive(Debug, thiserror::Error)]
@@ -94,6 +96,30 @@ pub trait Auth: Send + Sync {
     /// Disable 2FA, requiring a current `code` (TOTP or recovery) so a stolen
     /// access token alone cannot strip the second factor.
     async fn totp_disable(&self, user: UserId, code: &str) -> Result<(), AuthError>;
+
+    /// Confirm an email address from the verification token mailed at register
+    /// (or resend). Idempotent-ish: an unknown/expired/used token is
+    /// [`AuthError::InvalidToken`].
+    async fn verify_email(&self, token: &str) -> Result<(), AuthError>;
+
+    /// Re-send the verification mail to an authenticated, not-yet-verified user.
+    /// Rate-limited per user. No-op success if already verified.
+    async fn resend_verification(&self, user: UserId) -> Result<(), AuthError>;
+
+    /// Begin a password reset: mail a reset token to `email` if it exists.
+    /// ALWAYS `Ok(())` regardless of whether the address is registered (no
+    /// account-enumeration oracle). Rate-limited per IP and per email.
+    async fn request_password_reset(
+        &self,
+        email: &str,
+        ip: Option<IpAddr>,
+    ) -> Result<(), AuthError>;
+
+    /// Complete a password reset: set a new password from a valid reset token,
+    /// then revoke every existing session for the account (a reset logs all
+    /// devices out). [`AuthError::InvalidToken`] on a bad token,
+    /// [`AuthError::InvalidArgument`] on a weak password.
+    async fn reset_password(&self, token: &str, new_password: &str) -> Result<(), AuthError>;
 
     /// Rotation: marks the presented token used, mints a child in the same
     /// auth_session. Reuse of an already-rotated token revokes the whole

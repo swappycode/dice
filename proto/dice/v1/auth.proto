@@ -66,3 +66,20 @@ message TotpConfirmResponse { repeated string recovery_codes = 1; }
 // POST /v1/users/@me/totp/disable (bearer): turn 2FA off; requires a current
 // TOTP or recovery code so a hijacked access token alone cannot remove it.
 message TotpDisableRequest { string code = 1; }
+
+// ---- email verification + password reset (item 11b) ----
+
+// POST /v1/auth/verify-email (public): confirm an address with the token mailed
+// at register/resend. 204 on success.
+message VerifyEmailRequest { string token = 1; }
+
+// POST /v1/auth/password-reset/request (public): mail a reset token to `email`
+// if it is registered. ALWAYS 204 (no account-enumeration oracle).
+message PasswordResetRequest { string email = 1; }
+
+// POST /v1/auth/password-reset/confirm (public): set a new password from a valid
+// reset token. 204; all of the account's sessions are revoked.
+message PasswordResetConfirm {
+  string token = 1;
+  string new_password = 2;
+}

@@ -67,6 +67,30 @@ pub async fn totp_disable(core: Core<'_>, code: String) -> CmdResult<()> {
     core.totp_disable(&code).await.map_err(user)
 }
 
+/// Confirm an email address with a mailed verification token.
+#[tauri::command]
+pub async fn verify_email(core: Core<'_>, token: String) -> CmdResult<()> {
+    core.verify_email(&token).await.map_err(user)
+}
+
+/// Re-send the verification mail to the signed-in user.
+#[tauri::command]
+pub async fn resend_verification(core: Core<'_>) -> CmdResult<()> {
+    core.resend_verification().await.map_err(user)
+}
+
+/// Request a password-reset mail (always succeeds; no account enumeration).
+#[tauri::command]
+pub async fn request_password_reset(core: Core<'_>, email: String) -> CmdResult<()> {
+    core.request_password_reset(&email).await.map_err(user)
+}
+
+/// Set a new password from a reset token.
+#[tauri::command]
+pub async fn reset_password(core: Core<'_>, token: String, new_password: String) -> CmdResult<()> {
+    core.reset_password(&token, &new_password).await.map_err(user)
+}
+
 #[tauri::command]
 pub async fn register(
     core: Core<'_>,

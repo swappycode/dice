@@ -347,6 +347,30 @@ impl ClientCore {
         Ok(())
     }
 
+    /// Confirm an email address with a mailed verification token.
+    pub async fn verify_email(&self, token: &str) -> Result<(), CoreError> {
+        self.api.verify_email(token).await?;
+        Ok(())
+    }
+
+    /// Re-send the verification mail to the signed-in user.
+    pub async fn resend_verification(&self) -> Result<(), CoreError> {
+        self.api.resend_verification().await?;
+        Ok(())
+    }
+
+    /// Request a password-reset mail (always succeeds; no enumeration).
+    pub async fn request_password_reset(&self, email: &str) -> Result<(), CoreError> {
+        self.api.request_password_reset(email).await?;
+        Ok(())
+    }
+
+    /// Set a new password from a reset token (revokes all sessions server-side).
+    pub async fn reset_password(&self, token: &str, new_password: &str) -> Result<(), CoreError> {
+        self.api.reset_password(token, new_password).await?;
+        Ok(())
+    }
+
     pub async fn register(
         &self,
         email: &str,

@@ -20,6 +20,7 @@ use dice_protocol::internal::v1::{SessionRevoked, bus_event};
 use dice_protocol::v1::{AuthSuccess, User};
 use sqlx::PgPool;
 
+use crate::mailer::{LogMailer, Mail, Mailer};
 use crate::{Auth, AuthError, LoginOutcome, TotpEnrollment, validate};
 
 /// Registration: 3 per hour per IP (`rl:auth.register:{ip}`).
@@ -37,6 +38,21 @@ const LOGIN_WINDOW: Duration = Duration::from_secs(5 * 60);
 const TOTP_SCOPE: &str = "auth.totp";
 const TOTP_LIMIT: u32 = 5;
 const TOTP_WINDOW: Duration = Duration::from_secs(5 * 60);
+/// Password-reset requests: 5 per 15 min per IP and 3 per 15 min per email.
+const RESET_IP_SCOPE: &str = "auth.reset.ip";
+const RESET_IP_LIMIT: u32 = 5;
+const RESET_EMAIL_SCOPE: &str = "auth.reset.email";
+const RESET_EMAIL_LIMIT: u32 = 3;
+const RESET_WINDOW: Duration = Duration::from_secs(15 * 60);
+/// Verification re-sends: 3 per 15 min per user.
+const RESEND_SCOPE: &str = "auth.verify.resend";
+const RESEND_LIMIT: u32 = 3;
+const RESEND_WINDOW: Duration = Duration::from_secs(15 * 60);
+/// Opaque-token prefixes + their `auth_tokens.purpose` discriminants.
+const VERIFY_PREFIX: &str = "dvt_";
+const RESET_PREFIX: &str = "drst_";
+const PURPOSE_VERIFY: i16 = 1;
+const PURPOSE_RESET: i16 = 2;
 /// Rate-limit principal when the caller has no source address.
 const NO_IP: &str = "noip";
 /// `origin` field on every [`BusEvent`] this service publishes.
@@ -50,11 +66,14 @@ pub struct AuthService {
     jwt: Arc<JwtKeys>,
     ids: Arc<SnowflakeGenerator>,
     bus: Arc<dyn EventBus>,
+    /// Transactional mail (verify/reset). Defaults to [`LogMailer`].
+    mailer: Arc<dyn Mailer>,
 }
 
 impl AuthService {
     /// Wire the service. `jwt` must hold the PRIVATE half
-    /// ([`JwtKeys::can_sign`]); only auth-service ever signs access tokens.
+    /// ([`JwtKeys::can_sign`]); only auth-service ever signs access tokens. The
+    /// mailer defaults to [`LogMailer`] — override with [`Self::with_mailer`].
     pub fn new(
         pool: PgPool,
         cache: Arc<dyn Cache>,
@@ -68,7 +87,16 @@ impl AuthService {
             jwt,
             ids,
             bus,
+            mailer: Arc::new(LogMailer),
         }
+    }
+
+    /// Swap the mailer (e.g. a real SMTP transport in production). Defaults to
+    /// [`LogMailer`], which logs the message instead of sending it.
+    #[must_use]
+    pub fn with_mailer(mut self, mailer: Arc<dyn Mailer>) -> Self {
+        self.mailer = mailer;
+        self
     }
 
     /// Count one request and translate a denial into [`AuthError::RateLimited`].
@@ -182,6 +210,99 @@ impl AuthService {
         .map_err(|e| internal("consume recovery code", e))?;
         Ok(consumed.is_some())
     }
+
+    /// Mint + persist a single-use opaque token (`purpose`, `prefix`, `ttl` as a
+    /// Postgres interval string e.g. "24 hours"); returns the plaintext to mail.
+    async fn issue_token(
+        &self,
+        user_id: i64,
+        purpose: i16,
+        prefix: &str,
+        ttl: &str,
+    ) -> Result<String, AuthError> {
+        let (token, hash) = token::mint_prefixed(prefix);
+        sqlx::query!(
+            "INSERT INTO auth_tokens (id, user_id, purpose, token_hash, expires_at) \
+             VALUES ($1, $2, $3, $4, now() + ($5::text)::interval)",
+            self.ids.generate().as_i64(),
+            user_id,
+            purpose,
+            &hash[..],
+            ttl,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| internal("issue auth token", e))?;
+        Ok(token)
+    }
+
+    /// Atomically claim a live token of `purpose` matching `presented` (right
+    /// prefix, unused, unexpired); returns its user. [`AuthError::InvalidToken`]
+    /// on any miss.
+    async fn consume_token(
+        &self,
+        prefix: &str,
+        purpose: i16,
+        presented: &str,
+    ) -> Result<i64, AuthError> {
+        let hash = token::hash_prefixed(prefix, presented).ok_or(AuthError::InvalidToken)?;
+        let row = sqlx::query!(
+            r#"UPDATE auth_tokens SET used_at = now()
+               WHERE id = (
+                 SELECT id FROM auth_tokens
+                 WHERE token_hash = $1 AND purpose = $2
+                   AND used_at IS NULL AND expires_at > now()
+                 LIMIT 1
+               )
+               RETURNING user_id"#,
+            &hash[..],
+            purpose,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("consume auth token", e))?;
+        row.map(|r| r.user_id).ok_or(AuthError::InvalidToken)
+    }
+
+    /// Issue a verification token and mail it (LogMailer logs it in dev).
+    async fn send_verification(&self, user_id: i64, email: &str) -> Result<(), AuthError> {
+        let token = self
+            .issue_token(user_id, PURPOSE_VERIFY, VERIFY_PREFIX, "24 hours")
+            .await?;
+        self.mailer
+            .send(Mail {
+                to: email.to_owned(),
+                subject: "Verify your Dice email".to_owned(),
+                body: format!(
+                    "Welcome to Dice!\n\nYour verification token:\n\n  {token}\n\n\
+                     Enter it under Security \u{2192} Verify email. It expires in 24 hours."
+                ),
+            })
+            .await
+            .map_err(|e| internal("send verification mail", e))
+    }
+
+    /// Revoke every live session for `user` (e.g. after a password reset) and
+    /// publish a `SessionRevoked` per killed session so gateways drop sockets.
+    async fn revoke_all_sessions(&self, user: UserId) -> Result<(), AuthError> {
+        let rows = sqlx::query!(
+            "UPDATE auth_sessions SET revoked_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL RETURNING id",
+            user.as_i64(),
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| internal("revoke all sessions", e))?;
+        for r in rows {
+            if let Err(e) = self
+                .publish_session_revoked(user, SessionId::from_i64(r.id))
+                .await
+            {
+                tracing::error!(error = %e, %user, "failed to publish SessionRevoked on reset");
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -226,6 +347,12 @@ impl Auth for AuthService {
         .fetch_one(&self.pool)
         .await
         .map_err(map_register_error)?;
+
+        // Best-effort verification mail; a mail hiccup must not fail signup
+        // (the user can resend later from Security).
+        if let Err(e) = self.send_verification(row.id, email).await {
+            tracing::warn!(error = %e, "verification mail failed at register");
+        }
 
         self.mint_session(&row, ip).await
     }
@@ -505,6 +632,115 @@ impl Auth for AuthService {
         tx.commit()
             .await
             .map_err(|e| internal("commit totp disable tx", e))?;
+        Ok(())
+    }
+
+    async fn verify_email(&self, token: &str) -> Result<(), AuthError> {
+        let user_id = self
+            .consume_token(VERIFY_PREFIX, PURPOSE_VERIFY, token)
+            .await?;
+        sqlx::query!(
+            "UPDATE users SET email_verified = TRUE WHERE id = $1",
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| internal("mark email verified", e))?;
+        Ok(())
+    }
+
+    async fn resend_verification(&self, user: UserId) -> Result<(), AuthError> {
+        self.check_limit(RESEND_SCOPE, &user.to_string(), RESEND_LIMIT, RESEND_WINDOW)
+            .await?;
+        let row = sqlx::query!(
+            "SELECT email, email_verified FROM users WHERE id = $1",
+            user.as_i64(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| internal("resend lookup", e))?
+        .ok_or(AuthError::InvalidToken)?;
+        if row.email_verified {
+            return Ok(()); // already verified — nothing to do
+        }
+        self.send_verification(user.as_i64(), &row.email).await
+    }
+
+    async fn request_password_reset(
+        &self,
+        email: &str,
+        ip: Option<IpAddr>,
+    ) -> Result<(), AuthError> {
+        self.check_limit(
+            RESET_IP_SCOPE,
+            &ip_principal(ip),
+            RESET_IP_LIMIT,
+            RESET_WINDOW,
+        )
+        .await?;
+        self.check_limit(
+            RESET_EMAIL_SCOPE,
+            &email.to_lowercase(),
+            RESET_EMAIL_LIMIT,
+            RESET_WINDOW,
+        )
+        .await?;
+
+        // Look up WITHOUT leaking existence: any outcome (found or not, mail OK
+        // or not) returns Ok(()). Only a registered address gets a token mailed.
+        let row = sqlx::query!("SELECT id FROM users WHERE LOWER(email) = LOWER($1)", email,)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| internal("reset lookup", e))?;
+        if let Some(row) = row {
+            match self
+                .issue_token(row.id, PURPOSE_RESET, RESET_PREFIX, "30 minutes")
+                .await
+            {
+                Ok(token) => {
+                    let mail = Mail {
+                        to: email.to_owned(),
+                        subject: "Reset your Dice password".to_owned(),
+                        body: format!(
+                            "Someone asked to reset your Dice password.\n\n\
+                             Your reset token:\n\n  {token}\n\n\
+                             Enter it with a new password on the login screen. It \
+                             expires in 30 minutes. If this wasn't you, ignore this mail."
+                        ),
+                    };
+                    if let Err(e) = self.mailer.send(mail).await {
+                        tracing::error!(error = %e, "send reset mail");
+                    }
+                }
+                Err(e) => tracing::error!(error = %e, "issue reset token"),
+            }
+        }
+        Ok(())
+    }
+
+    async fn reset_password(&self, token: &str, new_password: &str) -> Result<(), AuthError> {
+        // Validate the new password BEFORE burning the single-use token.
+        validate::password(new_password)?;
+        let user_id = self
+            .consume_token(RESET_PREFIX, PURPOSE_RESET, token)
+            .await?;
+
+        let pw = new_password.to_owned();
+        let phc = tokio::task::spawn_blocking(move || password::hash(&pw))
+            .await
+            .map_err(|e| internal("join password-hash task", e))?
+            .map_err(|e| internal("argon2 hash", e))?;
+        sqlx::query!(
+            "UPDATE users SET password_hash = $2 WHERE id = $1",
+            user_id,
+            phc,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| internal("update password on reset", e))?;
+
+        // A reset logs every device out.
+        self.revoke_all_sessions(UserId::from_i64(user_id)).await?;
         Ok(())
     }
 

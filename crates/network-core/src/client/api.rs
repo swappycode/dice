@@ -208,6 +208,57 @@ impl ApiClient {
         .await
     }
 
+    /// `POST /v1/auth/verify-email` (public): confirm an address with a mailed
+    /// token.
+    pub async fn verify_email(&self, token: &str) -> Result<(), ApiError> {
+        self.post_public_unit(
+            "/v1/auth/verify-email",
+            &v1::VerifyEmailRequest {
+                token: token.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/auth/password-reset/request` (public): always succeeds (no
+    /// account-enumeration oracle) — a token is mailed only if `email` exists.
+    pub async fn request_password_reset(&self, email: &str) -> Result<(), ApiError> {
+        self.post_public_unit(
+            "/v1/auth/password-reset/request",
+            &v1::PasswordResetRequest {
+                email: email.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/auth/password-reset/confirm` (public): set a new password from a
+    /// reset token (all sessions are revoked server-side).
+    pub async fn reset_password(&self, token: &str, new_password: &str) -> Result<(), ApiError> {
+        self.post_public_unit(
+            "/v1/auth/password-reset/confirm",
+            &v1::PasswordResetConfirm {
+                token: token.to_owned(),
+                new_password: new_password.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/auth/verify-email/resend` (bearer, no body): re-send the
+    /// verification mail to the signed-in user.
+    pub async fn resend_verification(&self) -> Result<(), ApiError> {
+        let url = self.url("/v1/auth/verify-email/resend")?;
+        let response = self
+            .bearer_send(|token| self.http.post(url.clone()).bearer_auth(token))
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
     /// Revokes the refresh-token family (204 on success).
     pub async fn logout(&self, refresh_token: &str) -> Result<(), ApiError> {
         let url = self.url("/v1/auth/logout")?;
@@ -404,6 +455,27 @@ impl ApiClient {
             .send()
             .await?;
         decode_response(response).await
+    }
+
+    /// Public POST whose success carries no body (204) — verify-email / reset.
+    async fn post_public_unit<Req: Message>(
+        &self,
+        path: &str,
+        request: &Req,
+    ) -> Result<(), ApiError> {
+        let url = self.url(path)?;
+        let response = self
+            .http
+            .post(url)
+            .header(CONTENT_TYPE, PROTOBUF)
+            .body(request.encode_to_vec())
+            .send()
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
     }
 
     async fn post_bearer<Req: Message, Resp: Message + Default>(

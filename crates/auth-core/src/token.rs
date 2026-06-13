@@ -255,34 +255,47 @@ pub fn verify_totp_ticket(keys: &JwtKeys, jwt: &str) -> Result<UserId, TokenErro
     data.claims.sub.parse().map_err(|_| TokenError::BadClaim)
 }
 
-/// Mint a refresh token. Returns `(token, sha256)` where `token` is
-/// `"drt_" + base64url-no-pad(32 random bytes)` (sent to the client once) and
-/// `sha256` is the SHA-256 of the FULL token string (the only thing the
-/// server stores).
+/// Mint a `prefix`-tagged opaque token. Returns `(token, sha256)` where `token`
+/// is `prefix + base64url-no-pad(32 random bytes)` (sent to the client/by mail
+/// once) and `sha256` is the SHA-256 of the FULL token string (the only thing
+/// the server stores). Used for refresh tokens and for email-verify /
+/// password-reset tokens.
 ///
 /// # Panics
 /// Only if the operating-system RNG fails (unrecoverable).
-pub fn mint_refresh() -> (String, [u8; 32]) {
+pub fn mint_prefixed(prefix: &str) -> (String, [u8; 32]) {
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).expect("operating-system RNG failure");
-    let token = format!("{REFRESH_PREFIX}{}", URL_SAFE_NO_PAD.encode(raw));
+    let token = format!("{prefix}{}", URL_SAFE_NO_PAD.encode(raw));
     let digest = sha256(token.as_bytes());
     (token, digest)
 }
 
-/// Hash a client-presented refresh token for the database lookup.
-///
-/// Returns `None` unless it has the `drt_` prefix and the remainder decodes
-/// (base64url, no padding) to exactly 32 bytes — malformed input is rejected
-/// before touching storage. On success: SHA-256 of the full token string,
-/// byte-identical to [`mint_refresh`]'s second element.
-pub fn hash_refresh(presented: &str) -> Option<[u8; 32]> {
-    let encoded = presented.strip_prefix(REFRESH_PREFIX)?;
+/// Hash a presented `prefix`-tagged opaque token for a database lookup. Returns
+/// `None` unless it carries `prefix` and the remainder decodes (base64url, no
+/// padding) to exactly 32 bytes — malformed input is rejected before touching
+/// storage. On success: SHA-256 of the full token string.
+pub fn hash_prefixed(prefix: &str, presented: &str) -> Option<[u8; 32]> {
+    let encoded = presented.strip_prefix(prefix)?;
     let raw = URL_SAFE_NO_PAD.decode(encoded).ok()?;
     if raw.len() != 32 {
         return None;
     }
     Some(sha256(presented.as_bytes()))
+}
+
+/// Mint a refresh token (`drt_`-prefixed). See [`mint_prefixed`].
+///
+/// # Panics
+/// Only if the operating-system RNG fails (unrecoverable).
+pub fn mint_refresh() -> (String, [u8; 32]) {
+    mint_prefixed(REFRESH_PREFIX)
+}
+
+/// Hash a client-presented refresh token for the database lookup. See
+/// [`hash_prefixed`]; byte-identical to [`mint_refresh`]'s second element.
+pub fn hash_refresh(presented: &str) -> Option<[u8; 32]> {
+    hash_prefixed(REFRESH_PREFIX, presented)
 }
 
 /// Constant-time equality for stored vs presented refresh-token hashes.

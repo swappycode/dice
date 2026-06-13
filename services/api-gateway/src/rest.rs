@@ -51,6 +51,15 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/auth/register", post(register))
         .route("/v1/auth/login", post(login))
         .route("/v1/auth/login/totp", post(complete_totp_login))
+        .route("/v1/auth/verify-email", post(verify_email))
+        .route(
+            "/v1/auth/password-reset/request",
+            post(password_reset_request),
+        )
+        .route(
+            "/v1/auth/password-reset/confirm",
+            post(password_reset_confirm),
+        )
         .route("/v1/auth/refresh", post(refresh))
         .route("/v1/auth/logout", post(logout))
         .route("/gateway/v1", get(gateway_ws));
@@ -67,6 +76,7 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/users/@me/totp/enroll", post(totp_enroll))
         .route("/v1/users/@me/totp/confirm", post(totp_confirm))
         .route("/v1/users/@me/totp/disable", post(totp_disable))
+        .route("/v1/auth/verify-email/resend", post(resend_verification))
         // Download is a GET (no request body), so it rides the 1 MiB limit fine.
         .route("/v1/media/{media_id}", get(serve_media))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -322,6 +332,53 @@ async fn complete_totp_login(
     }
 }
 
+/// `POST /v1/auth/verify-email` (public): confirm an address with the mailed
+/// token. 204.
+async fn verify_email(
+    State(gw): State<Arc<Gateway>>,
+    Proto(req): Proto<v1::VerifyEmailRequest>,
+) -> Response {
+    match gw.deps.auth.verify_email(&req.token).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+/// `POST /v1/auth/password-reset/request` (public): mail a reset token if the
+/// address is registered. ALWAYS 204 (no account-enumeration oracle).
+async fn password_reset_request(
+    State(gw): State<Arc<Gateway>>,
+    peer: Option<axum::Extension<PeerAddr>>,
+    Proto(req): Proto<v1::PasswordResetRequest>,
+) -> Response {
+    match gw
+        .deps
+        .auth
+        .request_password_reset(&req.email, client_ip(peer))
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+/// `POST /v1/auth/password-reset/confirm` (public): set a new password from a
+/// reset token; every session is revoked. 204.
+async fn password_reset_confirm(
+    State(gw): State<Arc<Gateway>>,
+    Proto(req): Proto<v1::PasswordResetConfirm>,
+) -> Response {
+    match gw
+        .deps
+        .auth
+        .reset_password(&req.token, &req.new_password)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_auth_error(error),
+    }
+}
+
 async fn refresh(
     State(gw): State<Arc<Gateway>>,
     Proto(req): Proto<v1::RefreshRequest>,
@@ -532,6 +589,18 @@ async fn totp_disable(
     Proto(req): Proto<v1::TotpDisableRequest>,
 ) -> Response {
     match gw.deps.auth.totp_disable(user, &req.code).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_auth_error(error),
+    }
+}
+
+/// `POST /v1/auth/verify-email/resend` (bearer, no body): re-send the
+/// verification mail to the signed-in user. 204.
+async fn resend_verification(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+) -> Response {
+    match gw.deps.auth.resend_verification(user).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => map_auth_error(error),
     }
