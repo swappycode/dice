@@ -7,7 +7,10 @@
 //!   [`tauri::async_runtime::set`] BEFORE the Builder exists — nothing here
 //!   ever calls a bare `tokio::spawn` from the setup hook.
 //! - ring is the only rustls crypto provider (workspace policy).
-//! - single-instance: a second launch focuses the existing window.
+//! - single-instance: a second launch focuses the existing window — UNLESS a
+//!   `--profile <name>` / `DICE_CLIENT_PROFILE` is set, which gives that
+//!   instance its own app-data dir + keyring scope and lets it open its own
+//!   window (run two profiles for local two-user testing).
 //! - when the keystore already holds a session the gateway connects in the
 //!   background at startup; otherwise the first `login`/`register` connects.
 
@@ -25,13 +28,18 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use crate::emit::{Emitter, TauriEmitter};
-use crate::keystore::OsKeyring;
+use crate::keystore::{KeyStore, OsKeyring};
 use crate::state::{ClientCore, CoreConfig};
 
 /// Entry point shared by `main.rs` and the bundler glue.
 pub fn run() {
     dice_network_core::tls::install_ring_provider();
     init_tracing();
+
+    let profile = active_profile();
+    if let Some(name) = &profile {
+        tracing::info!(profile = %name, "isolated dev profile: own cache + keyring + window");
+    }
 
     // The ONE runtime. Built before anything Tauri so every spawn in this
     // process — Tauri's own async commands included — lands on it.
@@ -42,25 +50,38 @@ pub fn run() {
     let rt_handle = rt.handle().clone();
     tauri::async_runtime::set(rt_handle.clone());
 
-    tauri::Builder::default()
-        // Registered first, per the plugin's docs: a second instance pings
-        // this callback in the FIRST process; focus the existing window.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let mut builder = tauri::Builder::default();
+    // Single-instance only for the DEFAULT profile: a second normal launch
+    // focuses the existing window, but a named `--profile` is explicitly
+    // allowed its own window (local two-user testing).
+    if profile.is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+
+    let setup_profile = profile;
+    builder
         .setup(move |app| {
-            let cache_path = app.path().app_data_dir()?.join("cache.db");
+            let base = app.path().app_data_dir()?;
+            // A profile gets `<app-data>/profiles/<name>/cache.db` + a scoped
+            // keyring entry; the default keeps `<app-data>/cache.db` + the
+            // default keyring so existing sessions still resolve.
+            let (cache_path, keystore): (std::path::PathBuf, Arc<dyn KeyStore>) =
+                match &setup_profile {
+                    Some(name) => {
+                        let dir = base.join("profiles").join(name);
+                        std::fs::create_dir_all(&dir)?;
+                        (dir.join("cache.db"), Arc::new(OsKeyring::for_profile(name)))
+                    }
+                    None => (base.join("cache.db"), Arc::new(OsKeyring::new())),
+                };
             let cfg = CoreConfig::from_env(cache_path)?;
             let emitter: Arc<dyn Emitter> = Arc::new(TauriEmitter(app.handle().clone()));
-            let core = Arc::new(ClientCore::new(
-                cfg,
-                Arc::new(OsKeyring::new()),
-                emitter,
-                rt_handle.clone(),
-            )?);
+            let core = Arc::new(ClientCore::new(cfg, keystore, emitter, rt_handle.clone())?);
             // Stored session ⇒ resume + connect in the background; the
             // webview's own `session_status` call is idempotent over this.
             if core.has_stored_session() {
@@ -105,4 +126,51 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_target(true)
         .init();
+}
+
+/// The active dev profile: `--profile <name>` / `--profile=<name>` on the
+/// command line, else `DICE_CLIENT_PROFILE`. `None` = the normal app.
+fn active_profile() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if let Some(name) = arg.strip_prefix("--profile=") {
+            return sanitize_profile(name);
+        }
+        if arg == "--profile" {
+            return args.next().and_then(|n| sanitize_profile(&n));
+        }
+    }
+    std::env::var("DICE_CLIENT_PROFILE")
+        .ok()
+        .and_then(|n| sanitize_profile(&n))
+}
+
+/// Lowercase and keep `[a-z0-9_-]`, capped at 32 chars — safe as both a
+/// directory name and a keyring account suffix. Empty input yields `None`.
+fn sanitize_profile(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(32)
+        .collect();
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::sanitize_profile;
+
+    #[test]
+    fn sanitize_profile_is_filesystem_and_keyring_safe() {
+        assert_eq!(sanitize_profile("Bob"), Some("bob".to_owned()));
+        assert_eq!(sanitize_profile("  guest-2 "), Some("guest-2".to_owned()));
+        assert_eq!(sanitize_profile("../../etc"), Some("etc".to_owned()));
+        assert_eq!(sanitize_profile("a/b\\c:d"), Some("abcd".to_owned()));
+        assert_eq!(sanitize_profile(""), None);
+        assert_eq!(sanitize_profile("///"), None);
+        assert_eq!(sanitize_profile(&"x".repeat(100)).unwrap().len(), 32);
+    }
 }

@@ -26,6 +26,17 @@ impl OsKeyring {
         }
     }
 
+    /// A keyring entry scoped to a named dev profile, so two instances on one
+    /// machine hold independent sessions (see `lib.rs` `--profile`). The
+    /// default (no profile) keeps account `"default"` so existing stored
+    /// sessions still resolve.
+    pub fn for_profile(name: &str) -> Self {
+        Self {
+            service: "Dice".to_owned(),
+            account: format!("profile:{name}"),
+        }
+    }
+
     fn entry(&self) -> anyhow::Result<keyring::Entry> {
         Ok(keyring::Entry::new(&self.service, &self.account)?)
     }

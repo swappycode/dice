@@ -26,6 +26,28 @@ just check        # the PR gate: fmt, clippy -D warnings, tests, aws-lc-sys gate
 No database? Builds still work: the committed `.sqlx/` cache makes `cargo check` fully offline
 (`SQLX_OFFLINE=true`). See [database.md](database.md).
 
+## Testing two users locally (side-by-side)
+
+Each running app instance needs its own data dir + keyring, so pass `--profile <name>` (or set
+`DICE_CLIENT_PROFILE`). A named profile gets `<app-data>/profiles/<name>/cache.db`, a separate
+Windows Credential Manager entry, and is allowed its own window (the default single-instance lock
+only applies to the no-profile app):
+
+```powershell
+just infra-up ; just dev      # backend (terminal 1)
+just client-build             # build the release exe once (terminal 2)
+just client-as alice          # window 1 — register "alice"  (terminal 2)
+just client-as bob            # window 2 — register "bob"     (terminal 3)
+```
+
+Then in alice's window create a guild and copy the **Invite:** chip from the channel header; in
+bob's window click `[+]` → *Join with an invite code* → paste. Now both are in the same server and
+can chat / DM in real time.
+
+> **Don't use a browser tab as the second user.** Opening `http://localhost:1420` in a browser
+> runs the app in **mock mode** (no Tauri host) — fake servers, fake invite codes, no real backend.
+> The login footer reads "v0.1.0 (mock mode)" there. Real users only exist inside the desktop app.
+
 ## Gotchas on Windows
 - **Never let `aws-lc-sys` into the tree** (needs NASM/CMake; the MSYS2 MinGW cmake on PATH would
   poison MSVC builds). `just gate-aws-lc` enforces this; all TLS crates pin the `ring` provider.

@@ -50,6 +50,17 @@ dev:
 run-full:
     $env:DICE_PROFILE = "full"; cargo run -p dice-monolith
 
-# Desktop client dev loop (own workspace).
+# Desktop client dev loop (own workspace). One instance; HMR; predev frees :1420.
 client:
     $env:DICE_DEV_CA = "$PWD/dev/certs/dev-ca.pem"; $env:DICE_API_URL = "https://localhost:8443"; $env:DICE_GATEWAY_QUIC = "localhost:8444"; $env:DICE_GATEWAY_WSS = "wss://localhost:8443/gateway/v1"; cd apps/desktop-client; npm run tauri dev
+
+# Build the desktop client once (release exe, embedded UI) for the two-user demo.
+client-build:
+    cd apps/desktop-client; npm run build
+    cd apps/desktop-client/src-tauri; cargo build --release
+
+# Launch a built client under an ISOLATED profile (own cache + keyring + window),
+# for local two-user testing. Run `just client-build` first, then e.g.
+# `just client-as alice` and (second terminal) `just client-as bob`.
+client-as name:
+    $env:DICE_DEV_CA = "$PWD/dev/certs/dev-ca.pem"; $env:DICE_API_URL = "https://localhost:8443"; $env:DICE_GATEWAY_QUIC = "localhost:8444"; $env:DICE_GATEWAY_WSS = "wss://localhost:8443/gateway/v1"; & "apps/desktop-client/src-tauri/target/release/dice-desktop.exe" --profile {{name}}
