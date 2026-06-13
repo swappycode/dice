@@ -7,6 +7,47 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (5/n): avatars (user avatars on the media infra)
+
+**Branch:** `main`. Three commits (wire+service / client-host / client-ui). Full `just check` green
+(incl. a new chat avatar live test), host clippy + tests, frontend `tsc` + vite (CSS 35 KB), `.sqlx`
+re-prepared, migration `0008_avatars`. Re-introduces the M1-cut avatar field, now backed by
+media-service (an avatar is just a `media` row).
+
+**Wire/DB.** `User.avatar_id` (media id; 0 ⇒ initials). New `user.proto`: `SetAvatarRequest` +
+`UserUpdate(115)` — the FIRST new dispatch event since M1, so it rippled through
+`payload_field_number`, the cache `apply_event`, the host bridge `on_dispatch`, the `DiceEvent` enum
+(Rust + TS), and the frontend dispatcher. Migration 0008 adds `users.avatar_media_id` (FK→media, ON
+DELETE SET NULL). Adding `avatar_id` to `User` rippled to every `v1::User{}` literal (chat sync/load,
+auth `auth_success`, all host cache/test literals). **prost gotcha:** the extra field tipped the
+generated `BusEvent`/`Frame` oneofs past clippy's `large_enum_variant` threshold (224 vs 16 B) — fixed
+with `type_attribute(..., allow(large_enum_variant))` in build.rs (boxing would ripple to every
+construction site).
+
+**Service.** `chat-service::set_avatar(actor, media)` validates the media is an image the caller
+uploaded, updates the column, and **broadcasts `UserUpdate` to the caller's own subject + every guild
+and DM they share** so peers update live (no reconnect). auth-service register/login/refresh now carry
+the avatar. REST: `PUT /v1/users/@me/avatar` (204; the broadcast does the propagation). Live test:
+validate (non-image / not-yours rejected) + persist + guild-subject broadcast + sync reflection +
+clear.
+
+**Client.** Avatars reuse the attachment byte path (`fetch_attachment`/`ipc.attachmentSrc`). Host:
+`ApiClient::set_avatar`, `ClientCore::set_avatar`, `UserUpdate` → cache (`upsert_user` writes the media
+id into the existing `users.avatar_hash` column — no cache migration) + emit. UI: the `Avatar`
+component renders the image or falls back to initials; **MemberSidebar** shows member avatars and
+**SelfStrip** shows the self avatar with click-to-change (file picker → upload → `setAvatar`, UI
+updates via the `userUpdate` echo). Mock keeps browser demos working via object URLs.
+
+**Deferred (follow-ups):** guild icons (symmetric: `guilds.icon_hash` cache column already exists +
+GuildRail render), and avatars in message-row headers (text-only today). An orphaned-media GC sweep is
+still pending from attachments.
+
+**Chat/profile completeness:** edit ✅ delete ✅ replies ✅ reactions ✅ attachments ✅ avatars ✅.
+Remaining M2: notifications, read-markers sync, auth hardening, UI funk pass + theme pack, chime;
+split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (4/n): attachments (media-service + message attachments)
 
 **Branch:** `main`. Three commits (wire+service / client-host / client-ui). Full `just check` green
