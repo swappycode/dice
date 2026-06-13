@@ -8,7 +8,12 @@ import { ipc } from "../lib/ipc";
 import type { DiceEvent } from "../lib/types";
 import { setConnState, setTransport } from "../stores/connection";
 import { addDm, addGuild, applyBootstrap, resetDirectory } from "../stores/guilds";
-import { applyMessageCreate, resetMessages } from "../stores/messages";
+import {
+  applyMessageCreate,
+  applyMessageDelete,
+  applyMessageUpdate,
+  resetMessages,
+} from "../stores/messages";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
 import { currentUser, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
@@ -18,6 +23,12 @@ function dispatch(ev: DiceEvent): void {
     case "messageCreate":
       applyMessageCreate(ev.message, ev.nonce);
       clearTyping(ev.message.channelId, ev.message.authorId);
+      break;
+    case "messageUpdate":
+      applyMessageUpdate(ev.message);
+      break;
+    case "messageDelete":
+      applyMessageDelete(ev.channelId, ev.messageId);
       break;
     case "typingStart":
       if (ev.userId !== currentUser()?.id) noteTyping(ev.channelId, ev.userId);

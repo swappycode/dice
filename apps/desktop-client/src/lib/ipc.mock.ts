@@ -284,6 +284,28 @@ export function createMockIpc(): DiceIpc {
       }, 150);
     },
 
+    async editMessage(channelId, messageId, content) {
+      const trimmed = content.trim();
+      if (!trimmed) throw new Error("Message cannot be empty.");
+      const log = logs.get(channelId) ?? [];
+      const m = log.find((x) => x.id === messageId);
+      if (!m || m.authorId !== SELF.id) throw new Error("You can only edit your own messages.");
+      const ms = Date.now();
+      m.content = trimmed;
+      m.editedAtMs = ms;
+      setTimeout(() => emit({ type: "messageUpdate", message: { ...m } }), 80);
+    },
+
+    async deleteMessage(channelId, messageId) {
+      const log = logs.get(channelId) ?? [];
+      const i = log.findIndex((x) => x.id === messageId);
+      if (i < 0 || log[i]!.authorId !== SELF.id) {
+        throw new Error("You can only delete your own messages.");
+      }
+      log.splice(i, 1);
+      setTimeout(() => emit({ type: "messageDelete", channelId, messageId }), 80);
+    },
+
     async fetchMessages(channelId, before, limit = 50) {
       await delay(120);
       const log = logs.get(channelId) ?? [];

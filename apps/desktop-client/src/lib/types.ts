@@ -78,6 +78,8 @@ export type ConnState =
 
 export type DiceEvent =
   | { type: "messageCreate"; message: Message; nonce?: string }
+  | { type: "messageUpdate"; message: Message }
+  | { type: "messageDelete"; channelId: string; messageId: string }
   | { type: "typingStart"; channelId: string; userId: string }
   | { type: "presenceUpdate"; userId: string; status: PresenceStatus }
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }

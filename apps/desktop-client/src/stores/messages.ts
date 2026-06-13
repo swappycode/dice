@@ -87,6 +87,28 @@ export function oldestMessageId(channelId: string): string | null {
   return first ? first.id : null;
 }
 
+/** Apply a messageUpdate (edit): replace the row in place by id. */
+export function applyMessageUpdate(m: Message): void {
+  setByChannel(
+    produce((s) => {
+      const arr = s[m.channelId];
+      const i = arr?.findIndex((x) => x.id === m.id) ?? -1;
+      if (arr && i >= 0) arr[i] = m;
+    }),
+  );
+}
+
+/** Apply a messageDelete: drop the row from its channel. */
+export function applyMessageDelete(channelId: string, messageId: string): void {
+  setByChannel(
+    produce((s) => {
+      const arr = s[channelId];
+      const i = arr?.findIndex((x) => x.id === messageId) ?? -1;
+      if (arr && i >= 0) arr.splice(i, 1);
+    }),
+  );
+}
+
 export function markFailed(channelId: string, nonce: string): void {
   setByChannel(
     produce((s) => {

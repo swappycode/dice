@@ -51,6 +51,10 @@ export function createTauriIpc(): DiceIpc {
     // the promise (the UI renders its own optimistic row keyed by nonce).
     sendMessage: (channelId, content, nonce) =>
       call<void>("send_message", { channelId, content, nonce }),
+    editMessage: (channelId, messageId, content) =>
+      call<void>("edit_message", { channelId, messageId, content }),
+    deleteMessage: (channelId, messageId) =>
+      call<void>("delete_message", { channelId, messageId }),
     fetchMessages: (channelId, before, limit) =>
       call<Message[]>("fetch_messages", { channelId, before, limit }),
     startTyping: (channelId) => call<void>("start_typing", { channelId }),

@@ -61,6 +61,7 @@
 }
 
 .row {
+  position: relative;
   padding: var(--sp-1) 0;
   margin-top: var(--sp-2);
 }
@@ -102,4 +103,69 @@
 
 .failedNote {
   font-size: var(--font-size-chrome);
+}
+
+.edited {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+/* Hover action bar (Edit / Delete), top-right of own rows. */
+.actions {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  display: none;
+  gap: var(--sp-1);
+  background: var(--c-window-face);
+  border: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 2px var(--c-shadow-soft);
+  padding: 0 var(--sp-1);
+}
+
+.row:hover .actions {
+  display: inline-flex;
+}
+
+.action {
+  font-size: var(--font-size-chrome);
+  color: var(--c-link);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+}
+
+.action:hover {
+  text-decoration: underline;
+}
+
+/* Inline editor */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.editArea {
+  width: 100%;
+  min-height: 2.4em;
+  resize: vertical;
+  font: inherit;
+  color: var(--c-text);
+  background: var(--c-content);
+  border: 1px solid var(--c-bevel-lo);
+  padding: var(--sp-1) var(--sp-2);
+}
+
+.editHint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+.editHint button {
+  padding: 0 var(--sp-3);
 }

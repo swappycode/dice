@@ -4,6 +4,7 @@ import type { Message } from "../../lib/types";
 import { crossesDay, dayLabel, formatTime } from "../../lib/time";
 import { displayName, selectedChannelId } from "../../stores/guilds";
 import { messagesFor, oldestMessageId, prependOlder } from "../../stores/messages";
+import { currentUser } from "../../stores/session";
 import styles from "./MessageList.module.css";
 
 const GROUP_WINDOW_MS = 5 * 60_000;
@@ -18,9 +19,30 @@ export const MessageList: Component = () => {
   let scroller: HTMLDivElement | undefined;
   const [exhausted, setExhausted] = createSignal<Record<string, boolean>>({});
   const [loading, setLoading] = createSignal(false);
+  // Which message (by id) is being edited inline, and its draft text.
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [editText, setEditText] = createSignal("");
 
   const channelId = () => selectedChannelId() ?? "";
   const messages = () => messagesFor(channelId());
+
+  const isOwn = (m: Message): boolean => m.authorId === currentUser()?.id;
+
+  function beginEdit(m: Message): void {
+    setEditText(m.content);
+    setEditingId(m.id);
+  }
+  function commitEdit(m: Message): void {
+    const next = editText().trim();
+    setEditingId(null);
+    // Unchanged or empty = no-op (an empty edit would be rejected anyway).
+    if (next && next !== m.content) {
+      void ipc.editMessage(m.channelId, m.id, next).catch(() => {});
+    }
+  }
+  function removeMessage(m: Message): void {
+    void ipc.deleteMessage(m.channelId, m.id).catch(() => {});
+  }
 
   function pinnedToBottom(): boolean {
     if (!scroller) return true;
@@ -107,12 +129,58 @@ export const MessageList: Component = () => {
                       <span class={styles.time}>{formatTime(m.createdAtMs)}</span>
                     </div>
                   </Show>
-                  <div class={`selectable ${styles.content}`}>
-                    {m.content}
-                    <Show when={m.failed}>
-                      <span class={styles.failedNote}> — failed to send</span>
-                    </Show>
-                  </div>
+                  <Show
+                    when={editingId() === m.id}
+                    fallback={
+                      <div class={`selectable ${styles.content}`}>
+                        {m.content}
+                        <Show when={m.editedAtMs}>
+                          <span class={styles.edited}> (edited)</span>
+                        </Show>
+                        <Show when={m.failed}>
+                          <span class={styles.failedNote}> — failed to send</span>
+                        </Show>
+                      </div>
+                    }
+                  >
+                    <div class={styles.editor}>
+                      <textarea
+                        class={styles.editArea}
+                        value={editText()}
+                        onInput={(e) => setEditText(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setEditingId(null);
+                          } else if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            commitEdit(m);
+                          }
+                        }}
+                        ref={(el) => requestAnimationFrame(() => el.focus())}
+                      />
+                      <div class={styles.editHint}>
+                        <button type="button" class="bevel-raised" onClick={() => commitEdit(m)}>
+                          Save
+                        </button>
+                        <button type="button" class="bevel-raised" onClick={() => setEditingId(null)}>
+                          Cancel
+                        </button>
+                        <span>Enter to save · Esc to cancel</span>
+                      </div>
+                    </div>
+                  </Show>
+                  {/* Hover actions on own, settled messages */}
+                  <Show when={isOwn(m) && !m.pending && !m.failed && editingId() !== m.id}>
+                    <div class={styles.actions}>
+                      <button type="button" class={styles.action} onClick={() => beginEdit(m)}>
+                        Edit
+                      </button>
+                      <button type="button" class={styles.action} onClick={() => removeMessage(m)}>
+                        Delete
+                      </button>
+                    </div>
+                  </Show>
                 </div>
               </>
             );

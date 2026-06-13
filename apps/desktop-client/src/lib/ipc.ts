@@ -34,6 +34,10 @@ export interface DiceIpc {
   /** Optimistic send: caller generates the nonce, renders a pending row, and
       reconciles on the `messageCreate` event echoing the same nonce. */
   sendMessage(channelId: string, content: string, nonce: string): Promise<void>;
+  /** Edit (author-only); the UI reconciles on the `messageUpdate` event. */
+  editMessage(channelId: string, messageId: string, content: string): Promise<void>;
+  /** Delete (author, or MANAGE_MESSAGES); reconciles on `messageDelete`. */
+  deleteMessage(channelId: string, messageId: string): Promise<void>;
   fetchMessages(channelId: string, before?: string, limit?: number): Promise<Message[]>;
 
   startTyping(channelId: string): Promise<void>;
