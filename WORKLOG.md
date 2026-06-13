@@ -7,6 +7,54 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M2 (8/n): auth hardening (TOTP 2FA + email-verify + password-reset)
+
+**Branch:** `main`. Five commits (11a wire+service / 11a login-ui / 11a settings-dialog / 11b
+wire+service / 11b ui). Full `just check` green (two new auth live tests), host clippy + tests (15
+lib + 2 host_gate), frontend `tsc` + vite (CSS 39 KB). Migrations `0010_totp` + `0011_email_verify_reset`,
+`.sqlx` re-prepared. New dep `totp-rs` (default-features off, `otpauth` only — pure Rust, aws-lc gate
+still clean). **The security-critical heavyweight.**
+
+**11a — TOTP 2FA.** `auth-core::totp`: SHA1/6-digit/±1-step verify that returns the MATCHED time-step
+so the caller enforces single-use (RFC 6238 §5.2 replay guard — reject any step ≤ the last consumed);
+`otpauth://` URI; unbiased (rejection-sampled) recovery codes + normalized sha256 hashing. `token.rs`
+signs/verifies a short-lived **audience-tagged** ("dice-totp") login ticket so an access token and a
+2FA challenge ticket can never be swapped. Migration 0010 = `users.totp_secret/totp_enabled/totp_last_step`
++ `totp_recovery_codes`. auth-service: **`login` now returns `LoginOutcome` (Success | TotpRequired{ticket})**
+— the breaking signature change rippled to rest.rs, network-core `ApiClient` (its own `LoginOutcome`),
+the host, and every login test; `complete_totp_login` takes a TOTP **or** a recovery code, per-user
+rate-limited (5/5min); `totp_enroll/confirm/disable` (secret inactive until a confirm code proves it).
+REST: `/v1/auth/login` → `LoginResponse`, `/v1/auth/login/totp`, bearer `/v1/users/@me/totp/{enroll,confirm,disable}`.
+Client: LoginCard 2-step challenge; **SecurityDialog** (🔒 in SelfStrip) for enroll (setup key + otpauth
+link → confirm → recovery codes) / disable.
+
+**11b — email-verify + password-reset.** A **`Mailer` seam** (auth-service `mailer.rs`): `LogMailer`
+dev default logs the token; SMTP drops in behind the trait; `AuthService::with_mailer` swaps it (so the
+6 `AuthService::new` call sites DON'T churn — builder, defaulted). Migration 0011 = `users.email_verified`
++ `auth_tokens` (sha256, purpose 1=verify/2=reset, expiry, single-use). `token.rs` `mint_prefixed`/
+`hash_prefixed` generalize the refresh-token scheme for `dvt_`/`drst_` tokens. register mails a verify
+token; `verify_email`; `resend_verification` (bearer, rate-limited). `request_password_reset` ALWAYS
+returns Ok (no account-enumeration oracle), per-IP+per-email rate-limited; `reset_password` validates the
+new password BEFORE spending the token and **revokes every session** (publishes SessionRevoked per kill).
+REST public `/v1/auth/verify-email` + `/v1/auth/password-reset/{request,confirm}`, bearer
+`/v1/auth/verify-email/resend`. Client: LoginCard "Forgot your password?" (request code → enter code +
+new password); SecurityDialog email-verify section. Mock simulates both flows.
+
+**Tests.** Two new auth-service live tests: full 2FA lifecycle (enroll→confirm→challenge→TOTP replay
+rejected→recovery login→disable) and verify+reset (capturing mailer extracts the mailed token; reset
+kills the pre-reset session). DB migration-manifest test updated (11 migrations).
+
+**Deferred (small):** email-verify is informational, NOT a login gate (enforcement is a future toggle);
+TOTP secret is plaintext-at-rest (same tier as `password_hash`; encryption is future). No `email_verified`
+flag is exposed to the client (avoided a `User` proto ripple) — the verify UI is always available.
+Carried over: orphaned-media GC, the "unread divider line" UI. Next free dispatch # = 117 (11 added no
+Frame dispatch — all REST).
+
+**M2 done so far:** edit/delete/replies/reactions, attachments, avatars, notifications, read-markers,
+**auth hardening**. Remaining: UI funk pass + theme pack, chime + OS toast; split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (7/n): read-markers sync
 
 **Branch:** `main`. One commit. Full `just check` green (new chat live test), host clippy + tests,
