@@ -106,6 +106,13 @@ export function createTauriIpc(): DiceIpc {
     createGuild: (name) => call<Guild>("create_guild", { name }),
     joinGuild: (code) => call<Guild>("join_guild", { code }),
     openDm: (recipientId) => call<Channel>("open_dm", { recipientId }),
+    fetchUnread: async () => {
+      const list = await call<{ channelId: string; count: number }[]>("fetch_unread");
+      const map: Record<string, number> = {};
+      for (const e of list) map[e.channelId] = e.count;
+      return map;
+    },
+    markRead: (channelId) => call<void>("mark_read", { channelId }),
     onEvent: (cb) => {
       let unlisten: UnlistenFn | null = null;
       let cancelled = false;

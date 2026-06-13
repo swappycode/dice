@@ -1,4 +1,4 @@
-import { For, type Component } from "solid-js";
+import { For, Show, type Component } from "solid-js";
 import {
   directory,
   displayName,
@@ -8,6 +8,7 @@ import {
 } from "../../stores/guilds";
 import { presenceOf } from "../../stores/presence";
 import { currentUser } from "../../stores/session";
+import { markChannelRead, unreadCount } from "../../stores/unread";
 import { PresenceOrb } from "../common/PresenceOrb";
 import { SelfStrip } from "../common/SelfStrip";
 import styles from "./DmList.module.css";
@@ -25,10 +26,16 @@ export const DmList: Component = () => (
               <button
                 type="button"
                 class={`${styles.row} ${selectedChannelId() === dm.id ? styles.selected : ""}`}
-                onClick={() => selectDm(dm.id)}
+                onClick={() => {
+                  selectDm(dm.id);
+                  markChannelRead(dm.id);
+                }}
               >
                 <PresenceOrb status={presenceOf(partner() ?? "")()} />
                 <span class={styles.name}>{partner() ? displayName(partner()!) : "Unknown"}</span>
+                <Show when={unreadCount(dm.id) > 0}>
+                  <span class={styles.badge}>{unreadCount(dm.id)}</span>
+                </Show>
               </button>
             </li>
           );

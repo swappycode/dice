@@ -238,6 +238,13 @@ impl MessageDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UnreadDto {
+    pub channel_id: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionDto {
     pub user: UserDto,
 }

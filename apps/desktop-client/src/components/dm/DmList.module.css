@@ -38,6 +38,20 @@
   color: var(--c-text);
 }
 
+/* Unread count badge, pushed to the right edge of the row. */
+.badge {
+  margin-left: auto;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--c-accent);
+  color: var(--c-text-invert);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
 /* XP "newly installed program" soft-orange hover */
 .row:hover {
   background: linear-gradient(

@@ -1,5 +1,6 @@
-import { For, type Component } from "solid-js";
+import { For, Show, type Component } from "solid-js";
 import { directory, selectDmHome, selectGuild, selectedGuildId } from "../../stores/guilds";
+import { guildHasUnread } from "../../stores/unread";
 import { initialsOf } from "../common/Avatar";
 import styles from "./GuildRail.module.css";
 
@@ -26,6 +27,9 @@ export const GuildRail: Component<{ onAddGuild: () => void }> = (props) => (
             onClick={() => selectGuild(g.id)}
           >
             {initialsOf(g.name)}
+            <Show when={guildHasUnread(g.id)}>
+              <span class={styles.unreadDot} aria-label="unread" />
+            </Show>
           </button>
           <span class={`tooltip-classic ${styles.tip}`}>{g.name}</span>
         </div>

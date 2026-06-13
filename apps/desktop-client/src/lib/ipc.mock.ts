@@ -449,6 +449,16 @@ export function createMockIpc(): DiceIpc {
       return { ...ch };
     },
 
+    async fetchUnread() {
+      // The mock has no server-side counts; badges accrue live from the
+      // dispatcher as ambient/echoed messages land in non-active channels.
+      return {};
+    },
+
+    async markRead(_channelId) {
+      /* no server in the mock; the store clears locally */
+    },
+
     onEvent(cb) {
       subscribers.add(cb);
       startAmbient();

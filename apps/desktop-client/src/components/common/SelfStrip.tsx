@@ -5,6 +5,7 @@ import { resetDirectory } from "../../stores/guilds";
 import { resetMessages } from "../../stores/messages";
 import { presenceOf, resetPresence } from "../../stores/presence";
 import { currentUser, setSession } from "../../stores/session";
+import { resetUnread } from "../../stores/unread";
 import { Avatar } from "./Avatar";
 import { PresenceOrb } from "./PresenceOrb";
 import styles from "./SelfStrip.module.css";
@@ -42,6 +43,7 @@ export const SelfStrip: Component = () => {
     resetMessages();
     resetPresence();
     resetDirectory();
+    resetUnread();
     setSession(null);
   }
 

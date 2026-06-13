@@ -67,6 +67,11 @@ export interface DiceIpc {
   joinGuild(code: string): Promise<Guild>;
   openDm(recipientId: string): Promise<Channel>;
 
+  /** Per-channel unread counts for badges (channelId → count); for boot/resync. */
+  fetchUnread(): Promise<Record<string, number>>;
+  /** Clear a channel's unread badge on the server (on open / read). */
+  markRead(channelId: string): Promise<void>;
+
   /** Subscribe to the gateway event stream. Returns an unsubscribe fn. */
   onEvent(cb: (ev: DiceEvent) => void): () => void;
 }

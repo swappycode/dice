@@ -6,6 +6,7 @@ import {
   selectedGuild,
   selectedGuildId,
 } from "../../stores/guilds";
+import { markChannelRead, unreadCount } from "../../stores/unread";
 import { SelfStrip } from "../common/SelfStrip";
 import styles from "./ChannelTree.module.css";
 
@@ -41,12 +42,18 @@ export const ChannelTree: Component = () => {
                   <button
                     type="button"
                     class={`${styles.row} ${selectedChannelId() === ch.id ? styles.selected : ""}`}
-                    onClick={() => selectChannel(ch.id)}
+                    onClick={() => {
+                      selectChannel(ch.id);
+                      markChannelRead(ch.id);
+                    }}
                   >
                     <span class={styles.hash} aria-hidden="true">
                       #
                     </span>
                     <span class={styles.name}>{ch.name}</span>
+                    <Show when={unreadCount(ch.id) > 0}>
+                      <span class={styles.badge}>{unreadCount(ch.id)}</span>
+                    </Show>
                   </button>
                 </li>
               )}

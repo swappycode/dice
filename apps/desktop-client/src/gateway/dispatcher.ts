@@ -7,7 +7,14 @@
 import { ipc } from "../lib/ipc";
 import type { DiceEvent } from "../lib/types";
 import { setConnState, setTransport } from "../stores/connection";
-import { addDm, addGuild, applyBootstrap, applyUserUpdate, resetDirectory } from "../stores/guilds";
+import {
+  addDm,
+  addGuild,
+  applyBootstrap,
+  applyUserUpdate,
+  resetDirectory,
+  selectedChannelId,
+} from "../stores/guilds";
 import {
   applyMessageCreate,
   applyMessageDelete,
@@ -16,6 +23,7 @@ import {
   resetMessages,
 } from "../stores/messages";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
+import { bumpUnread, markChannelRead, resetUnread, setAllUnread } from "../stores/unread";
 import { currentUser, session, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
 
@@ -24,6 +32,13 @@ function dispatch(ev: DiceEvent): void {
     case "messageCreate":
       applyMessageCreate(ev.message, ev.nonce);
       clearTyping(ev.message.channelId, ev.message.authorId);
+      // Badge non-active channels (the author never notifies themselves).
+      if (
+        ev.message.authorId !== currentUser()?.id &&
+        ev.message.channelId !== selectedChannelId()
+      ) {
+        bumpUnread(ev.message.channelId);
+      }
       break;
     case "messageUpdate":
       applyMessageUpdate(ev.message);
@@ -70,6 +85,7 @@ function dispatch(ev: DiceEvent): void {
       resetMessages();
       resetPresence();
       resetDirectory();
+      resetUnread();
       setConnState("idle");
       setTransport(null);
       setLoginNotice("Your session expired. Please log in again.");
@@ -87,4 +103,12 @@ export async function runBootstrap(): Promise<void> {
   const b = await ipc.getBootstrap();
   applyBootstrap(b);
   loadPresence(b.presence);
+  try {
+    setAllUnread(await ipc.fetchUnread());
+    // The channel you're already viewing isn't unread.
+    const sel = selectedChannelId();
+    if (sel) markChannelRead(sel);
+  } catch {
+    /* offline / no server: badges accrue live */
+  }
 }

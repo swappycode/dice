@@ -224,6 +224,35 @@ impl ApiClient {
         })
     }
 
+    /// `GET /v1/unread` — the caller's non-zero per-channel unread counts as
+    /// `(channel_id, count)` pairs.
+    pub async fn fetch_unread(&self) -> Result<Vec<(u64, u64)>, ApiError> {
+        let url = self.url("/v1/unread")?;
+        let response = self
+            .bearer_send(|token| self.http.get(url.clone()).bearer_auth(token))
+            .await?;
+        let counts: v1::UnreadCounts = decode_response(response).await?;
+        Ok(counts
+            .entries
+            .into_iter()
+            .map(|e| (e.channel_id, e.count))
+            .collect())
+    }
+
+    /// `POST /v1/channels/{id}/read` — clear the caller's unread badge for the
+    /// channel (204).
+    pub async fn mark_read(&self, channel_id: u64) -> Result<(), ApiError> {
+        let url = self.url(&format!("/v1/channels/{channel_id}/read"))?;
+        let response = self
+            .bearer_send(|token| self.http.post(url.clone()).bearer_auth(token))
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
     /// `PUT /v1/users/@me/avatar` — set (`media_id`) or clear (`0`) the avatar.
     /// 204 on success; the change propagates via the `UserUpdate` dispatch.
     pub async fn set_avatar(&self, media_id: u64) -> Result<(), ApiError> {

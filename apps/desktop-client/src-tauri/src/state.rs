@@ -568,6 +568,27 @@ impl ClientCore {
         Ok(format!("data:{content_type};base64,{b64}"))
     }
 
+    /// The caller's non-zero per-channel unread counts (for badges on boot).
+    pub async fn fetch_unread(&self) -> Result<Vec<crate::dto::UnreadDto>, CoreError> {
+        Ok(self
+            .api
+            .fetch_unread()
+            .await?
+            .into_iter()
+            .map(|(channel, count)| crate::dto::UnreadDto {
+                channel_id: id_str(channel),
+                count,
+            })
+            .collect())
+    }
+
+    /// Clear the caller's unread badge for a channel (on open / read).
+    pub async fn mark_read(&self, channel_id: &str) -> Result<(), CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        self.api.mark_read(channel).await?;
+        Ok(())
+    }
+
     /// Set (or clear, `media_id = None`) the caller's avatar. The media must
     /// already be uploaded (`upload_attachment`). The server broadcasts a
     /// `UserUpdate` — including to this client — which updates the cache + UI.

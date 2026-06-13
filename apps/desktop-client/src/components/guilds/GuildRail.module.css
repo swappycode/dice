@@ -63,6 +63,7 @@
 
 /* 40×40 quick-launch tiles */
 .tile {
+  position: relative;
   width: 40px;
   height: 40px;
   border-radius: 4px;
@@ -75,6 +76,18 @@
     inset 1px 1px 0 var(--c-bevel-hi),
     inset -1px -1px 0 var(--c-bevel-lo);
   transition: box-shadow var(--t-fast);
+}
+
+/* Unread dot, top-right of a guild tile. */
+.unreadDot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  border: 1px solid var(--c-text-invert);
 }
 
 .tile:hover {

@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::dto::{AttachmentDto, BootstrapDto, ChannelDto, GuildDto, MessageDto, SessionDto};
+use crate::dto::{
+    AttachmentDto, BootstrapDto, ChannelDto, GuildDto, MessageDto, SessionDto, UnreadDto,
+};
 use crate::state::{ClientCore, CoreError};
 
 type Core<'a> = State<'a, Arc<ClientCore>>;
@@ -105,6 +107,18 @@ pub async fn fetch_attachment(core: Core<'_>, media_id: String) -> CmdResult<Str
 #[tauri::command]
 pub async fn set_avatar(core: Core<'_>, media_id: Option<String>) -> CmdResult<()> {
     core.set_avatar(media_id.as_deref()).await.map_err(user)
+}
+
+/// The caller's non-zero per-channel unread counts (for badges on boot).
+#[tauri::command]
+pub async fn fetch_unread(core: Core<'_>) -> CmdResult<Vec<UnreadDto>> {
+    core.fetch_unread().await.map_err(user)
+}
+
+/// Clear a channel's unread badge (on open / read).
+#[tauri::command]
+pub async fn mark_read(core: Core<'_>, channel_id: String) -> CmdResult<()> {
+    core.mark_read(&channel_id).await.map_err(user)
 }
 
 /// Toggle a reaction emoji on a message (server enforces membership).

@@ -128,6 +128,8 @@ pub fn run() {
             commands::upload_attachment,
             commands::fetch_attachment,
             commands::set_avatar,
+            commands::fetch_unread,
+            commands::mark_read,
             commands::edit_message,
             commands::delete_message,
             commands::react,
