@@ -1,6 +1,13 @@
-import { createEffect, createSignal, For, Show, type Component } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  Show,
+  type Component,
+} from "solid-js";
 import { ipc } from "../../lib/ipc";
-import type { Message } from "../../lib/types";
+import type { Attachment, Message } from "../../lib/types";
 import { crossesDay, dayLabel, formatTime } from "../../lib/time";
 import { displayName, selectedChannelId } from "../../stores/guilds";
 import {
@@ -17,6 +24,49 @@ const GROUP_WINDOW_MS = 5 * 60_000;
 const PIN_THRESHOLD_PX = 48;
 /** Fixed retro reaction palette (system emoji, no image assets). */
 const REACT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "😢"];
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** One attachment: an inline image, or a download chip for other files. Bytes
+ *  are fetched lazily from the host (`ipc.attachmentSrc`, cached per id). */
+const AttachmentView: Component<{ attachment: Attachment }> = (props) => {
+  const a = props.attachment;
+  const isImage = a.contentType.startsWith("image/");
+  const [src] = createResource(() => ipc.attachmentSrc(a.id));
+  return (
+    <Show
+      when={isImage}
+      fallback={
+        <a
+          class={`bevel-raised ${styles.fileChip}`}
+          href={src() || undefined}
+          download={a.filename}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <span class={styles.fileIcon}>📄</span>
+          <span class={styles.fileName}>{a.filename}</span>
+          <span class={styles.fileSize}>{formatSize(a.sizeBytes)}</span>
+        </a>
+      }
+    >
+      <a class={styles.imageLink} href={src() || undefined} target="_blank" rel="noreferrer">
+        <img
+          class={styles.image}
+          src={src() || ""}
+          alt={a.filename}
+          width={a.width || undefined}
+          height={a.height || undefined}
+          loading="lazy"
+        />
+      </a>
+    </Show>
+  );
+};
 
 /**
  * Render-last-100 + "Load older" button — the design doc's pre-approved
@@ -199,6 +249,14 @@ export const MessageList: Component = () => {
                         </button>
                         <span>Enter to save · Esc to cancel</span>
                       </div>
+                    </div>
+                  </Show>
+                  {/* Attachments (images inline, other files as chips) */}
+                  <Show when={m.attachments && m.attachments.length > 0}>
+                    <div class={styles.attachments}>
+                      <For each={m.attachments}>
+                        {(a) => <AttachmentView attachment={a} />}
+                      </For>
                     </div>
                   </Show>
                   {/* Reaction pills */}

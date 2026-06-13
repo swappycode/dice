@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DiceIpc } from "./ipc";
 import type {
+  Attachment,
   Bootstrap,
   Channel,
   DiceEvent,
@@ -39,6 +40,24 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 }
 
+/** Read a File as `{ contentType, dataBase64 }` (FileReader gives a
+ *  `data:<mime>;base64,<b64>` URL; we split off the base64 payload). */
+function readFileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("could not read the selected file"));
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Resolved attachment data: URLs, deduped per media id (bytes fetched once). */
+const attachmentSrcCache = new Map<string, Promise<string>>();
+
 export function createTauriIpc(): DiceIpc {
   return {
     getSession: () => call<Session | null>("session_status"),
@@ -49,8 +68,30 @@ export function createTauriIpc(): DiceIpc {
     getBootstrap: () => call<Bootstrap>("get_bootstrap"),
     // The host returns the pending message row; the DiceIpc seam only needs
     // the promise (the UI renders its own optimistic row keyed by nonce).
-    sendMessage: (channelId, content, nonce, replyToId) =>
-      call<void>("send_message", { channelId, content, nonce, replyToId: replyToId ?? null }),
+    sendMessage: (channelId, content, nonce, replyToId, attachmentIds) =>
+      call<void>("send_message", {
+        channelId,
+        content,
+        nonce,
+        replyToId: replyToId ?? null,
+        attachmentIds: attachmentIds ?? [],
+      }),
+    uploadAttachment: async (file) => {
+      const dataBase64 = await readFileBase64(file);
+      return call<Attachment>("upload_attachment", {
+        filename: file.name,
+        contentType: file.type || "application/octet-stream",
+        dataBase64,
+      });
+    },
+    attachmentSrc: (mediaId) => {
+      let pending = attachmentSrcCache.get(mediaId);
+      if (!pending) {
+        pending = call<string>("fetch_attachment", { mediaId });
+        attachmentSrcCache.set(mediaId, pending);
+      }
+      return pending;
+    },
     editMessage: (channelId, messageId, content) =>
       call<void>("edit_message", { channelId, messageId, content }),
     deleteMessage: (channelId, messageId) =>

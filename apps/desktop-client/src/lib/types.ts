@@ -47,6 +47,15 @@ export interface Reaction {
   me: boolean; // this user reacted with this emoji
 }
 
+export interface Attachment {
+  id: string; // media id; bytes fetched via ipc.attachmentSrc(id)
+  filename: string;
+  contentType: string; // MIME
+  sizeBytes: number;
+  width: number; // 0 for non-images (used to reserve layout space)
+  height: number;
+}
+
 export interface Message {
   id: string;
   channelId: string;
@@ -56,6 +65,7 @@ export interface Message {
   editedAtMs: number | null;
   replyToId?: string | null; // parent message id (may be uncached/deleted)
   reactions?: Reaction[];
+  attachments?: Attachment[];
   nonce?: string; // present on optimistic pending rows + their echoes
   pending?: boolean; // optimistic row not yet acked
   failed?: boolean;

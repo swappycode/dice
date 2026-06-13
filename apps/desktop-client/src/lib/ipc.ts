@@ -13,6 +13,7 @@
 import { createMockIpc } from "./ipc.mock";
 import { createTauriIpc } from "./ipc.real";
 import type {
+  Attachment,
   Bootstrap,
   Channel,
   DiceEvent,
@@ -32,13 +33,21 @@ export interface DiceIpc {
   getBootstrap(): Promise<Bootstrap>;
 
   /** Optimistic send: caller generates the nonce, renders a pending row, and
-      reconciles on the `messageCreate` event echoing the same nonce. */
+      reconciles on the `messageCreate` event echoing the same nonce.
+      `attachmentIds` are media ids returned by prior `uploadAttachment` calls. */
   sendMessage(
     channelId: string,
     content: string,
     nonce: string,
     replyToId?: string,
+    attachmentIds?: string[],
   ): Promise<void>;
+  /** Upload one file ahead of a send; returns its stored metadata (the `id`
+      is then passed to `sendMessage` in `attachmentIds`). */
+  uploadAttachment(file: File): Promise<Attachment>;
+  /** Resolve an attachment's bytes to a URL the webview can render directly
+      (`<img src>` / download link). Cached per id by the implementation. */
+  attachmentSrc(mediaId: string): Promise<string>;
   /** Edit (author-only); the UI reconciles on the `messageUpdate` event. */
   editMessage(channelId: string, messageId: string, content: string): Promise<void>;
   /** Delete (author, or MANAGE_MESSAGES); reconciles on `messageDelete`. */

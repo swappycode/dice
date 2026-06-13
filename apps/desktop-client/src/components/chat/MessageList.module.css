@@ -134,6 +134,56 @@
   opacity: 0.85;
 }
 
+/* Attachments (images inline + file download chips). */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.imageLink {
+  display: inline-block;
+  line-height: 0;
+}
+
+.image {
+  max-width: 320px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--c-bevel-lo);
+  background: var(--c-window-face);
+  cursor: pointer;
+}
+
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 280px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text);
+  text-decoration: none;
+  background: var(--c-window-face);
+}
+
+.fileIcon {
+  flex: none;
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSize {
+  flex: none;
+  color: var(--c-text-dim);
+}
+
 /* Reaction pills. */
 .reactions {
   display: flex;

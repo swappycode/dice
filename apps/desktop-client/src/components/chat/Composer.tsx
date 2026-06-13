@@ -1,6 +1,6 @@
-import { createEffect, Show, type Component } from "solid-js";
+import { createEffect, createSignal, For, Show, type Component } from "solid-js";
 import { ipc } from "../../lib/ipc";
-import type { Message } from "../../lib/types";
+import type { Attachment, Message } from "../../lib/types";
 import { displayName, dmPartnerId, selectedChannel } from "../../stores/guilds";
 import { addPending, markFailed, replyTarget, setReplyTarget } from "../../stores/messages";
 import { currentUser } from "../../stores/session";
@@ -9,9 +9,13 @@ import styles from "./Composer.module.css";
 const TYPING_THROTTLE_MS = 8_000; // protocol.md §6: ≤ 1 per 8 s per channel
 const MAX_ROWS = 5;
 const LINE_PX = 18;
+const MAX_ATTACHMENTS = 10; // mirrors the server cap
 
 export const Composer: Component = () => {
   let textarea: HTMLTextAreaElement | undefined;
+  let fileInput: HTMLInputElement | undefined;
+  const [pendingAttachments, setPendingAttachments] = createSignal<Attachment[]>([]);
+  const [uploading, setUploading] = createSignal(false);
   const lastTypingSent = new Map<string, number>();
 
   const channel = () => selectedChannel();
@@ -26,15 +30,41 @@ export const Composer: Component = () => {
     return `Message #${ch.name}`;
   };
 
-  // reset draft + reply target when switching channels
+  // reset draft + reply target + staged attachments when switching channels
   createEffect(() => {
     channel();
     setReplyTarget(null);
+    setPendingAttachments([]);
     if (textarea) {
       textarea.value = "";
       autosize();
     }
   });
+
+  async function onFilesPicked(e: Event): Promise<void> {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = ""; // allow re-picking the same file
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      for (const file of files) {
+        if (pendingAttachments().length >= MAX_ATTACHMENTS) break;
+        try {
+          const att = await ipc.uploadAttachment(file);
+          setPendingAttachments((prev) => [...prev, att]);
+        } catch {
+          /* a failed upload is skipped; the rest continue */
+        }
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removeAttachment(id: string): void {
+    setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
 
   function autosize(): void {
     if (!textarea) return;
@@ -59,7 +89,10 @@ export const Composer: Component = () => {
     const me = currentUser();
     if (!ch || !me || !textarea) return;
     const content = textarea.value.trim();
-    if (!content || content.length > 4000) return;
+    if (content.length > 4000) return;
+    const attachments = pendingAttachments();
+    // A message needs content OR at least one attachment (matches the server).
+    if (!content && attachments.length === 0) return;
 
     const replyId = replyTarget()?.id;
     const nonce = crypto.randomUUID();
@@ -71,6 +104,7 @@ export const Composer: Component = () => {
       createdAtMs: Date.now(),
       editedAtMs: null,
       replyToId: replyId ?? null,
+      attachments,
       nonce,
       pending: true,
     };
@@ -78,7 +112,10 @@ export const Composer: Component = () => {
     textarea.value = "";
     autosize();
     setReplyTarget(null);
-    ipc.sendMessage(ch.id, content, nonce, replyId).catch(() => markFailed(ch.id, nonce));
+    setPendingAttachments([]);
+    ipc
+      .sendMessage(ch.id, content, nonce, replyId, attachments.map((a) => a.id))
+      .catch(() => markFailed(ch.id, nonce));
   }
 
   function onKeyDown(e: KeyboardEvent): void {
@@ -107,6 +144,41 @@ export const Composer: Component = () => {
           </div>
         )}
       </Show>
+      <Show when={pendingAttachments().length > 0}>
+        <div class={styles.attachments}>
+          <For each={pendingAttachments()}>
+            {(a) => (
+              <div class={`bevel-raised ${styles.attachChip}`} title={a.filename}>
+                <span class={styles.attachName}>{a.filename}</span>
+                <button
+                  type="button"
+                  class={styles.attachRemove}
+                  title="Remove attachment"
+                  onClick={() => removeAttachment(a.id)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        class={styles.fileInput}
+        onChange={(e) => void onFilesPicked(e)}
+      />
+      <button
+        type="button"
+        class={`bevel-raised ${styles.attach}`}
+        title="Attach files"
+        disabled={uploading() || pendingAttachments().length >= MAX_ATTACHMENTS}
+        onClick={() => fileInput?.click()}
+      >
+        {uploading() ? "…" : "📎"}
+      </button>
       <textarea
         ref={textarea}
         class={`bevel-sunken ${styles.input}`}

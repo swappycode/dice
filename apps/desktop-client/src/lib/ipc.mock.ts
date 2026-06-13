@@ -9,6 +9,7 @@
 import { DICE_EPOCH_MS } from "./time";
 import type { DiceIpc } from "./ipc";
 import type {
+  Attachment,
   Bootstrap,
   Channel,
   DiceEvent,
@@ -169,6 +170,8 @@ const AMBIENT_LINES: Array<[User, Channel, string]> = [
 
 export function createMockIpc(): DiceIpc {
   const subscribers = new Set<(ev: DiceEvent) => void>();
+  // Uploaded attachments live as object URLs (browser-only; no backend).
+  const uploads = new Map<string, { attachment: Attachment; url: string }>();
   let session: Session | null = localStorage.getItem(SESSION_KEY) ? { user: SELF } : null;
   let ambientTimer: ReturnType<typeof setInterval> | null = null;
   let ambientIdx = 0;
@@ -267,7 +270,10 @@ export function createMockIpc(): DiceIpc {
       };
     },
 
-    async sendMessage(channelId, content, nonce, replyToId) {
+    async sendMessage(channelId, content, nonce, replyToId, attachmentIds) {
+      const attachments = (attachmentIds ?? [])
+        .map((id) => uploads.get(id)?.attachment)
+        .filter((a): a is Attachment => !!a);
       // echo after 150 ms with a real id + the caller's nonce (reconcile path)
       setTimeout(() => {
         const ms = Date.now();
@@ -279,10 +285,31 @@ export function createMockIpc(): DiceIpc {
           createdAtMs: ms,
           editedAtMs: null,
           replyToId: replyToId ?? null,
+          attachments,
         };
         appendToLog(m);
         emit({ type: "messageCreate", message: m, nonce });
       }, 150);
+    },
+
+    async uploadAttachment(file) {
+      await delay(80);
+      const id = genId(Date.now());
+      const url = URL.createObjectURL(file);
+      const attachment: Attachment = {
+        id,
+        filename: file.name,
+        contentType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+        width: 0,
+        height: 0,
+      };
+      uploads.set(id, { attachment, url });
+      return attachment;
+    },
+
+    async attachmentSrc(mediaId) {
+      return uploads.get(mediaId)?.url ?? "";
     },
 
     async react(channelId, messageId, emoji, add) {

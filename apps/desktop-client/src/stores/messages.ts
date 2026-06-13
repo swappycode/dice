@@ -98,7 +98,8 @@ export function oldestMessageId(channelId: string): string | null {
 }
 
 /** Apply a messageUpdate (edit): MERGE content + editedAtMs, PRESERVING the
- *  cached replyToId and reactions (the edit broadcast doesn't carry them). */
+ *  cached replyToId, reactions and attachments (the edit broadcast carries none
+ *  of them — the `...arr[i]` spread keeps the existing values). */
 export function applyMessageUpdate(m: Message): void {
   setByChannel(
     produce((s) => {
