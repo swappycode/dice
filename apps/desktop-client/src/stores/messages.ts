@@ -1,3 +1,4 @@
+import { createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { Message } from "../lib/types";
 
@@ -5,6 +6,15 @@ import type { Message } from "../lib/types";
 const MAX_PER_CHANNEL = 200;
 
 const [byChannel, setByChannel] = createStore<Record<string, Message[]>>({});
+
+/** The message the composer is currently replying to (null = not replying). */
+const [replyTarget, setReplyTarget] = createSignal<Message | null>(null);
+export { replyTarget, setReplyTarget };
+
+/** Look up a (cached) message by id within a channel — for reply previews. */
+export function messageById(channelId: string, messageId: string): Message | undefined {
+  return byChannel[channelId]?.find((m) => m.id === messageId);
+}
 
 /** Channels whose newest page has been fetched (non-reactive bookkeeping). */
 const fetchedChannels = new Set<string>();
@@ -87,13 +97,46 @@ export function oldestMessageId(channelId: string): string | null {
   return first ? first.id : null;
 }
 
-/** Apply a messageUpdate (edit): replace the row in place by id. */
+/** Apply a messageUpdate (edit): MERGE content + editedAtMs, PRESERVING the
+ *  cached replyToId and reactions (the edit broadcast doesn't carry them). */
 export function applyMessageUpdate(m: Message): void {
   setByChannel(
     produce((s) => {
       const arr = s[m.channelId];
       const i = arr?.findIndex((x) => x.id === m.id) ?? -1;
-      if (arr && i >= 0) arr[i] = m;
+      if (arr && i >= 0) {
+        arr[i] = { ...arr[i]!, content: m.content, editedAtMs: m.editedAtMs };
+      }
+    }),
+  );
+}
+
+/** Apply a reactionUpdate delta: adjust the message's per-emoji aggregate. */
+export function applyReactionDelta(
+  channelId: string,
+  messageId: string,
+  emoji: string,
+  added: boolean,
+  isSelf: boolean,
+): void {
+  setByChannel(
+    produce((s) => {
+      const m = s[channelId]?.find((x) => x.id === messageId);
+      if (!m) return;
+      const list = (m.reactions ??= []);
+      const idx = list.findIndex((r) => r.emoji === emoji);
+      if (added) {
+        if (idx >= 0) {
+          list[idx]!.count += 1;
+          if (isSelf) list[idx]!.me = true;
+        } else {
+          list.push({ emoji, count: 1, me: isSelf });
+        }
+      } else if (idx >= 0) {
+        list[idx]!.count -= 1;
+        if (isSelf) list[idx]!.me = false;
+        if (list[idx]!.count <= 0) list.splice(idx, 1);
+      }
     }),
   );
 }

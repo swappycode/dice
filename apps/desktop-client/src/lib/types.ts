@@ -41,6 +41,12 @@ export interface Guild {
   members: Member[];
 }
 
+export interface Reaction {
+  emoji: string;
+  count: number;
+  me: boolean; // this user reacted with this emoji
+}
+
 export interface Message {
   id: string;
   channelId: string;
@@ -48,6 +54,8 @@ export interface Message {
   content: string;
   createdAtMs: number; // derived from the snowflake by the bridge/mock
   editedAtMs: number | null;
+  replyToId?: string | null; // parent message id (may be uncached/deleted)
+  reactions?: Reaction[];
   nonce?: string; // present on optimistic pending rows + their echoes
   pending?: boolean; // optimistic row not yet acked
   failed?: boolean;
@@ -80,6 +88,14 @@ export type DiceEvent =
   | { type: "messageCreate"; message: Message; nonce?: string }
   | { type: "messageUpdate"; message: Message }
   | { type: "messageDelete"; channelId: string; messageId: string }
+  | {
+      type: "reactionUpdate";
+      channelId: string;
+      messageId: string;
+      emoji: string;
+      userId: string;
+      added: boolean;
+    }
   | { type: "typingStart"; channelId: string; userId: string }
   | { type: "presenceUpdate"; userId: string; status: PresenceStatus }
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }

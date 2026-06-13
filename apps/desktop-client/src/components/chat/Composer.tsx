@@ -1,8 +1,8 @@
-import { createEffect, type Component } from "solid-js";
+import { createEffect, Show, type Component } from "solid-js";
 import { ipc } from "../../lib/ipc";
 import type { Message } from "../../lib/types";
 import { displayName, dmPartnerId, selectedChannel } from "../../stores/guilds";
-import { addPending, markFailed } from "../../stores/messages";
+import { addPending, markFailed, replyTarget, setReplyTarget } from "../../stores/messages";
 import { currentUser } from "../../stores/session";
 import styles from "./Composer.module.css";
 
@@ -26,9 +26,10 @@ export const Composer: Component = () => {
     return `Message #${ch.name}`;
   };
 
-  // reset draft when switching channels
+  // reset draft + reply target when switching channels
   createEffect(() => {
     channel();
+    setReplyTarget(null);
     if (textarea) {
       textarea.value = "";
       autosize();
@@ -60,6 +61,7 @@ export const Composer: Component = () => {
     const content = textarea.value.trim();
     if (!content || content.length > 4000) return;
 
+    const replyId = replyTarget()?.id;
     const nonce = crypto.randomUUID();
     const pending: Message = {
       id: `pending-${nonce}`,
@@ -68,13 +70,15 @@ export const Composer: Component = () => {
       content,
       createdAtMs: Date.now(),
       editedAtMs: null,
+      replyToId: replyId ?? null,
       nonce,
       pending: true,
     };
     addPending(pending); // optimistic row; echo reconciles by nonce
     textarea.value = "";
     autosize();
-    ipc.sendMessage(ch.id, content, nonce).catch(() => markFailed(ch.id, nonce));
+    setReplyTarget(null);
+    ipc.sendMessage(ch.id, content, nonce, replyId).catch(() => markFailed(ch.id, nonce));
   }
 
   function onKeyDown(e: KeyboardEvent): void {
@@ -86,6 +90,23 @@ export const Composer: Component = () => {
 
   return (
     <div class={styles.composer}>
+      <Show when={replyTarget()}>
+        {(target) => (
+          <div class={styles.replyBar}>
+            <span class={styles.replyText}>
+              Replying to <b>{displayName(target().authorId)}</b>
+            </span>
+            <button
+              type="button"
+              class={styles.replyCancel}
+              title="Cancel reply"
+              onClick={() => setReplyTarget(null)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </Show>
       <textarea
         ref={textarea}
         class={`bevel-sunken ${styles.input}`}

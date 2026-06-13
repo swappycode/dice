@@ -110,6 +110,87 @@
   color: var(--c-text-dim);
 }
 
+/* Reply reference line above a replying message. */
+.replyRef {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+  margin-bottom: 1px;
+  overflow: hidden;
+}
+
+.replyAuthor {
+  color: var(--c-accent);
+  font-weight: 700;
+}
+
+.replySnippet {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60ch;
+  opacity: 0.85;
+}
+
+/* Reaction pills. */
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 18px;
+  padding: 0 var(--sp-2);
+  font-size: var(--font-size-chrome);
+  border: 1px solid var(--c-bevel-lo);
+  background: var(--c-window-face);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.pillMine {
+  border-color: var(--c-accent-border);
+  background: var(--c-accent-soft);
+}
+
+.pillCount {
+  color: var(--c-text-dim);
+}
+
+/* Emoji picker popover (opened by the React action). */
+.picker {
+  position: absolute;
+  top: 12px;
+  right: 0;
+  z-index: 50;
+  display: inline-flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--c-window-face);
+  border: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 3px var(--c-shadow-soft);
+}
+
+.pickerEmoji {
+  padding: 2px 3px;
+  font-size: 14px;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.pickerEmoji:hover {
+  background: var(--c-accent-soft);
+}
+
 /* Hover action bar (Edit / Delete), top-right of own rows. */
 .actions {
   position: absolute;

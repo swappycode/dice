@@ -12,6 +12,7 @@ import {
   applyMessageCreate,
   applyMessageDelete,
   applyMessageUpdate,
+  applyReactionDelta,
   resetMessages,
 } from "../stores/messages";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
@@ -29,6 +30,15 @@ function dispatch(ev: DiceEvent): void {
       break;
     case "messageDelete":
       applyMessageDelete(ev.channelId, ev.messageId);
+      break;
+    case "reactionUpdate":
+      applyReactionDelta(
+        ev.channelId,
+        ev.messageId,
+        ev.emoji,
+        ev.added,
+        ev.userId === currentUser()?.id,
+      );
       break;
     case "typingStart":
       if (ev.userId !== currentUser()?.id) noteTyping(ev.channelId, ev.userId);

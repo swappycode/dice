@@ -267,7 +267,7 @@ export function createMockIpc(): DiceIpc {
       };
     },
 
-    async sendMessage(channelId, content, nonce) {
+    async sendMessage(channelId, content, nonce, replyToId) {
       // echo after 150 ms with a real id + the caller's nonce (reconcile path)
       setTimeout(() => {
         const ms = Date.now();
@@ -278,10 +278,26 @@ export function createMockIpc(): DiceIpc {
           content,
           createdAtMs: ms,
           editedAtMs: null,
+          replyToId: replyToId ?? null,
         };
         appendToLog(m);
         emit({ type: "messageCreate", message: m, nonce });
       }, 150);
+    },
+
+    async react(channelId, messageId, emoji, add) {
+      setTimeout(
+        () =>
+          emit({
+            type: "reactionUpdate",
+            channelId,
+            messageId,
+            emoji,
+            userId: SELF.id,
+            added: add,
+          }),
+        60,
+      );
     },
 
     async editMessage(channelId, messageId, content) {

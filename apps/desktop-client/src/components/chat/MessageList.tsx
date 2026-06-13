@@ -3,12 +3,20 @@ import { ipc } from "../../lib/ipc";
 import type { Message } from "../../lib/types";
 import { crossesDay, dayLabel, formatTime } from "../../lib/time";
 import { displayName, selectedChannelId } from "../../stores/guilds";
-import { messagesFor, oldestMessageId, prependOlder } from "../../stores/messages";
+import {
+  messageById,
+  messagesFor,
+  oldestMessageId,
+  prependOlder,
+  setReplyTarget,
+} from "../../stores/messages";
 import { currentUser } from "../../stores/session";
 import styles from "./MessageList.module.css";
 
 const GROUP_WINDOW_MS = 5 * 60_000;
 const PIN_THRESHOLD_PX = 48;
+/** Fixed retro reaction palette (system emoji, no image assets). */
+const REACT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "😢"];
 
 /**
  * Render-last-100 + "Load older" button — the design doc's pre-approved
@@ -22,6 +30,8 @@ export const MessageList: Component = () => {
   // Which message (by id) is being edited inline, and its draft text.
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editText, setEditText] = createSignal("");
+  // Which message's reaction picker is open (id or null).
+  const [pickerFor, setPickerFor] = createSignal<string | null>(null);
 
   const channelId = () => selectedChannelId() ?? "";
   const messages = () => messagesFor(channelId());
@@ -42,6 +52,11 @@ export const MessageList: Component = () => {
   }
   function removeMessage(m: Message): void {
     void ipc.deleteMessage(m.channelId, m.id).catch(() => {});
+  }
+  function toggleReaction(m: Message, emoji: string): void {
+    setPickerFor(null);
+    const mine = m.reactions?.find((r) => r.emoji === emoji)?.me ?? false;
+    void ipc.react(m.channelId, m.id, emoji, !mine).catch(() => {});
   }
 
   function pinnedToBottom(): boolean {
@@ -123,6 +138,22 @@ export const MessageList: Component = () => {
                     [styles.failed!]: !!m.failed,
                   }}
                 >
+                  <Show when={m.replyToId}>
+                    {(rid) => {
+                      const parent = () => messageById(m.channelId, rid());
+                      return (
+                        <div class={styles.replyRef}>
+                          ↪{" "}
+                          <Show when={parent()} fallback={<i>original message</i>}>
+                            <span class={styles.replyAuthor}>
+                              {displayName(parent()!.authorId)}
+                            </span>
+                            <span class={styles.replySnippet}>{parent()!.content}</span>
+                          </Show>
+                        </div>
+                      );
+                    }}
+                  </Show>
                   <Show when={showHeader(m, prev())}>
                     <div class={styles.meta}>
                       <span class={styles.author}>{displayName(m.authorId)}</span>
@@ -170,15 +201,69 @@ export const MessageList: Component = () => {
                       </div>
                     </div>
                   </Show>
-                  {/* Hover actions on own, settled messages */}
-                  <Show when={isOwn(m) && !m.pending && !m.failed && editingId() !== m.id}>
+                  {/* Reaction pills */}
+                  <Show when={m.reactions && m.reactions.length > 0}>
+                    <div class={styles.reactions}>
+                      <For each={m.reactions}>
+                        {(r) => (
+                          <button
+                            type="button"
+                            class={styles.pill}
+                            classList={{ [styles.pillMine!]: r.me }}
+                            onClick={() => toggleReaction(m, r.emoji)}
+                          >
+                            <span>{r.emoji}</span>
+                            <span class={styles.pillCount}>{r.count}</span>
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                  {/* Hover actions: React + Reply for anyone; Edit/Delete for own */}
+                  <Show when={!m.pending && !m.failed && editingId() !== m.id}>
                     <div class={styles.actions}>
-                      <button type="button" class={styles.action} onClick={() => beginEdit(m)}>
-                        Edit
+                      <button
+                        type="button"
+                        class={styles.action}
+                        onClick={() => setPickerFor(pickerFor() === m.id ? null : m.id)}
+                      >
+                        React
                       </button>
-                      <button type="button" class={styles.action} onClick={() => removeMessage(m)}>
-                        Delete
+                      <button
+                        type="button"
+                        class={styles.action}
+                        onClick={() => setReplyTarget(m)}
+                      >
+                        Reply
                       </button>
+                      <Show when={isOwn(m)}>
+                        <button type="button" class={styles.action} onClick={() => beginEdit(m)}>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          class={styles.action}
+                          onClick={() => removeMessage(m)}
+                        >
+                          Delete
+                        </button>
+                      </Show>
+                    </div>
+                  </Show>
+                  {/* Emoji picker popover */}
+                  <Show when={pickerFor() === m.id}>
+                    <div class={styles.picker}>
+                      <For each={REACT_EMOJIS}>
+                        {(e) => (
+                          <button
+                            type="button"
+                            class={styles.pickerEmoji}
+                            onClick={() => toggleReaction(m, e)}
+                          >
+                            {e}
+                          </button>
+                        )}
+                      </For>
                     </div>
                   </Show>
                 </div>

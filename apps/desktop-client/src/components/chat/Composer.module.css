@@ -1,9 +1,43 @@
 .composer {
   flex: none;
   display: flex;
+  flex-wrap: wrap; /* the reply bar (flex-basis:100%) wraps onto its own row */
   align-items: flex-end;
   gap: var(--sp-3);
   padding: var(--sp-3);
+}
+
+/* Reply bar spans the full width above the input/send row. */
+.replyBar {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-accent-soft);
+  border: 1px solid var(--c-bevel-lo);
+  font-size: var(--font-size-chrome);
+}
+
+.replyText {
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replyCancel {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--c-text-dim);
+  font-size: var(--font-size-chrome);
+}
+
+.replyCancel:hover {
+  color: var(--c-text);
 }
 
 .input {
