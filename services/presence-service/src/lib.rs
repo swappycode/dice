@@ -8,6 +8,7 @@
 //! `dice.evt.dm.{channel_id}.presence` they participate in, so DM-only
 //! contacts see dots too. The gateway passes both lists at `connect`.
 
+pub mod rpc;
 mod service;
 
 use dice_common::{ChannelId, GuildId, SessionId, UserId};

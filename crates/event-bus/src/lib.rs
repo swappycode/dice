@@ -18,6 +18,7 @@
 
 mod local;
 mod nats;
+pub mod rpc;
 mod subject;
 
 use std::pin::Pin;

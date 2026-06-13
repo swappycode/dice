@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../proto/dice/v1/presence.proto",
         "../../proto/dice/v1/user.proto",
         "../../proto/dice/internal/v1/events.proto",
+        "../../proto/dice/internal/v1/rpc.proto",
     ];
     prost_build::Config::new()
         .protoc_executable(protoc_bin_vendored::protoc_bin_path()?)

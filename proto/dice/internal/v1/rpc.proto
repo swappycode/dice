@@ -1,0 +1,48 @@
+// Service-to-service request/response pairs for NATS request-reply (split mode).
+// Subjects: dice.rpc.{service}.{method}, queue group = service name. The reply
+// envelope (ok/error tag) is framed by hand in dice-event-bus::rpc, so only the
+// method payloads live here. Presence is the first service wired (the others
+// follow the identical pattern). See docs/design/backend-services.md.
+syntax = "proto3";
+package dice.internal.v1;
+
+import "dice/v1/presence.proto";
+
+message PresenceConnectReq {
+  fixed64 user = 1;
+  fixed64 session = 2;
+  repeated fixed64 guild_ids = 3;
+  repeated fixed64 dm_channel_ids = 4;
+  dice.v1.PresenceStatus status = 5;
+}
+
+message PresenceHeartbeatReq {
+  fixed64 user = 1;
+  fixed64 session = 2;
+}
+
+message PresenceSetStatusReq {
+  fixed64 user = 1;
+  fixed64 session = 2;
+  dice.v1.PresenceStatus status = 3;
+}
+
+message PresenceDisconnectReq {
+  fixed64 user = 1;
+  fixed64 session = 2;
+}
+
+message PresenceInterestReq {
+  fixed64 user = 1;
+  fixed64 session = 2;
+  repeated fixed64 guild_ids = 3;
+  repeated fixed64 dm_channel_ids = 4;
+}
+
+message PresenceSnapshotReq {
+  repeated fixed64 users = 1;
+}
+
+message PresenceSnapshotResp {
+  repeated dice.v1.PresenceUpdate updates = 1;
+}
