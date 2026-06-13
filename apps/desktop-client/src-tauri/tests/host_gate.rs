@@ -350,7 +350,7 @@ async fn host_gate_full_journey_and_offline_restart() {
     // ---- optimistic send: pending sqlite row → ack reconciles ----
     let channel_id: u64 = general.id.parse().unwrap();
     let pending = core
-        .send_message(&general.id, "hello from the host", "nonce-a1")
+        .send_message(&general.id, "hello from the host", None, "nonce-a1")
         .await
         .unwrap();
     assert_eq!(pending.pending, Some(true), "send returns the PENDING row");
@@ -419,6 +419,7 @@ async fn host_gate_full_journey_and_offline_restart() {
     raw.send(Command::SendMessage {
         channel_id,
         content: "hello from the raw client".into(),
+        reply_to_id: 0,
         nonce: 0xB0B,
     })
     .await

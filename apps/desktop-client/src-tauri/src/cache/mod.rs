@@ -15,7 +15,7 @@ use dice_protocol::v1::frame::Payload;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::dto::{
-    BootstrapDto, ChannelDto, GuildDto, MemberDto, MessageDto, UserDto, snowflake_ms,
+    BootstrapDto, ChannelDto, GuildDto, MemberDto, MessageDto, ReactionDto, UserDto, snowflake_ms,
 };
 
 /// Pending rows older than this at open are marked failed (design §3.3).
@@ -236,6 +236,7 @@ impl Cache {
         channel_id: u64,
         author_id: u64,
         content: String,
+        reply_to: Option<u64>,
         client_nonce: String,
     ) -> Result<MessageDto, CacheError> {
         static SEQ: AtomicI64 = AtomicI64::new(0);
@@ -248,15 +249,17 @@ impl Cache {
             content: content.clone(),
             created_at_ms: created,
             edited_at_ms: None,
+            reply_to_id: reply_to.map(|r| r.to_string()),
+            reactions: Vec::new(),
             nonce: Some(client_nonce.clone()),
             pending: Some(true),
             failed: None,
         };
         self.run(move |conn| {
             conn.execute(
-                "INSERT INTO messages(id, channel_id, author_id, content, created_at, nonce, pending)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
-                params![id, channel_id as i64, author_id as i64, content, created as i64, client_nonce],
+                "INSERT INTO messages(id, channel_id, author_id, content, created_at, nonce, pending, reply_to_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+                params![id, channel_id as i64, author_id as i64, content, created as i64, client_nonce, reply_to.map(|r| r as i64)],
             )?;
             Ok(())
         })
@@ -310,7 +313,7 @@ impl Cache {
                 Some(before) => {
                     let mut stmt = conn.prepare_cached(
                         "SELECT id, channel_id, author_id, content, created_at, edited_at,
-                                nonce, pending, failed
+                                nonce, pending, failed, reply_to_id
                          FROM messages
                          WHERE channel_id = ?1 AND id > 0 AND id < ?2
                          ORDER BY id DESC LIMIT ?3",
@@ -327,7 +330,7 @@ impl Cache {
                 None => {
                     let mut stmt = conn.prepare_cached(
                         "SELECT id, channel_id, author_id, content, created_at, edited_at,
-                                nonce, pending, failed
+                                nonce, pending, failed, reply_to_id
                          FROM messages
                          WHERE channel_id = ?1 AND id > 0
                          ORDER BY id DESC LIMIT ?2",
@@ -339,7 +342,7 @@ impl Cache {
                     out.reverse();
                     let mut local = conn.prepare_cached(
                         "SELECT id, channel_id, author_id, content, created_at, edited_at,
-                                nonce, pending, failed
+                                nonce, pending, failed, reply_to_id
                          FROM messages
                          WHERE channel_id = ?1 AND id < 0
                          ORDER BY created_at ASC",
@@ -350,7 +353,69 @@ impl Cache {
                     }
                 }
             }
+            load_reactions_into(conn, &mut out)?;
             Ok(out)
+        })
+        .await
+    }
+
+    /// Apply a live `ReactionUpdate` delta to the cached aggregate. `me` =
+    /// whether the reacting user is us. Mirrors the server's per-emoji rollup so
+    /// reload-from-cache and live state agree.
+    pub async fn apply_reaction_delta(
+        &self,
+        message_id: u64,
+        emoji: String,
+        me: bool,
+        added: bool,
+    ) -> Result<(), CacheError> {
+        self.run(move |conn| {
+            let mid = message_id as i64;
+            let existing: Option<(i64, i64)> = conn
+                .query_row(
+                    "SELECT count, me FROM message_reactions WHERE message_id = ?1 AND emoji = ?2",
+                    params![mid, emoji],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if added {
+                match existing {
+                    Some((count, me_cur)) => {
+                        conn.execute(
+                            "UPDATE message_reactions SET count = ?1, me = ?2 \
+                             WHERE message_id = ?3 AND emoji = ?4",
+                            params![count + 1, i64::from(me_cur != 0 || me), mid, emoji],
+                        )?;
+                    }
+                    None => {
+                        let ord: i64 = conn.query_row(
+                            "SELECT COALESCE(MAX(ord) + 1, 0) FROM message_reactions WHERE message_id = ?1",
+                            params![mid],
+                            |r| r.get(0),
+                        )?;
+                        conn.execute(
+                            "INSERT INTO message_reactions(message_id, emoji, count, me, ord) \
+                             VALUES (?1, ?2, 1, ?3, ?4)",
+                            params![mid, emoji, i64::from(me), ord],
+                        )?;
+                    }
+                }
+            } else if let Some((count, me_cur)) = existing {
+                if count - 1 <= 0 {
+                    conn.execute(
+                        "DELETE FROM message_reactions WHERE message_id = ?1 AND emoji = ?2",
+                        params![mid, emoji],
+                    )?;
+                } else {
+                    let new_me = if me { 0 } else { me_cur };
+                    conn.execute(
+                        "UPDATE message_reactions SET count = ?1, me = ?2 \
+                         WHERE message_id = ?3 AND emoji = ?4",
+                        params![count - 1, new_me, mid, emoji],
+                    )?;
+                }
+            }
+            Ok(())
         })
         .await
     }
@@ -386,6 +451,7 @@ impl Cache {
             let tx = conn.transaction()?;
             for message in &messages {
                 upsert_message(&tx, message, None)?;
+                replace_reactions(&tx, message)?;
             }
             let newest = messages.iter().map(|m| m.id as i64).max();
             let oldest = messages.iter().map(|m| m.id as i64).min();
@@ -447,6 +513,7 @@ impl Cache {
             let tx = conn.transaction()?;
             for message in &messages {
                 upsert_message(&tx, message, None)?;
+                replace_reactions(&tx, message)?;
             }
             if let Some(oldest) = messages.iter().map(|m| m.id as i64).min() {
                 tx.execute(
@@ -701,10 +768,38 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDto> {
         content: row.get(3)?,
         created_at_ms: row.get::<_, i64>(4)? as u64,
         edited_at_ms: row.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+        reply_to_id: row.get::<_, Option<i64>>(9)?.map(|v| v.to_string()),
+        // Filled by page_messages via a separate reactions query.
+        reactions: Vec::new(),
         nonce: row.get(6)?,
         pending: pending.then_some(true),
         failed: failed.then_some(true),
     })
+}
+
+/// Fill each (non-pending) message's `reactions` from the cached aggregate.
+fn load_reactions_into(conn: &Connection, messages: &mut [MessageDto]) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT emoji, count, me FROM message_reactions WHERE message_id = ?1 ORDER BY ord",
+    )?;
+    for m in messages.iter_mut() {
+        // Pending rows have negative ids and never carry reactions.
+        let Ok(id) = m.id.parse::<i64>() else {
+            continue;
+        };
+        if id < 0 {
+            continue;
+        }
+        let rows = stmt.query_map(params![id], |row| {
+            Ok(ReactionDto {
+                emoji: row.get(0)?,
+                count: row.get::<_, i64>(1)? as u32,
+                me: row.get::<_, i64>(2)? != 0,
+            })
+        })?;
+        m.reactions = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    }
+    Ok(())
 }
 
 fn set_meta(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<()> {
@@ -812,9 +907,11 @@ fn upsert_message(
     message: &v1::Message,
     client_nonce: Option<&str>,
 ) -> rusqlite::Result<()> {
+    // ON CONFLICT updates ONLY content/edited_at/flags — NOT reply_to_id — so a
+    // later edit (whose broadcast carries reply_to_id=0) can't wipe the reply ref.
     conn.execute(
-        "INSERT INTO messages(id, channel_id, author_id, content, created_at, edited_at, nonce)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO messages(id, channel_id, author_id, content, created_at, edited_at, nonce, reply_to_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(id) DO UPDATE SET
              content = excluded.content,
              edited_at = excluded.edited_at,
@@ -828,8 +925,33 @@ fn upsert_message(
             snowflake_ms(message.id) as i64,
             (message.edited_at_ms != 0).then_some(message.edited_at_ms as i64),
             client_nonce,
+            (message.reply_to_id != 0).then_some(message.reply_to_id as i64),
         ],
     )?;
+    Ok(())
+}
+
+/// Replace a message's cached reaction aggregate from an authoritative API
+/// snapshot (`v1::Message.reactions`). No-op preserves nothing — it fully
+/// replaces, so a message with no reactions clears the rows.
+fn replace_reactions(conn: &Connection, message: &v1::Message) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM message_reactions WHERE message_id = ?1",
+        params![message.id as i64],
+    )?;
+    for (ord, r) in message.reactions.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO message_reactions(message_id, emoji, count, me, ord)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                message.id as i64,
+                r.emoji,
+                r.count as i64,
+                i64::from(r.me),
+                ord as i64
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -929,6 +1051,8 @@ mod tests {
             author_id: author,
             content: content.to_owned(),
             edited_at_ms: 0,
+            reply_to_id: 0,
+            reactions: Vec::new(),
         }
     }
 
@@ -938,7 +1062,7 @@ mod tests {
         let cache = Cache::open(&path).unwrap();
 
         let pending = cache
-            .insert_pending(7, 1, "hello".into(), "n-1".into())
+            .insert_pending(7, 1, "hello".into(), None, "n-1".into())
             .await
             .unwrap();
         assert!(pending.id.starts_with('-'), "pending ids are negative");
@@ -966,7 +1090,7 @@ mod tests {
 
         // A second pending row fails: kept, flagged.
         cache
-            .insert_pending(7, 1, "doomed".into(), "n-2".into())
+            .insert_pending(7, 1, "doomed".into(), None, "n-2".into())
             .await
             .unwrap();
         cache.mark_failed("n-2".into()).await.unwrap();

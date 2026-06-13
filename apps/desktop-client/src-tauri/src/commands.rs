@@ -65,9 +65,24 @@ pub async fn send_message(
     core: Core<'_>,
     channel_id: String,
     content: String,
+    reply_to_id: Option<String>,
     nonce: String,
 ) -> CmdResult<MessageDto> {
-    core.send_message(&channel_id, &content, &nonce)
+    core.send_message(&channel_id, &content, reply_to_id.as_deref(), &nonce)
+        .await
+        .map_err(user)
+}
+
+/// Toggle a reaction emoji on a message (server enforces membership).
+#[tauri::command]
+pub async fn react(
+    core: Core<'_>,
+    channel_id: String,
+    message_id: String,
+    emoji: String,
+    add: bool,
+) -> CmdResult<()> {
+    core.react(&channel_id, &message_id, &emoji, add)
         .await
         .map_err(user)
 }

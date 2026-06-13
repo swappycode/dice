@@ -68,6 +68,21 @@ const MIGRATIONS: &[&str] = &[
         last_read_message_id INTEGER
     );
     ",
+    // v2: replies + reactions (M2). reply_to_id is a plain column (the parent
+    // may be uncached/deleted). Reactions are stored as the per-emoji AGGREGATE
+    // from this user's perspective (count + me); `ord` preserves first-seen order.
+    "
+    ALTER TABLE messages ADD COLUMN reply_to_id INTEGER;
+    CREATE TABLE message_reactions (
+        message_id INTEGER NOT NULL,
+        emoji TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        me INTEGER NOT NULL DEFAULT 0,
+        ord INTEGER NOT NULL,
+        PRIMARY KEY (message_id, emoji)
+    );
+    CREATE INDEX idx_reactions_msg ON message_reactions(message_id, ord);
+    ",
 ];
 
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {

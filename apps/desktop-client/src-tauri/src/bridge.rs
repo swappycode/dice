@@ -330,6 +330,31 @@ impl Bridge {
                     },
                 );
             }
+            Payload::ReactionUpdate(ru) => {
+                let me = self
+                    .current_user
+                    .lock()
+                    .expect("user lock")
+                    .as_ref()
+                    .is_some_and(|u| u.id == ru.user_id);
+                if let Err(error) = self
+                    .cache
+                    .apply_reaction_delta(ru.message_id, ru.emoji.clone(), me, ru.added)
+                    .await
+                {
+                    tracing::warn!(%error, "reaction cache write failed");
+                }
+                emit_dice(
+                    &self.emitter,
+                    &DiceEvent::ReactionUpdate {
+                        channel_id: id_str(ru.channel_id),
+                        message_id: id_str(ru.message_id),
+                        emoji: ru.emoji.clone(),
+                        user_id: id_str(ru.user_id),
+                        added: ru.added,
+                    },
+                );
+            }
             Payload::TypingStart(typing) => {
                 // Ephemeral: never cached.
                 emit_dice(

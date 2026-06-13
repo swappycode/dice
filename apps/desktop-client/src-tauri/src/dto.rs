@@ -148,6 +148,24 @@ impl From<&v1::Guild> for GuildDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReactionDto {
+    pub emoji: String,
+    pub count: u32,
+    pub me: bool,
+}
+
+impl From<&v1::Reaction> for ReactionDto {
+    fn from(r: &v1::Reaction) -> Self {
+        Self {
+            emoji: r.emoji.clone(),
+            count: r.count,
+            me: r.me,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageDto {
     pub id: String,
     pub channel_id: String,
@@ -155,6 +173,10 @@ pub struct MessageDto {
     pub content: String,
     pub created_at_ms: u64,
     pub edited_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<ReactionDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,6 +194,8 @@ impl MessageDto {
             content: m.content.clone(),
             created_at_ms: snowflake_ms(m.id),
             edited_at_ms: (m.edited_at_ms != 0).then_some(m.edited_at_ms),
+            reply_to_id: (m.reply_to_id != 0).then(|| id_str(m.reply_to_id)),
+            reactions: m.reactions.iter().map(ReactionDto::from).collect(),
             nonce,
             pending: None,
             failed: None,
@@ -213,6 +237,14 @@ pub enum DiceEvent {
     MessageDelete {
         channel_id: String,
         message_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    ReactionUpdate {
+        channel_id: String,
+        message_id: String,
+        emoji: String,
+        user_id: String,
+        added: bool,
     },
     #[serde(rename_all = "camelCase")]
     TypingStart { channel_id: String, user_id: String },
@@ -285,6 +317,8 @@ mod tests {
             author_id: 3,
             content: "hi".into(),
             edited_at_ms: 0,
+            reply_to_id: 0,
+            reactions: Vec::new(),
         };
         let dto = MessageDto::from_wire(&m, None);
         assert_eq!(dto.created_at_ms, 1234 + dice_common::time::DICE_EPOCH_MS);

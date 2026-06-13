@@ -127,6 +127,7 @@ pub fn run() {
             commands::send_message,
             commands::edit_message,
             commands::delete_message,
+            commands::react,
             commands::fetch_messages,
             commands::start_typing,
             commands::set_presence,

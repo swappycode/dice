@@ -166,6 +166,8 @@ pub enum Command {
     SendMessage {
         channel_id: u64,
         content: String,
+        /// 0 = not a reply.
+        reply_to_id: u64,
         nonce: u64,
     },
     /// Edit (author-only) — confirmed by the broadcast MessageUpdate dispatch.
@@ -179,6 +181,20 @@ pub enum Command {
     DeleteMessage {
         channel_id: u64,
         message_id: u64,
+        nonce: u64,
+    },
+    /// Toggle a reaction on — confirmed by the broadcast ReactionUpdate delta.
+    AddReaction {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
+        nonce: u64,
+    },
+    /// Toggle a reaction off.
+    RemoveReaction {
+        channel_id: u64,
+        message_id: u64,
+        emoji: String,
         nonce: u64,
     },
     StartTyping {
@@ -946,12 +962,40 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
         Command::SendMessage {
             channel_id,
             content,
+            reply_to_id,
             nonce,
         } => Some(Frame::with_nonce(
             *nonce,
             Payload::SendMessage(v1::SendMessageRequest {
                 channel_id: *channel_id,
                 content: content.clone(),
+                reply_to_id: *reply_to_id,
+            }),
+        )),
+        Command::AddReaction {
+            channel_id,
+            message_id,
+            emoji,
+            nonce,
+        } => Some(Frame::with_nonce(
+            *nonce,
+            Payload::AddReaction(v1::AddReactionRequest {
+                channel_id: *channel_id,
+                message_id: *message_id,
+                emoji: emoji.clone(),
+            }),
+        )),
+        Command::RemoveReaction {
+            channel_id,
+            message_id,
+            emoji,
+            nonce,
+        } => Some(Frame::with_nonce(
+            *nonce,
+            Payload::RemoveReaction(v1::RemoveReactionRequest {
+                channel_id: *channel_id,
+                message_id: *message_id,
+                emoji: emoji.clone(),
             }),
         )),
         Command::EditMessage {

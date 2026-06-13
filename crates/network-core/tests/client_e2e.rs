@@ -480,6 +480,7 @@ async fn gateway_journey() {
         .send(Command::SendMessage {
             channel_id: general.id,
             content: "hello bob".into(),
+            reply_to_id: 0,
             nonce,
         })
         .await
@@ -587,6 +588,7 @@ async fn gateway_journey() {
         .send(Command::SendMessage {
             channel_id: 0xFFFF_FFFF_FFFF,
             content: "into the void".into(),
+            reply_to_id: 0,
             nonce: bad_nonce,
         })
         .await
@@ -614,6 +616,7 @@ async fn gateway_journey() {
     bob.send(Command::SendMessage {
         channel_id: general.id,
         content: "while you were away".into(),
+        reply_to_id: 0,
         nonce: nonce2,
     })
     .await
@@ -875,6 +878,7 @@ async fn quic_only_happy_path_send_and_ack() {
         .send(Command::SendMessage {
             channel_id: general.id,
             content: "over quic".into(),
+            reply_to_id: 0,
             nonce,
         })
         .await

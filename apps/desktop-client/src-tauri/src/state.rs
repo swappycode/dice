@@ -471,9 +471,14 @@ impl ClientCore {
         &self,
         channel_id: &str,
         content: &str,
+        reply_to: Option<&str>,
         nonce: &str,
     ) -> Result<MessageDto, CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        let reply_to = match reply_to {
+            Some(s) => Some(parse_id(s).ok_or_else(|| CoreError::BadId(s.into()))?),
+            None => None,
+        };
         let author = self
             .current_user
             .lock()
@@ -484,7 +489,13 @@ impl ClientCore {
         let wire_nonce = self.nonce_seq.fetch_add(1, Ordering::Relaxed);
         let pending_dto = self
             .cache
-            .insert_pending(channel, author, content.to_owned(), nonce.to_owned())
+            .insert_pending(
+                channel,
+                author,
+                content.to_owned(),
+                reply_to,
+                nonce.to_owned(),
+            )
             .await?;
         // Register the nonce mapping BEFORE the command goes out so even an
         // instant ack finds it.
@@ -504,6 +515,7 @@ impl ClientCore {
             .send(Command::SendMessage {
                 channel_id: channel,
                 content: content.to_owned(),
+                reply_to_id: reply_to.unwrap_or(0),
                 nonce: wire_nonce,
             })
             .await
@@ -512,6 +524,37 @@ impl ClientCore {
             return self.fail_send(wire_nonce, nonce).await;
         }
         Ok(pending_dto)
+    }
+
+    /// Toggle a reaction. `add=true` reacts, `add=false` un-reacts. Confirmed by
+    /// the broadcast `ReactionUpdate` delta (which the reactor also receives).
+    pub async fn react(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+        emoji: &str,
+        add: bool,
+    ) -> Result<(), CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        let message = parse_id(message_id).ok_or_else(|| CoreError::BadId(message_id.into()))?;
+        let cmds = self.gateway_cmds().ok_or(CoreError::NotConnected)?;
+        let nonce = self.nonce_seq.fetch_add(1, Ordering::Relaxed);
+        let cmd = if add {
+            Command::AddReaction {
+                channel_id: channel,
+                message_id: message,
+                emoji: emoji.to_owned(),
+                nonce,
+            }
+        } else {
+            Command::RemoveReaction {
+                channel_id: channel,
+                message_id: message,
+                emoji: emoji.to_owned(),
+                nonce,
+            }
+        };
+        cmds.send(cmd).await.map_err(|_| CoreError::NotConnected)
     }
 
     async fn fail_send(
