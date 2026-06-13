@@ -7,6 +7,38 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-13 — M2 (3/n): replies + reactions
+
+**Branch:** `main`. Full `just check` green (incl. the new chat live tests), host clippy + tests,
+frontend `tsc` + vite build (CSS 34 KB, well under the 100 KB budget), `.sqlx` re-prepared, two new
+migrations (`0005_replies`, `0006_reactions`).
+
+**Replies.** `reply_to_id` on `Message` + `SendMessageRequest`; a plain column (migration 0005, NO
+foreign key) so a reply whose parent is later deleted just renders as "original message" rather than
+failing the send. `send_message` gained a `reply_to` param (threaded through gateway dispatch,
+network-core `Command`, the host, and the composer); history preserves it. Client cache stores it on
+INSERT only (ON CONFLICT can't wipe it, so an edit keeps the reply ref). UI: a "Reply" hover action
+sets the composer reply-target (reply bar above the input); replying rows show a `↪ author: snippet`
+reference resolved from the store.
+
+**Reactions.** New `message_reactions` table (0006). `AddReaction(35)`/`RemoveReaction(36)` requests;
+the broadcast is a `ReactionUpdate(114)` **delta** (`{message_id, emoji, user_id, added}`) — each
+client adjusts its own aggregate and flips `me` when the user is itself, so one event personalises
+correctly for everyone. add/remove are idempotent (only a real change fans out). `get_messages`
+attaches the per-emoji aggregate (`count` + `me`) for the requesting user, so reactions survive
+reload; the client cache mirrors this (aggregate table written from API snapshots, adjusted by live
+deltas, joined on read). UI: reaction pills (highlighted when `me`) toggle on click; a "React" action
+opens a fixed system-emoji palette (no image assets).
+
+Live tests: `reply_to_id_round_trips_through_history`,
+`reactions_aggregate_in_history_and_broadcast_deltas`.
+
+**Chat completeness so far:** edit ✅ delete ✅ replies ✅ reactions ✅. Remaining M2: attachments
+(media-service + MinIO), notifications (notification-service + JetStream), read-markers sync, auth
+hardening, the UI funk pass + theme pack, chime; split-mode NATS RPC last.
+
+---
+
 ## 2026-06-13 — M2 (2/n): carried gaps cleared + message edit/delete
 
 **Branch:** `main`. All gates green: full `just check` (fmt, clippy -D warnings, ~200 tests, aws-lc
