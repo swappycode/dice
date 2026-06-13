@@ -304,6 +304,32 @@ impl Bridge {
                     },
                 );
             }
+            Payload::MessageUpdate(mu) => {
+                let Some(message) = mu.message.clone() else {
+                    return;
+                };
+                if let Err(error) = self.cache.apply_event(payload.clone()).await {
+                    tracing::warn!(%error, "message-update cache write failed");
+                }
+                emit_dice(
+                    &self.emitter,
+                    &DiceEvent::MessageUpdate {
+                        message: MessageDto::from_wire(&message, None),
+                    },
+                );
+            }
+            Payload::MessageDelete(md) => {
+                if let Err(error) = self.cache.apply_event(payload.clone()).await {
+                    tracing::warn!(%error, "message-delete cache write failed");
+                }
+                emit_dice(
+                    &self.emitter,
+                    &DiceEvent::MessageDelete {
+                        channel_id: id_str(md.channel_id),
+                        message_id: id_str(md.message_id),
+                    },
+                );
+            }
             Payload::TypingStart(typing) => {
                 // Ephemeral: never cached.
                 emit_dice(

@@ -245,9 +245,9 @@ async fn serve_https_injects_peer_addr() {
     let addr = listener.local_addr().unwrap();
     let router = axum::Router::new().route(
         "/whoami",
-        axum::routing::get(|peer: axum::Extension<PeerAddr>| async move {
-            peer.0.0.ip().to_string()
-        }),
+        axum::routing::get(
+            |peer: axum::Extension<PeerAddr>| async move { peer.0.0.ip().to_string() },
+        ),
     );
     let ct = CancellationToken::new();
     let server = tokio::spawn(serve_https_on(listener, tls, router, ct.clone()));
@@ -263,7 +263,10 @@ async fn serve_https_injects_peer_addr() {
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.unwrap();
     let text = String::from_utf8_lossy(&response);
-    assert!(text.starts_with("HTTP/1.1 200"), "unexpected response: {text}");
+    assert!(
+        text.starts_with("HTTP/1.1 200"),
+        "unexpected response: {text}"
+    );
     // The loopback client connects from 127.0.0.1, so the handler must echo it.
     assert!(
         text.ends_with("127.0.0.1"),

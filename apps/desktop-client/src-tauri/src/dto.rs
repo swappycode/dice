@@ -208,6 +208,13 @@ pub enum DiceEvent {
         nonce: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
+    MessageUpdate { message: MessageDto },
+    #[serde(rename_all = "camelCase")]
+    MessageDelete {
+        channel_id: String,
+        message_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
     TypingStart { channel_id: String, user_id: String },
     #[serde(rename_all = "camelCase")]
     PresenceUpdate { user_id: String, status: String },

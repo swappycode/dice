@@ -168,6 +168,19 @@ pub enum Command {
         content: String,
         nonce: u64,
     },
+    /// Edit (author-only) — confirmed by the broadcast MessageUpdate dispatch.
+    EditMessage {
+        channel_id: u64,
+        message_id: u64,
+        content: String,
+        nonce: u64,
+    },
+    /// Delete — confirmed by the broadcast MessageDelete dispatch.
+    DeleteMessage {
+        channel_id: u64,
+        message_id: u64,
+        nonce: u64,
+    },
     StartTyping {
         channel_id: u64,
     },
@@ -939,6 +952,30 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
             Payload::SendMessage(v1::SendMessageRequest {
                 channel_id: *channel_id,
                 content: content.clone(),
+            }),
+        )),
+        Command::EditMessage {
+            channel_id,
+            message_id,
+            content,
+            nonce,
+        } => Some(Frame::with_nonce(
+            *nonce,
+            Payload::EditMessage(v1::EditMessageRequest {
+                channel_id: *channel_id,
+                message_id: *message_id,
+                content: content.clone(),
+            }),
+        )),
+        Command::DeleteMessage {
+            channel_id,
+            message_id,
+            nonce,
+        } => Some(Frame::with_nonce(
+            *nonce,
+            Payload::DeleteMessage(v1::DeleteMessageRequest {
+                channel_id: *channel_id,
+                message_id: *message_id,
             }),
         )),
         Command::StartTyping { channel_id } => Some(Frame::control(Payload::StartTyping(

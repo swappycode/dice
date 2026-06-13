@@ -84,6 +84,31 @@ pub async fn fetch_messages(
         .map_err(user)
 }
 
+/// Edit a message (author-only). The `messageUpdate` event reconciles the UI.
+#[tauri::command]
+pub async fn edit_message(
+    core: Core<'_>,
+    channel_id: String,
+    message_id: String,
+    content: String,
+) -> CmdResult<()> {
+    core.edit_message(&channel_id, &message_id, &content)
+        .await
+        .map_err(user)
+}
+
+/// Delete a message. The `messageDelete` event removes it from the UI.
+#[tauri::command]
+pub async fn delete_message(
+    core: Core<'_>,
+    channel_id: String,
+    message_id: String,
+) -> CmdResult<()> {
+    core.delete_message(&channel_id, &message_id)
+        .await
+        .map_err(user)
+}
+
 /// Host-throttled to 1 per 8 s per channel; lossy while disconnected.
 #[tauri::command]
 pub async fn start_typing(core: Core<'_>, channel_id: String) -> CmdResult<()> {

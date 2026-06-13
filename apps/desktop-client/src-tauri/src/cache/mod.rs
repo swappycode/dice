@@ -171,6 +171,19 @@ impl Cache {
                         advance_cursor(&tx, message.channel_id, message.id)?;
                     }
                 }
+                Payload::MessageUpdate(mu) => {
+                    // ON CONFLICT updates content + edited_at; no-op if we
+                    // never cached the original (a no-row UPDATE is harmless).
+                    if let Some(message) = &mu.message {
+                        upsert_message(&tx, message, None)?;
+                    }
+                }
+                Payload::MessageDelete(md) => {
+                    tx.execute(
+                        "DELETE FROM messages WHERE id = ?1 AND channel_id = ?2",
+                        params![md.message_id as i64, md.channel_id as i64],
+                    )?;
+                }
                 Payload::GuildCreate(v1::GuildCreate { guild })
                 | Payload::GuildUpdate(v1::GuildUpdate { guild }) => {
                     if let Some(guild) = guild {

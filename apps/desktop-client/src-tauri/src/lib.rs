@@ -125,6 +125,8 @@ pub fn run() {
             commands::logout,
             commands::get_bootstrap,
             commands::send_message,
+            commands::edit_message,
+            commands::delete_message,
             commands::fetch_messages,
             commands::start_typing,
             commands::set_presence,

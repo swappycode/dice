@@ -82,11 +82,12 @@ pub async fn serve_https_on(
             // handing off to axum, so REST handlers can do per-IP rate limiting.
             // WS-upgrade requests carry it too (currently unused there).
             let inner = TowerToHyperService::new(router);
-            let service =
-                hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+            let service = hyper::service::service_fn(
+                move |mut req: hyper::Request<hyper::body::Incoming>| {
                     req.extensions_mut().insert(PeerAddr(peer));
                     inner.call(req)
-                });
+                },
+            );
             // `with_upgrades` is what lets `axum::extract::ws` complete the
             // WebSocket upgrade on this hand-rolled stack.
             let conn = hyper::server::conn::http1::Builder::new()

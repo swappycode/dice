@@ -529,6 +529,47 @@ impl ClientCore {
         Err(CoreError::NotConnected)
     }
 
+    /// Edit a message (server enforces author-only). Non-optimistic: the
+    /// broadcast `MessageUpdate` dispatch updates cache + UI; a rejection comes
+    /// back as a logged `RequestError`.
+    pub async fn edit_message(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+        content: &str,
+    ) -> Result<(), CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        let message = parse_id(message_id).ok_or_else(|| CoreError::BadId(message_id.into()))?;
+        let cmds = self.gateway_cmds().ok_or(CoreError::NotConnected)?;
+        cmds.send(Command::EditMessage {
+            channel_id: channel,
+            message_id: message,
+            content: content.to_owned(),
+            nonce: self.nonce_seq.fetch_add(1, Ordering::Relaxed),
+        })
+        .await
+        .map_err(|_| CoreError::NotConnected)
+    }
+
+    /// Delete a message (server enforces author-or-MANAGE_MESSAGES). Confirmed
+    /// by the broadcast `MessageDelete` dispatch.
+    pub async fn delete_message(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+    ) -> Result<(), CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        let message = parse_id(message_id).ok_or_else(|| CoreError::BadId(message_id.into()))?;
+        let cmds = self.gateway_cmds().ok_or(CoreError::NotConnected)?;
+        cmds.send(Command::DeleteMessage {
+            channel_id: channel,
+            message_id: message,
+            nonce: self.nonce_seq.fetch_add(1, Ordering::Relaxed),
+        })
+        .await
+        .map_err(|_| CoreError::NotConnected)
+    }
+
     /// Cache-first history. `before = None` serves the newest page (fetching
     /// from the API only when the window is stale/missing); `before = Some`
     /// pages older rows, extending the window downward from the API when the
