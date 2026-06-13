@@ -94,12 +94,20 @@ pub fn run() {
             }
             app.manage(core);
 
+            // A named profile puts its name in the title bar so two side-by-side
+            // instances (e.g. `client-as alice` / `client-as bob`) are tellable
+            // apart in Alt-Tab / the taskbar; the default app stays plain "Dice".
+            let title = match &setup_profile {
+                Some(name) => format!("Dice \u{2014} {name}"),
+                None => "Dice".to_owned(),
+            };
+
             // Create the main window HERE (not in tauri.conf.json) so the
             // managed `ClientCore` is guaranteed present before the webview's
             // first IPC call, and so the WebView2 browser args are tunable at
             // runtime via `DICE_WEBVIEW_ARGS` (one build, many RAM experiments).
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("Dice")
+                .title(title)
                 .inner_size(1100.0, 720.0)
                 .min_inner_size(800.0, 560.0)
                 .resizable(true)
