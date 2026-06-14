@@ -21,6 +21,8 @@ apps/desktop-client/dist/
 # Forward planning kept local (not published)
 /docs/ROADMAP.md
 /docs/design/m2-theme-pack.md
+/docs/testing-m2.md
+/docs/HANDOFF.md
 
 # OS noise
 .DS_Store
