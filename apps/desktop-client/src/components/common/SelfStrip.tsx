@@ -11,7 +11,11 @@ import { Avatar } from "./Avatar";
 import { PresenceOrb } from "./PresenceOrb";
 import styles from "./SelfStrip.module.css";
 
-const PRESENCE_CYCLE: PresenceStatus[] = ["online", "idle", "dnd", "offline"];
+// Only ONLINE/IDLE/DND are user-settable: the presence service rejects a
+// manual "offline" (appearing offline while connected is the reserved INVISIBLE
+// masking feature, deferred post-M1 — see presence-service settable()). OFFLINE
+// is automatic — it broadcasts when the socket drops / heartbeats stop.
+const PRESENCE_CYCLE: PresenceStatus[] = ["online", "idle", "dnd"];
 
 /** Sidebar footer: own avatar (click = change) + orb (click = cycle status) +
  *  username + log off. */
