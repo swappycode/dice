@@ -1,6 +1,6 @@
-import { type Component, createMemo, For, Show } from "solid-js";
+import { type Component, createMemo, createSignal, For, lazy, Show, Suspense } from "solid-js";
 import { perfMode, setPerfMode } from "../../lib/perfMode";
-import { setTheme, theme, THEMES, type Theme } from "../../lib/theme";
+import { setTheme, theme, THEMES, type ThemeChoice } from "../../lib/theme";
 import { connLabel, connState } from "../../stores/connection";
 import { directory, displayName } from "../../stores/guilds";
 import { presenceOf } from "../../stores/presence";
@@ -8,7 +8,17 @@ import { typingUserIds } from "../../stores/typing";
 import { PresenceOrb } from "../common/PresenceOrb";
 import styles from "./StatusBar.module.css";
 
+// Lazy: the builder + its color math stay out of the initial/login bundle.
+const ThemeBuilderDialog = lazy(() => import("../dialogs/ThemeBuilderDialog"));
+
 export const StatusBar: Component = () => {
+  const [builderOpen, setBuilderOpen] = createSignal(false);
+
+  const onThemePick = (v: string): void => {
+    if (v === "custom") setBuilderOpen(true);
+    else setTheme(v as ThemeChoice);
+  };
+
   const connOrb = createMemo(() =>
     connState() === "connected" ? "online" : connState() === "connecting" || connState() === "reconnecting" ? "idle" : "offline",
   );
@@ -59,11 +69,28 @@ export const StatusBar: Component = () => {
           id="theme-select"
           class={styles.themeSelect}
           value={theme()}
-          onChange={(e) => setTheme(e.currentTarget.value as Theme)}
+          onChange={(e) => onThemePick(e.currentTarget.value)}
         >
           <For each={THEMES}>{(t) => <option value={t.id}>{t.label}</option>}</For>
+          <option value="custom">Custom…</option>
         </select>
+        <Show when={theme() === "custom"}>
+          <button
+            type="button"
+            class={styles.editTheme}
+            title="Edit custom theme"
+            aria-label="Edit custom theme"
+            onClick={() => setBuilderOpen(true)}
+          >
+            ✎
+          </button>
+        </Show>
       </div>
+      <Show when={builderOpen()}>
+        <Suspense>
+          <ThemeBuilderDialog onClose={() => setBuilderOpen(false)} />
+        </Suspense>
+      </Show>
     </footer>
   );
 };

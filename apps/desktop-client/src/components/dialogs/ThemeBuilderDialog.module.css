@@ -1,0 +1,169 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-scrim);
+}
+
+/* beveled classic-Windows dialog */
+.dialog {
+  width: 380px;
+  max-width: 92vw;
+  background: var(--c-window-face);
+  border: 1px solid var(--c-window-frame);
+  border-radius: var(--radius-control);
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo),
+    0 8px 28px var(--c-scrim);
+  overflow: hidden;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 24px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  background: var(--grad-titlebar);
+  color: var(--c-titlebar-text);
+}
+
+.titleText {
+  flex: 1;
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  text-shadow: var(--titlebar-text-glow);
+}
+
+.closeBtn {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  border: 1px solid var(--c-glass-edge);
+  border-radius: var(--radius-control);
+  background: var(--grad-close);
+  color: var(--c-caption-glyph);
+}
+
+.closeBtn:hover {
+  background: var(--grad-close-hover);
+  color: var(--c-text-invert);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+}
+
+.baseRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.baseLabel {
+  font-weight: 700;
+}
+
+.baseSelect {
+  flex: 1;
+  height: 22px;
+  padding: 0 var(--sp-2);
+}
+
+.lead {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* native color well, beveled to match the kit */
+.swatch {
+  flex: none;
+  width: 34px;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid var(--c-bevel-lo);
+  border-radius: var(--radius-control);
+  background: var(--c-content);
+  box-shadow: inset 1px 1px 2px var(--c-well-shadow);
+  cursor: pointer;
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.rowLabel {
+  font-weight: 700;
+}
+
+.rowHint {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+.hex {
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+  text-transform: uppercase;
+}
+
+.contrast {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-bevel-lo);
+  font-size: var(--font-size-chrome);
+}
+
+.contrastTitle {
+  color: var(--c-text-dim);
+}
+
+.ok {
+  color: var(--orb-online);
+}
+
+.warn {
+  color: var(--orb-idle);
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+
+.spring {
+  flex: 1;
+}
+
+.btn {
+  min-width: 72px;
+  height: 24px;
+  font-size: var(--font-size-chrome);
+}

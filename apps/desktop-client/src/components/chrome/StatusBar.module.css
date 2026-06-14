@@ -54,3 +54,15 @@
   margin: 0 var(--sp-1) 0 0;
   vertical-align: middle;
 }
+
+/* pencil button to (re)open the theme builder while a custom theme is active */
+.editTheme {
+  height: 16px;
+  min-width: 18px;
+  padding: 0 var(--sp-1);
+  font-size: var(--font-size-chrome);
+  line-height: 1;
+  background: var(--c-content);
+  border: 1px solid var(--c-bevel-lo);
+  color: var(--c-link);
+}
