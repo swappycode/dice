@@ -186,4 +186,8 @@ impl FramedTransport for QuicTransport {
     fn kind(&self) -> TransportKind {
         TransportKind::Quic
     }
+
+    fn quic_connection(&self) -> Option<quinn::Connection> {
+        Some(self.conn.clone())
+    }
 }

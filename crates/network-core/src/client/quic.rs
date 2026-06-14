@@ -186,6 +186,12 @@ impl QuicTransport {
     pub fn last_close_code(&self) -> Option<u16> {
         self.last_close_code
     }
+
+    /// A cheap clone of the underlying connection for voice datagram I/O
+    /// (`send_datagram` / `read_datagram`), independent of the control stream.
+    pub fn connection(&self) -> quinn::Connection {
+        self.conn.clone()
+    }
 }
 
 impl Drop for QuicTransport {

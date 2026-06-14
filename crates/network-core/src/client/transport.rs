@@ -189,4 +189,12 @@ impl AnyTransport {
             Self::Wss(_) => TransportKind::Wss,
         }
     }
+
+    /// The QUIC connection for voice datagram I/O, or `None` over WSS.
+    pub fn quic_connection(&self) -> Option<quinn::Connection> {
+        match self {
+            Self::Quic(t) => Some(t.connection()),
+            Self::Wss(_) => None,
+        }
+    }
 }

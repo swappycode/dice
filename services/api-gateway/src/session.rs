@@ -365,6 +365,9 @@ pub(crate) async fn run_ready(
     mut transport: Box<dyn FramedTransport>,
 ) {
     loop {
+        // Register this connection for voice datagram fan-out (QUIC only); the
+        // guard unregisters it + stops its read pump when the connection ends.
+        let _voice_attach = gw.voice_dg.attach(st.user, transport.quic_connection());
         match ready_loop(&gw, &mut st, &mut *transport).await {
             LoopEnd::Shutdown => return,
             LoopEnd::CleanClose | LoopEnd::Fatal => {
@@ -372,6 +375,7 @@ pub(crate) async fn run_ready(
                 return;
             }
             LoopEnd::Detach => {
+                drop(_voice_attach); // unregister the dead connection promptly
                 drop(transport);
                 match detached_wait(&gw, &mut st).await {
                     Some(fresh) => {

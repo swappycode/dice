@@ -1162,3 +1162,112 @@ async fn quic_rejects_untrusted_certificates() {
         .unwrap();
     let _ = std::fs::remove_dir_all(&env.cert_dir);
 }
+
+/// The voice SFU end-to-end over real QUIC with SYNTHETIC packets (no audio
+/// hardware): two clients in the same voice channel — a datagram sent by A is
+/// forwarded to B by the gateway, and never echoed back to A.
+#[tokio::test]
+async fn voice_datagrams_fan_out_through_the_sfu() {
+    let env = spawn_env("voice", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+
+    let (a_name, a_email) = unique("va");
+    let (b_name, b_email) = unique("vb");
+    let a_auth = api
+        .register(&a_email, &a_name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let b_auth = api
+        .register(&b_email, &b_name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let a_user = a_auth.user.clone().unwrap();
+    let b_user = b_auth.user.clone().unwrap();
+    let a_api = api
+        .clone()
+        .with_token_provider(Arc::new(StaticToken(a_auth.access_token.clone())));
+    let b_api = api
+        .clone()
+        .with_token_provider(Arc::new(StaticToken(b_auth.access_token.clone())));
+
+    // Guild + a VOICE channel; B joins the guild so both are members.
+    let guild = a_api.create_guild("voice hq").await.unwrap();
+    let voice = a_api
+        .create_channel(guild.id, "Lounge", v1::ChannelKind::Voice)
+        .await
+        .unwrap();
+    assert_eq!(voice.kind, v1::ChannelKind::Voice as i32);
+    b_api.join_guild(&guild.invite_code).await.unwrap();
+
+    // Both connect over QUIC (datagrams require QUIC); the gateway registers
+    // each connection for voice fan-out at Ready.
+    let ep = quic_endpoint(env.quic);
+    let mut alice = gw_connect_with(
+        &env,
+        Arc::new(StaticToken(a_auth.access_token.clone())),
+        TransportPolicy::QuicOnly,
+        Some(ep.clone()),
+        None,
+    );
+    let mut bob = gw_connect_with(
+        &env,
+        Arc::new(StaticToken(b_auth.access_token.clone())),
+        TransportPolicy::QuicOnly,
+        Some(ep),
+        None,
+    );
+    assert_eq!(expect_ready(&mut alice).await.user.unwrap().id, a_user.id);
+    assert_eq!(expect_ready(&mut bob).await.user.unwrap().id, b_user.id);
+
+    // Both join the voice channel (REST) so the SFU knows they're co-members.
+    assert_eq!(
+        a_api
+            .voice_join(voice.id, false, false)
+            .await
+            .unwrap()
+            .members
+            .len(),
+        1
+    );
+    assert_eq!(
+        b_api
+            .voice_join(voice.id, false, false)
+            .await
+            .unwrap()
+            .members
+            .len(),
+        2
+    );
+
+    // A sends a synthetic voice datagram. Datagrams are lossy, so send a few;
+    // B must receive it verbatim through the SFU.
+    let packet = dice_protocol::bytes::Bytes::from_static(b"synthetic-voice-frame");
+    for _ in 0..5 {
+        alice.send_voice(packet.clone());
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    let got = expect_event(&mut bob, "VoiceData", |e| match e {
+        ClientEvent::VoiceData(bytes) => Some(bytes),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, packet, "B receives A's voice datagram verbatim");
+
+    // A must NOT receive its own datagram (forward-only SFU never echoes).
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    loop {
+        match tokio::time::timeout_at(deadline, alice.events().recv()).await {
+            Ok(Some(ClientEvent::VoiceData(_))) => panic!("sender received its own datagram"),
+            Ok(Some(_)) => continue, // dispatches/presence are fine
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[a_user.id, b_user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}

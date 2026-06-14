@@ -26,6 +26,7 @@ dashmap     = { workspace = true }
 getrandom   = { workspace = true }
 parking_lot = { workspace = true }
 prost       = { workspace = true }
+quinn       = { workspace = true }
 subtle      = { workspace = true }
 tokio       = { workspace = true }
 tokio-util  = { workspace = true }

@@ -191,11 +191,16 @@ pub(crate) async fn identify(
         return;
     }
 
+    // Voice-datagram capability is advertised here (negotiation seam); the
+    // functional enable is QUIC-transport presence (see voice_dg), so voice
+    // survives a resume even though Resume carries no capabilities field.
+    let voice_capable = identify.capabilities & dice_protocol::CAP_VOICE_DATAGRAMS != 0;
     tracing::debug!(
         %user,
         session_id,
         auth_session = %st.auth_session,
         kind = ?transport.kind(),
+        voice_capable,
         "session ready"
     );
     run_ready(gw, st, transport).await;

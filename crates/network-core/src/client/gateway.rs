@@ -158,6 +158,10 @@ pub enum ClientEvent {
     RequestError { nonce: u64, error: v1::Error },
     /// Mirror of every state transition (the `watch` carries the rich form).
     ConnState(ConnStateLite),
+    /// An inbound voice datagram (a `voice-core`-encoded VoiceFrame). QUIC only;
+    /// the host routes it to the audio pipeline, never to the UI. Dropped under
+    /// event-queue pressure (voice is loss-tolerant).
+    VoiceData(dice_protocol::bytes::Bytes),
 }
 
 /// Outbound commands.
@@ -217,17 +221,34 @@ pub enum Command {
 #[error("gateway driver is gone")]
 pub struct SendError;
 
+/// Shared handle to the active QUIC connection used for voice datagrams. The
+/// driver publishes the current connection here on each Ready and clears it on
+/// teardown; [`GatewayHandle::send_voice`] reads it. `None` = not connected or
+/// not on QUIC (no voice).
+type VoiceConn = Arc<std::sync::Mutex<Option<quinn::Connection>>>;
+
 /// Caller-side handle: command sink, event source, state watch.
 pub struct GatewayHandle {
     cmds: mpsc::Sender<Command>,
     events: mpsc::Receiver<ClientEvent>,
     state: watch::Receiver<ConnState>,
+    voice_conn: VoiceConn,
     task: JoinHandle<()>,
 }
 
 impl GatewayHandle {
     pub async fn send(&self, cmd: Command) -> Result<(), SendError> {
         self.cmds.send(cmd).await.map_err(|_| SendError)
+    }
+
+    /// Best-effort send of one voice datagram (a `voice-core`-encoded
+    /// VoiceFrame) on the active QUIC connection. A no-op when not connected,
+    /// not on QUIC, or the datagram is too large — voice is loss-tolerant, so
+    /// failures are dropped, never queued or retried.
+    pub fn send_voice(&self, packet: dice_protocol::bytes::Bytes) {
+        if let Some(conn) = self.voice_conn.lock().expect("voice slot").clone() {
+            let _ = conn.send_datagram(packet);
+        }
     }
 
     /// The bounded event stream (single consumer).
@@ -272,6 +293,8 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
     let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_QUEUE);
     let (event_tx, event_rx) = mpsc::channel(EVENT_QUEUE);
     let (state_tx, state_rx) = watch::channel(ConnState::Idle);
+    let voice_conn: VoiceConn = Arc::new(std::sync::Mutex::new(None));
+    let driver_voice_conn = voice_conn.clone();
     let task = rt.spawn(async move {
         let (tls, quic) = match transport_setup(&cfg) {
             Ok(parts) => parts,
@@ -299,6 +322,7 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
             attempt: 0,
             auth_retry_used: false,
             pending: PendingSends::default(),
+            voice_conn: driver_voice_conn,
         };
         Box::pin(driver.run()).await;
     });
@@ -306,6 +330,7 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
         cmds: cmd_tx,
         events: event_rx,
         state: state_rx,
+        voice_conn,
         task,
     }
 }
@@ -419,6 +444,9 @@ struct Driver {
     /// the handshake). Cleared on Ready/Resumed.
     auth_retry_used: bool,
     pending: PendingSends,
+    /// Shared slot the GatewayHandle reads in `send_voice`; set to the live
+    /// QUIC connection on Ready, cleared on teardown.
+    voice_conn: VoiceConn,
 }
 
 impl Driver {
@@ -509,7 +537,7 @@ impl Driver {
                 resume_token: resume.resume_token.clone(),
                 last_seq: resume.last_seq,
             })),
-            (None, Some(token)) => self.identify_frame(token),
+            (None, Some(token)) => self.identify_frame(token, voice_caps(transport_kind)),
             // Unreachable: identify_token is Some exactly when resume is None.
             (None, None) => return Flow::Retry { delay: None },
         };
@@ -590,7 +618,7 @@ impl Driver {
                         Ok(token) => token,
                         Err(error) => return token_error_flow(error),
                     };
-                    let identify = self.identify_frame(token);
+                    let identify = self.identify_frame(token, voice_caps(transport_kind));
                     if transport.send(&identify).await.is_err() {
                         return Flow::Retry { delay: None };
                     }
@@ -617,8 +645,23 @@ impl Driver {
             return Flow::Shutdown;
         }
 
+        // Voice datagrams (QUIC only): publish the connection so `send_voice`
+        // can reach it, and spawn a reader that surfaces inbound datagrams as
+        // `ClientEvent::VoiceData`.
+        let voice_reader = match transport.quic_connection() {
+            Some(conn) => {
+                *self.voice_conn.lock().expect("voice slot") = Some(conn.clone());
+                Some(spawn_voice_reader(conn, self.events.clone()))
+            }
+            None => None,
+        };
+
         let ready_at = Instant::now();
         let flow = self.pump(&mut transport, &hello).await;
+        *self.voice_conn.lock().expect("voice slot") = None;
+        if let Some(reader) = voice_reader {
+            reader.abort();
+        }
         drop(transport); // FIN now; pending drain below must not delay it
 
         // Requests the gateway never answered die with the connection.
@@ -908,11 +951,11 @@ impl Driver {
         .await
     }
 
-    fn identify_frame(&self, access_token: String) -> Frame {
+    fn identify_frame(&self, access_token: String, capabilities: u64) -> Frame {
         Frame::control(Payload::Identify(v1::Identify {
             access_token,
             properties: Some(self.cfg.properties.clone()),
-            capabilities: 0,
+            capabilities,
             protocol_version: dice_protocol::PROTOCOL_VERSION,
         }))
     }
@@ -942,6 +985,40 @@ impl Driver {
 }
 
 // ----------------------------------------------------------- pure helpers
+
+/// Voice rides QUIC datagrams only; advertise `CAP_VOICE_DATAGRAMS` in Identify
+/// when (and only when) this connection is QUIC.
+fn voice_caps(kind: TransportKind) -> u64 {
+    if matches!(kind, TransportKind::Quic) {
+        dice_protocol::CAP_VOICE_DATAGRAMS
+    } else {
+        0
+    }
+}
+
+/// Read inbound voice datagrams off a QUIC connection and surface them as
+/// [`ClientEvent::VoiceData`]. Exits when the connection closes. Drops packets
+/// (never blocks) when the event queue is full — voice is loss-tolerant and the
+/// control-event stream must not stall behind it.
+fn spawn_voice_reader(
+    conn: quinn::Connection,
+    events: mpsc::Sender<ClientEvent>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match conn.read_datagram().await {
+                Ok(bytes) => {
+                    if let Err(mpsc::error::TrySendError::Closed(_)) =
+                        events.try_send(ClientEvent::VoiceData(bytes))
+                    {
+                        return; // consumer gone
+                    }
+                }
+                Err(_) => return, // connection closed
+            }
+        }
+    })
+}
 
 /// Map a [`TokenError`] from the credential provider onto a connection flow:
 /// a transient refresh failure backs off and retries (the credentials may
@@ -1265,6 +1342,7 @@ mod tests {
             attempt: 0,
             auth_retry_used: false,
             pending: PendingSends::default(),
+            voice_conn: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 

@@ -331,6 +331,25 @@ impl ApiClient {
         .await
     }
 
+    /// `POST /v1/channels` — create a guild channel of the given kind
+    /// (GUILD_TEXT or VOICE; requires MANAGE_CHANNELS).
+    pub async fn create_channel(
+        &self,
+        guild_id: u64,
+        name: &str,
+        kind: v1::ChannelKind,
+    ) -> Result<v1::Channel, ApiError> {
+        self.post_bearer(
+            "/v1/channels",
+            &v1::CreateChannelRequest {
+                guild_id,
+                name: name.to_owned(),
+                kind: kind as i32,
+            },
+        )
+        .await
+    }
+
     /// `POST /v1/dms` — idempotent per recipient pair.
     pub async fn open_dm(&self, recipient_id: u64) -> Result<v1::Channel, ApiError> {
         self.post_bearer("/v1/dms", &v1::OpenDmRequest { recipient_id })

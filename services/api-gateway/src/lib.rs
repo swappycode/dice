@@ -25,6 +25,7 @@ mod rest;
 mod resume;
 mod router;
 mod session;
+mod voice_dg;
 mod ws;
 
 use std::net::SocketAddr;
@@ -77,6 +78,8 @@ pub(crate) struct Gateway {
     pub(crate) heartbeat_interval: Duration,
     pub(crate) resume_window: Duration,
     pub(crate) router: router::Router,
+    /// Voice datagram fan-out registry (the SFU's I/O half).
+    pub(crate) voice_dg: std::sync::Arc<voice_dg::VoiceDatagrams>,
     pub(crate) resume: resume::ResumeRegistry,
     /// Process-wide shutdown token; sessions broadcast `Close{GOING_AWAY}`
     /// on cancellation.
@@ -137,6 +140,7 @@ pub async fn start(
             ct.clone(),
             tracker.clone(),
         ),
+        voice_dg: voice_dg::VoiceDatagrams::new(deps.voice.clone()),
         resume: resume::ResumeRegistry::new(),
         heartbeat_interval: Duration::from_millis(u64::from(cfg.heartbeat_interval_ms)),
         resume_window: Duration::from_millis(u64::from(cfg.resume_window_ms)),

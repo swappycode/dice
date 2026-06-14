@@ -49,4 +49,11 @@ pub trait FramedTransport: Send {
     async fn close(&mut self, code: u32, reason: &str);
     fn remote_addr(&self) -> std::net::SocketAddr;
     fn kind(&self) -> TransportKind;
+    /// The underlying QUIC connection, for out-of-band datagram I/O (voice).
+    /// `None` for transports without datagrams (WSS). The returned handle is a
+    /// cheap clone; voice send/recv runs on it independently of the control
+    /// stream this trait otherwise frames.
+    fn quic_connection(&self) -> Option<quinn::Connection> {
+        None
+    }
 }
