@@ -33,10 +33,22 @@ mono/F32, out stereo/F32 → no resampling needed).
   CHANNELS header (owner, auto-named); the bridge now emits a live `ChannelCreate` DiceEvent (was
   cache-only) → `stores/guilds::addChannel`, so a new channel appears for all members without reload.
 
+**Runtime test (2026-06-14) — partial.** Fixes `e29b8cb` (VOICE in chat-service `channel_access` +
+client-cache kind read) landed after the first test. Then: ✅ both users **join** voice channels and
+the **channels persist across refresh**. ❌ TWO open bugs:
+- **(a) No audio + the client logs NOTHING** — not even `starting voice audio`. Debug order tomorrow:
+  **1)** confirm both clients are on **QUIC, not WSS** — `send_voice` is a no-op on WSS (voice rides
+  QUIC datagrams), so a WSS session is silent; status bar shows Connected (QUIC|WSS). **2)** confirm
+  the client tracing filter shows **info** level (the engine's `tracing::info!` lines) — "prints
+  nothing" may just be the log level; set `RUST_LOG=info` / check the subscriber in `src-tauri/src/
+  lib.rs`. **3)** verify the self `VoiceJoin` reaches the bridge and `is_self()` is true
+  (`current_user` set) so `VoiceEngine::start` actually runs. **4)** then the cpal path itself.
+- **(b) Channel switch isn't reactive** — switching channels needs a manual page refresh to show the
+  change (a frontend signal/reactivity bug — likely the voice roster / active-channel or the
+  channel-list rendering not tracking reactively). Investigate `stores/voice.ts` + `ChannelTree`.
+
 **REMAINING (next chat) — Voice phase 3–4 finish:**
-1. **USER runtime verification:** two clients (`just client` + `just client-as <name>`), owner makes a
-   guild + clicks ＋ to add a voice channel, both join, speak/listen on **headphones** (no AEC yet).
-   This is the "does audio actually work" test — not yet done.
+1. Fix bugs (a) + (b) above; then confirm two clients actually hear each other on **headphones**.
 2. **Step 4:** PTT + VAD (currently OPEN MIC — transmits constantly), device-picker dialog, speaking
    orbs from real VAD (the muted/deaf/speaking tags + VoiceState path already exist).
 3. **Step 5:** AEC seam (WebRTC APM C++ — deferred, headphones for now), resampling for non-48 kHz
