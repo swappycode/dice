@@ -974,7 +974,12 @@ async fn create_channel_requires_manage_channels() {
     assert!(matches!(err, ChatError::NotAMember), "{err:?}");
     let err = ctx
         .svc
-        .create_channel(a, GuildId::from_raw(1), "x".into(), v1::ChannelKind::GuildText)
+        .create_channel(
+            a,
+            GuildId::from_raw(1),
+            "x".into(),
+            v1::ChannelKind::GuildText,
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotFound), "{err:?}");
@@ -983,7 +988,12 @@ async fn create_channel_requires_manage_channels() {
     let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
     let ch = ctx
         .svc
-        .create_channel(a, gid, "  announcements ".into(), v1::ChannelKind::GuildText)
+        .create_channel(
+            a,
+            gid,
+            "  announcements ".into(),
+            v1::ChannelKind::GuildText,
+        )
         .await
         .unwrap();
     assert_eq!(ch.name, "announcements");
@@ -1114,7 +1124,12 @@ async fn sync_user_state_builds_the_full_ready_snapshot() {
     ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
     let extra = ctx
         .svc
-        .create_channel(a, GuildId::from_raw(guild.id), "second".into(), v1::ChannelKind::GuildText)
+        .create_channel(
+            a,
+            GuildId::from_raw(guild.id),
+            "second".into(),
+            v1::ChannelKind::GuildText,
+        )
         .await
         .unwrap();
     let dm = ctx.svc.open_dm(a, b).await.unwrap();

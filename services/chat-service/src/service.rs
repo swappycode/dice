@@ -687,7 +687,14 @@ impl Chat for ChatService {
         .await
         .map_err(internal)?;
 
-        let channel = guild_channel(id.as_i64(), guild.as_i64(), stored_kind, name, position, None);
+        let channel = guild_channel(
+            id.as_i64(),
+            guild.as_i64(),
+            stored_kind,
+            name,
+            position,
+            None,
+        );
         let event = self.make_event(
             guild.raw(),
             Vec::new(),
@@ -1282,7 +1289,16 @@ impl ChatService {
         .await
         .map_err(internal)?
         .into_iter()
-        .map(|r| guild_channel(r.id, g.id, r.channel_type, r.name, r.position, r.last_message_id))
+        .map(|r| {
+            guild_channel(
+                r.id,
+                g.id,
+                r.channel_type,
+                r.name,
+                r.position,
+                r.last_message_id,
+            )
+        })
         .collect();
         let members = self.load_members(guild).await?;
         Ok(v1::Guild {
