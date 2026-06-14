@@ -18,11 +18,13 @@ apps/desktop-client/dist/
 # Local QA / testing scratch — ad-hoc launcher scripts + run logs, machine-specific
 /qa/
 
-# Forward planning kept local (not published)
+# Forward planning + test/handoff/meta docs kept local (not published)
 /docs/ROADMAP.md
 /docs/design/m2-theme-pack.md
+/docs/testing-m1.md
 /docs/testing-m2.md
 /docs/HANDOFF.md
+/docs/git-notes.md
 
 # OS noise
 .DS_Store
