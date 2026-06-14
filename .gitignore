@@ -18,13 +18,13 @@ apps/desktop-client/dist/
 # Local QA / testing scratch — ad-hoc launcher scripts + run logs, machine-specific
 /qa/
 
-# Forward planning + test/handoff/meta docs kept local (not published)
+# Context-only docs kept LOCAL (never published): planning, testing, handoff, and
+# meta notes that exist only to give the user + assistant context — not product docs.
 /docs/ROADMAP.md
-/docs/design/m2-theme-pack.md
-/docs/testing-m1.md
-/docs/testing-m2.md
 /docs/HANDOFF.md
 /docs/git-notes.md
+/docs/testing-*.md
+/docs/design/m2-theme-pack.md
 
 # OS noise
 .DS_Store
