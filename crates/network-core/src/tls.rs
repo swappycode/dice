@@ -190,6 +190,11 @@ fn quic_transport_config() -> Result<quinn::TransportConfig, TlsError> {
         quinn::IdleTimeout::try_from(Duration::from_secs(90))
             .map_err(|_| TlsError::TransportParam)?,
     ));
+    // Voice rides QUIC datagrams (M3, docs/protocol.md §1: 64 KiB datagram
+    // receive buffer). Setting a receive buffer advertises datagram support in
+    // the transport parameters, so the peer may send; both directions enable it.
+    transport.datagram_receive_buffer_size(Some(64 * 1024));
+    transport.datagram_send_buffer_size(64 * 1024);
     Ok(transport)
 }
 
@@ -316,6 +321,78 @@ mod tests {
         tls.alpn_protocols = vec![dice_protocol::ALPN_GATEWAY.to_vec()];
         assert!(!tls.enable_early_data, "0-RTT must stay disabled");
         quic_client_config(Arc::new(tls)).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Voice rides QUIC datagrams; prove the real server+client transport
+    /// configs advertise datagram support and a packet flows both directions
+    /// over a live connection (the device-free half of the SFU transport).
+    #[tokio::test]
+    async fn quic_datagrams_round_trip_over_the_real_configs() {
+        use std::net::Ipv4Addr;
+
+        use bytes::Bytes;
+
+        install_ring_provider();
+        let dir = temp_dir("quicdatagram");
+        let paths = generate_dev_certs(&dir).unwrap();
+
+        let server_tls = load_server_config(
+            &paths.server_cert,
+            &paths.server_key,
+            &[dice_protocol::ALPN_GATEWAY],
+        )
+        .unwrap();
+        let server = quinn::Endpoint::server(
+            quic_server_config(server_tls).unwrap(),
+            (Ipv4Addr::LOCALHOST, 0).into(),
+        )
+        .unwrap();
+        let server_addr = server.local_addr().unwrap();
+
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in load_certs(&paths.ca_pem).unwrap() {
+            roots.add(cert).unwrap();
+        }
+        let mut client_tls = rustls::ClientConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_tls.alpn_protocols = vec![dice_protocol::ALPN_GATEWAY.to_vec()];
+        let mut client = quinn::Endpoint::client((Ipv4Addr::UNSPECIFIED, 0).into()).unwrap();
+        client.set_default_client_config(quic_client_config(Arc::new(client_tls)).unwrap());
+
+        // The dev leaf carries a 127.0.0.1 IP SAN, so verify against that name.
+        let (client_conn, server_conn) = tokio::join!(
+            async {
+                client
+                    .connect(server_addr, "127.0.0.1")
+                    .unwrap()
+                    .await
+                    .unwrap()
+            },
+            async { server.accept().await.unwrap().await.unwrap() },
+        );
+
+        client_conn
+            .send_datagram(Bytes::from_static(b"ping"))
+            .unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(2), server_conn.read_datagram())
+            .await
+            .expect("server datagram timed out")
+            .unwrap();
+        assert_eq!(&got[..], b"ping");
+
+        server_conn
+            .send_datagram(Bytes::from_static(b"pong"))
+            .unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(2), client_conn.read_datagram())
+            .await
+            .expect("client datagram timed out")
+            .unwrap();
+        assert_eq!(&got[..], b"pong");
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

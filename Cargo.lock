@@ -3535,6 +3535,7 @@ dependencies = [
  "dice-database",
  "dice-event-bus",
  "dice-protocol",
+ "dice-voice-core",
  "prost",
  "sqlx",
  "thiserror",

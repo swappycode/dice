@@ -22,10 +22,20 @@
 
 mod service;
 
+use bytes::Bytes;
 use dice_common::{ChannelId, UserId};
 use dice_protocol::v1::VoiceRoster;
 
 pub use service::{ORIGIN, VoiceService};
+
+/// Where forwarded voice packets go. The gateway implements this over its QUIC
+/// datagram connections (one entry per voice-capable session); tests use a
+/// recording mock. Delivery is best-effort and synchronous — voice is
+/// loss-tolerant, so a dropped packet is never retried.
+pub trait VoiceSink: Send + Sync {
+    /// Deliver one encoded voice packet to `target`'s voice connection(s).
+    fn deliver(&self, target: UserId, packet: Bytes);
+}
 
 /// Errors surfaced by [`Voice`].
 #[derive(Debug, thiserror::Error)]
@@ -83,4 +93,14 @@ pub trait Voice: Send + Sync {
     /// Drop `user` from whatever voice channel they are in (called on gateway
     /// session teardown). Idempotent; publishes `VoiceLeave` if they were in one.
     async fn disconnect(&self, user: UserId) -> Result<(), VoiceError>;
+
+    /// Forward one encoded voice packet from `sender` to every OTHER member of
+    /// the voice channel they're currently in, via `sink` — the forward-only
+    /// SFU (no transcoding). A no-op if the sender is not in a voice channel.
+    async fn forward(
+        &self,
+        sender: UserId,
+        packet: Bytes,
+        sink: &dyn VoiceSink,
+    ) -> Result<(), VoiceError>;
 }

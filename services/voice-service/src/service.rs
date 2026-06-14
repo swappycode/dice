@@ -354,6 +354,24 @@ impl Voice for VoiceService {
         }
         Ok(())
     }
+
+    async fn forward(
+        &self,
+        sender: UserId,
+        packet: Bytes,
+        sink: &dyn crate::VoiceSink,
+    ) -> Result<(), VoiceError> {
+        let Some(channel) = self.read_user_channel(sender).await? else {
+            return Ok(()); // sender isn't in a voice channel — drop
+        };
+        let roster = self.read_roster(channel).await?;
+        for member in &roster.members {
+            if member.user_id != sender.raw() {
+                sink.deliver(UserId::from_raw(member.user_id), packet.clone());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -619,6 +637,68 @@ mod tests {
         let _ = sqlx::query!("DELETE FROM users WHERE id = $1", outsider.as_i64())
             .execute(&h.pool)
             .await;
+        cleanup(&h.pool, guild).await;
+    }
+
+    /// A recording [`crate::VoiceSink`] for the loopback test.
+    #[derive(Default)]
+    struct RecordingSink {
+        delivered: std::sync::Mutex<Vec<(UserId, Bytes)>>,
+    }
+
+    impl crate::VoiceSink for RecordingSink {
+        fn deliver(&self, target: UserId, packet: Bytes) {
+            self.delivered.lock().unwrap().push((target, packet));
+        }
+    }
+
+    /// The phase-2 SFU gate: feed an encoded voice frame in, assert it fans out
+    /// to every other channel member (and never echoes to the sender).
+    #[tokio::test]
+    async fn forward_fans_out_to_co_members_only() {
+        use dice_voice_core::VoiceFrame;
+
+        let h = harness().await;
+        let (a, b, c) = (
+            UserId::from(idgen().generate()),
+            UserId::from(idgen().generate()),
+            UserId::from(idgen().generate()),
+        );
+        let (guild, channel) = seed(&h.pool, &[a, b, c]).await;
+        for u in [a, b, c] {
+            h.svc.join(u, channel, false, false).await.unwrap();
+        }
+
+        let packet = VoiceFrame {
+            ssrc: 42,
+            seq: 7,
+            timestamp: 6720,
+            marker: true,
+            payload: Bytes::from_static(b"synthetic-opus"),
+        }
+        .encode();
+
+        let sink = RecordingSink::default();
+        h.svc.forward(a, packet.clone(), &sink).await.unwrap();
+
+        // Snapshot to owned values so no lock guard is held across an await.
+        let got: Vec<(UserId, Bytes)> = sink.delivered.lock().unwrap().clone();
+        assert_eq!(got.len(), 2, "fans out to the two co-members");
+        let targets: Vec<UserId> = got.iter().map(|(t, _)| *t).collect();
+        assert!(targets.contains(&b) && targets.contains(&c));
+        assert!(!targets.contains(&a), "never echoes to the sender");
+        assert!(
+            got.iter().all(|(_, p)| *p == packet),
+            "packet forwarded verbatim"
+        );
+
+        // A sender not in any voice channel is a silent no-op.
+        let outsider = UserId::from(idgen().generate());
+        let sink2 = RecordingSink::default();
+        h.svc.forward(outsider, packet, &sink2).await.unwrap();
+        let delivered2 = sink2.delivered.lock().unwrap().len();
+        assert_eq!(delivered2, 0);
+
         cleanup(&h.pool, guild).await;
     }
 

@@ -20,5 +20,9 @@ prost = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+# The loopback test feeds a real voice-core-encoded frame through the SFU.
+dice-voice-core = { workspace = true }
+
 [lints]
 workspace = true
