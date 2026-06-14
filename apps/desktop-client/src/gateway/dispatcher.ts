@@ -24,6 +24,7 @@ import {
   applyReactionDelta,
   resetMessages,
 } from "../stores/messages";
+import { applyFriendUpdate, loadFriends, resetFriends } from "../stores/friends";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
 import {
   bumpUnread,
@@ -104,6 +105,9 @@ function dispatch(ev: DiceEvent): void {
     case "dmChannelCreate":
       addDm(ev.channel, ev.users);
       break;
+    case "friendUpdate":
+      applyFriendUpdate(ev.friend, ev.removed);
+      break;
     case "connState":
       setConnState(ev.state);
       setTransport(ev.state === "connected" ? (ev.transport ?? null) : null);
@@ -115,6 +119,7 @@ function dispatch(ev: DiceEvent): void {
       resetPresence();
       resetDirectory();
       resetUnread();
+      resetFriends();
       setConnState("idle");
       setTransport(null);
       setLoginNotice("Your session expired. Please log in again.");
@@ -139,5 +144,10 @@ export async function runBootstrap(): Promise<void> {
     if (sel) markChannelRead(sel);
   } catch {
     /* offline / no server: badges accrue live */
+  }
+  try {
+    await loadFriends();
+  } catch {
+    /* offline / no server: the Friends page reloads on open */
   }
 }

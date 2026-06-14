@@ -1,0 +1,55 @@
+.panel {
+  flex: none;
+  width: var(--tree-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--c-window-face);
+  border-right: 1px solid var(--c-bevel-lo);
+}
+
+/* Tab strip doubles as the panel header (matches the channel-tree header band). */
+.tabs {
+  flex: none;
+  display: flex;
+  border-bottom: 1px solid var(--c-bevel-lo);
+  box-shadow: 0 1px 0 var(--c-bevel-hi);
+  background: var(--grad-button);
+}
+
+.tab {
+  flex: 1;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  color: var(--c-text-dim);
+}
+
+.tab:hover {
+  color: var(--c-text);
+}
+
+.active {
+  color: var(--c-text);
+  border-bottom-color: var(--c-accent);
+}
+
+/* Incoming-request count on the Friends tab. */
+.badge {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--c-unread);
+  color: var(--c-text-invert);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}

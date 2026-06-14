@@ -13,6 +13,8 @@ import type {
   Bootstrap,
   Channel,
   DiceEvent,
+  Friend,
+  FriendStatus,
   Guild,
   Message,
   PresenceStatus,
@@ -92,6 +94,14 @@ dmPriya.recipientIds = [SELF.id, PRIYA.id];
 const dmMoss = mkChannel(null, "", 1);
 dmMoss.recipientIds = [SELF.id, MOSS.id];
 const dms: Channel[] = [dmPriya, dmMoss];
+
+/** Friendships keyed by the other user's id (the Friends-page demo set). */
+const friends = new Map<string, FriendStatus>([
+  [AYAAN.id, "accepted"],
+  [PRIYA.id, "accepted"],
+  [GLITCH.id, "accepted"],
+  [MOSS.id, "incoming"],
+]);
 
 /** Canonical per-channel message logs (ascending by time). */
 const logs = new Map<string, Message[]>();
@@ -527,6 +537,67 @@ export function createMockIpc(): DiceIpc {
       const other = users.find((u) => u.id === recipientId);
       emit({ type: "dmChannelCreate", channel: { ...ch }, users: other ? [other] : [] });
       return { ...ch };
+    },
+
+    async listFriends() {
+      await delay(80);
+      return [...friends.entries()].flatMap(([id, status]) => {
+        const u = users.find((x) => x.id === id);
+        return u ? [{ user: { ...u }, status }] : [];
+      });
+    },
+
+    async addFriend(username) {
+      await delay(150);
+      const u = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
+      if (!u) throw new Error("No user with that username.");
+      if (u.id === SELF.id) throw new Error("You can't add yourself.");
+      const existing = friends.get(u.id);
+      if (existing === "accepted") throw new Error("You're already friends.");
+      // If they already requested us, adding them accepts it.
+      const status: FriendStatus = existing === "incoming" ? "accepted" : "outgoing";
+      friends.set(u.id, status);
+      const friend: Friend = { user: { ...u }, status };
+      setTimeout(() => emit({ type: "friendUpdate", friend, removed: false }), 60);
+      return friend;
+    },
+
+    async acceptFriend(userId) {
+      await delay(120);
+      const u = users.find((x) => x.id === userId);
+      if (!u || friends.get(userId) !== "incoming") {
+        throw new Error("No pending request from this user.");
+      }
+      friends.set(userId, "accepted");
+      const friend: Friend = { user: { ...u }, status: "accepted" };
+      setTimeout(() => emit({ type: "friendUpdate", friend, removed: false }), 60);
+      return friend;
+    },
+
+    async declineFriend(userId) {
+      await delay(100);
+      const u = users.find((x) => x.id === userId);
+      if (!friends.has(userId)) throw new Error("No such request.");
+      friends.delete(userId);
+      if (u) {
+        setTimeout(
+          () => emit({ type: "friendUpdate", friend: { user: { ...u }, status: "accepted" }, removed: true }),
+          60,
+        );
+      }
+    },
+
+    async removeFriend(userId) {
+      await delay(100);
+      const u = users.find((x) => x.id === userId);
+      if (!friends.has(userId)) throw new Error("Not friends.");
+      friends.delete(userId);
+      if (u) {
+        setTimeout(
+          () => emit({ type: "friendUpdate", friend: { user: { ...u }, status: "accepted" }, removed: true }),
+          60,
+        );
+      }
     },
 
     async fetchUnread() {

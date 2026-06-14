@@ -18,6 +18,7 @@ import type {
   Bootstrap,
   Channel,
   DiceEvent,
+  Friend,
   Guild,
   LoginResult,
   Message,
@@ -117,6 +118,11 @@ export function createTauriIpc(): DiceIpc {
     createGuild: (name) => call<Guild>("create_guild", { name }),
     joinGuild: (code) => call<Guild>("join_guild", { code }),
     openDm: (recipientId) => call<Channel>("open_dm", { recipientId }),
+    listFriends: () => call<Friend[]>("list_friends"),
+    addFriend: (username) => call<Friend>("add_friend", { username }),
+    acceptFriend: (userId) => call<Friend>("accept_friend", { userId }),
+    declineFriend: (userId) => call<void>("decline_friend", { userId }),
+    removeFriend: (userId) => call<void>("remove_friend", { userId }),
     fetchUnread: async () => {
       const list = await call<{ channelId: string; count: number }[]>("fetch_unread");
       const map: Record<string, number> = {};

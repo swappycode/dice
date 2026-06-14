@@ -1,0 +1,149 @@
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.addForm {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1) var(--sp-2);
+}
+
+.addInput {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--sp-2);
+}
+
+.addBtn {
+  flex: none;
+  height: 24px;
+  padding: 0 var(--sp-3);
+  font-size: var(--font-size-chrome);
+}
+
+.error {
+  margin: 0 var(--sp-2) var(--sp-2);
+  font-size: var(--font-size-chrome);
+  color: var(--orb-dnd);
+}
+
+/* Etched group header (Online / Incoming / …). */
+.section {
+  margin: var(--sp-3) var(--sp-2) var(--sp-1);
+  font-size: var(--font-size-chrome);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-text-dim);
+}
+
+.rowWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2);
+}
+
+.info {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+}
+
+/* The clickable "message this friend" area of an accepted row. */
+.rowMain {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  text-align: left;
+  font-size: var(--font-size-base);
+  color: var(--c-text);
+}
+
+.rowMain:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c-unread) 28%, var(--c-content)),
+    color-mix(in srgb, var(--c-unread) 14%, var(--c-content))
+  );
+  border-color: color-mix(in srgb, var(--c-unread) 55%, var(--c-content));
+}
+
+:global([data-theme="aero"]) .rowMain:hover {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent-border);
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.act {
+  flex: none;
+  height: 22px;
+  padding: 0 var(--sp-3);
+  font-size: var(--font-size-chrome);
+}
+
+.linkBtn {
+  flex: none;
+  padding: 0 var(--sp-1);
+  background: none;
+  border: none;
+  color: var(--c-link);
+  text-decoration: underline;
+  font-size: var(--font-size-chrome);
+}
+
+.pending {
+  margin-left: auto;
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+}
+
+/* Remove-friend ✕ — idles quiet, reddens on hover like a close button. */
+.iconBtn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--c-text-dim);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.iconBtn:hover {
+  background: var(--grad-close);
+  border-color: var(--c-glass-edge);
+  color: var(--c-text-invert);
+}
+
+.empty {
+  padding: var(--sp-6) var(--sp-3);
+  font-size: var(--font-size-chrome);
+  color: var(--c-text-dim);
+  text-align: center;
+}

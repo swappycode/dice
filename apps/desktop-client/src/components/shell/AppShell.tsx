@@ -4,7 +4,7 @@ import { TitleBar } from "../chrome/TitleBar";
 import { StatusBar } from "../chrome/StatusBar";
 import { GuildRail } from "../guilds/GuildRail";
 import { ChannelTree } from "../channels/ChannelTree";
-import { DmList } from "../dm/DmList";
+import { HomePane } from "../home/HomePane";
 import { ChatView } from "../chat/ChatView";
 import { MemberSidebar } from "../chat/MemberSidebar";
 import { GuildDialog } from "../dialogs/GuildDialog";
@@ -18,7 +18,7 @@ export const AppShell: Component = () => {
       <TitleBar />
       <div class={styles.body}>
         <GuildRail onAddGuild={() => setGuildDialogOpen(true)} />
-        <Show when={selectedGuildId()} fallback={<DmList />}>
+        <Show when={selectedGuildId()} fallback={<HomePane />}>
           <ChannelTree />
         </Show>
         <ChatView />

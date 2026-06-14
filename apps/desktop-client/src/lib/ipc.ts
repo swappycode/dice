@@ -17,6 +17,7 @@ import type {
   Bootstrap,
   Channel,
   DiceEvent,
+  Friend,
   Guild,
   LoginResult,
   Message,
@@ -88,6 +89,17 @@ export interface DiceIpc {
   createGuild(name: string): Promise<Guild>;
   joinGuild(code: string): Promise<Guild>;
   openDm(recipientId: string): Promise<Channel>;
+
+  /** The caller's friends + pending requests (both directions). */
+  listFriends(): Promise<Friend[]>;
+  /** Send a friend request by username (a reverse-pending request auto-accepts). */
+  addFriend(username: string): Promise<Friend>;
+  /** Accept a pending incoming request; returns the now-accepted friend. */
+  acceptFriend(userId: string): Promise<Friend>;
+  /** Decline an incoming, or cancel an outgoing, pending request. */
+  declineFriend(userId: string): Promise<void>;
+  /** Remove an accepted friend. */
+  removeFriend(userId: string): Promise<void>;
 
   /** Per-channel unread counts for badges (channelId → count); for boot/resync. */
   fetchUnread(): Promise<Record<string, number>>;

@@ -76,6 +76,13 @@ export interface Session {
   user: User;
 }
 
+/** A friendship from the caller's point of view. */
+export type FriendStatus = "incoming" | "outgoing" | "accepted";
+export interface Friend {
+  user: User;
+  status: FriendStatus;
+}
+
 /** Result of `ipc.login`: either a `session` (no 2FA) or a `totpTicket` to
  *  answer the 2FA challenge with `ipc.completeTotpLogin`. Exactly one is set. */
 export interface LoginResult {
@@ -126,5 +133,6 @@ export type DiceEvent =
   | { type: "readMarkerUpdate"; channelId: string; lastReadMessageId: string }
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }
+  | { type: "friendUpdate"; friend: Friend; removed: boolean }
   | { type: "connState"; state: ConnState; transport?: "quic" | "wss" | null }
   | { type: "sessionExpired" };
