@@ -900,42 +900,49 @@ impl Chat for ChatService {
 
         let (lo, hi) = friend_pair(actor, target);
         let mut tx = self.pool.begin().await.map_err(internal)?;
-        let existing = sqlx::query!(
-            "SELECT status, requester_id FROM friendships \
-             WHERE user_lo = $1 AND user_hi = $2 FOR UPDATE",
+        // Claim a fresh pending row. ON CONFLICT serializes on the pair PK, so a
+        // concurrent mutual add (A adds B while B adds A) can't double-insert and
+        // 500 — the loser falls through to re-derive the outcome from the now-
+        // committed row (locked FOR UPDATE). Mirrors open_dm's insert-then-select.
+        let inserted = sqlx::query!(
+            "INSERT INTO friendships (user_lo, user_hi, status, requester_id) \
+             VALUES ($1, $2, $3, $4) ON CONFLICT (user_lo, user_hi) DO NOTHING",
             lo,
-            hi
+            hi,
+            FRIEND_PENDING,
+            actor.as_i64()
         )
-        .fetch_optional(&mut *tx)
+        .execute(&mut *tx)
         .await
-        .map_err(internal)?;
+        .map_err(internal)?
+        .rows_affected()
+            == 1;
 
-        // None = create pending; reverse-pending = accept; same-direction pending
-        // or already-accepted = no DB change.
+        // Fresh insert = create pending; otherwise the pair already existed:
+        // reverse-pending = accept; same-direction pending or accepted = no change.
         enum Step {
             Created,
             Accepted,
             AlreadyPending,
             AlreadyFriends,
         }
-        let step = match existing {
-            None => {
-                sqlx::query!(
-                    "INSERT INTO friendships (user_lo, user_hi, status, requester_id) \
-                     VALUES ($1, $2, $3, $4)",
-                    lo,
-                    hi,
-                    FRIEND_PENDING,
-                    actor.as_i64()
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(internal)?;
-                Step::Created
-            }
-            Some(row) if row.status == FRIEND_ACCEPTED => Step::AlreadyFriends,
-            Some(row) if row.requester_id == actor.as_i64() => Step::AlreadyPending,
-            Some(_) => {
+        let step = if inserted {
+            Step::Created
+        } else {
+            let row = sqlx::query!(
+                "SELECT status, requester_id FROM friendships \
+                 WHERE user_lo = $1 AND user_hi = $2 FOR UPDATE",
+                lo,
+                hi
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(internal)?;
+            if row.status == FRIEND_ACCEPTED {
+                Step::AlreadyFriends
+            } else if row.requester_id == actor.as_i64() {
+                Step::AlreadyPending
+            } else {
                 // The other user already requested me — adding them accepts it.
                 sqlx::query!(
                     "UPDATE friendships SET status = $3, updated_at = now() \

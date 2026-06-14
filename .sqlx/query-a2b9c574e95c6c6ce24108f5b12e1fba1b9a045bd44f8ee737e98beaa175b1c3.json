@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO friendships (user_lo, user_hi, status, requester_id) VALUES ($1, $2, $3, $4) ON CONFLICT (user_lo, user_hi) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a2b9c574e95c6c6ce24108f5b12e1fba1b9a045bd44f8ee737e98beaa175b1c3"
+}
