@@ -13,7 +13,7 @@
   --c-window-face: #e8f4fb;
   --c-content: #ffffff;
   --c-text: #10333f;
-  --c-text-dim: #5b7d8a;
+  --c-text-dim: #426170; /* darkened from #5b7d8a so dimmed copy clears AA (4.5:1) on the near-white face + white inputs */
   --c-text-invert: #ffffff;
   --c-bevel-hi: #ffffff;
   --c-bevel-lo: #a6cfe2;
@@ -23,6 +23,7 @@
   --c-accent-border: #6fcdf0;
   --c-titlebar-text: #0b3a4e;
   --c-link: #0a7fc2;
+  --c-brand-ink: #0b3a4e; /* the pale cyan accent is unreadable as wordmark ink on the near-white face — use the deep teal */
 
   --grad-titlebar: linear-gradient(
     180deg,
