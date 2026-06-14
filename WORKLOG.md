@@ -7,6 +7,45 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M3 (3/n): Friends / social
+
+**Branch:** `main`. Five commits (backend / client-host / client-ui + 2 review fixes). All gates green:
+`just check` (incl. 2 new live friend tests + `sqlx-prepare` for migration 0012), host clippy `-D warnings` +
+tests, frontend `tsc` + vite (CSS 54 KB). New Frame dispatch **FriendUpdate #117** (next free now **118**).
+
+**Design.** Folded friends into **chat-service** (it owns DMs + the bus-publish / `make_event` /
+`Subject::User` machinery + user-record seeding) rather than a new service — so no new `GatewayDeps` field,
+construction-site churn, or RPC seam. `friendships` table = a normalized `(user_lo < user_hi)` pair + `status`
+(pending/accepted) + `requester_id`. **accept reuses `open_dm`** (idempotent): that seeds both user
+dictionaries, fans `DmChannelCreate`, and — via the gateway's existing handling — registers mutual DM presence
+interest, so friends see each other's presence + can DM in one click, with **zero presence-service changes**.
+
+**Backend.** `Chat` trait + ChatService: `add_friend` (by username; a reverse-pending request auto-accepts),
+`accept_friend` (recipient-only), `decline_friend` (pending), `remove_friend` (accepted), `list_friends`
+(status from the caller's side). Every mutation publishes `FriendUpdate` to BOTH users' own subjects carrying
+the OTHER user's record (no "unknown"). proto `friend.proto` + envelope #117 + `payload_field_number`. REST:
+`GET/POST /v1/friends` + `/v1/friends/{id}/{accept,decline,remove}`.
+
+**Client.** network-core `ApiClient` + host commands / `FriendDto` / `DiceEvent::FriendUpdate` + a bridge
+`on_dispatch` arm (friends live in the frontend store, not the SQLite cache). UI: a Messages/Friends tab
+(`HomePane`); `DmList` is now body-only sharing one `SelfStrip` with the new `FriendsList` (add-by-username,
+incoming/outgoing requests, accepted grouped by presence, one-click DM, remove). Friends store hydrated at
+bootstrap + kept live by the dispatch; Friends-tab incoming-request badge. IPC parity across
+interface/real/mock.
+
+**Adversarial review (5 agents) + 2 fixes.** **(high)** manual "Log off" didn't reset the friends store →
+cross-account friends/badge leak → factored a single `resetClientState()` both logout paths call. **(medium)**
+`add_friend`'s bare INSERT could 500 on a concurrent mutual add → `ON CONFLICT DO NOTHING` + re-derive (mirrors
+`open_dm`).
+
+**M3 status:** login-cohesion ✅, Vantablack ✅, theme builder ✅, Friends ✅. **Voice is the sole remaining
+M3 item — DEFERRED:** a real-time audio SFU (`voice-core` + `voice-service` over QUIC datagrams, Opus, cpal
+capture/playback, WebRTC AEC/NS/AGC, PTT/VAD) can't be built + verified in this dev environment (no audio
+hardware / loopback in the gates), so it needs a dedicated on-hardware build+test pass. Concrete phased plan
+in `docs/ROADMAP.md` → M3 Voice. Next free Frame dispatch # = **118**.
+
+---
+
 ## 2026-06-14 — M3 (2/n): in-app theme builder
 
 **Branch:** `main`. Two client commits (`custom-theme state/plumbing` / `builder dialog`). Frontend gate
