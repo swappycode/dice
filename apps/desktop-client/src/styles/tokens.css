@@ -55,6 +55,7 @@
   --c-accent-border: #316ac5; /* Aero overrides with its hover border */
   --c-titlebar-text: #ffffff;
   --c-link: #0a44c8; /* classic blue hyperlink */
+  --c-brand-ink: var(--c-accent); /* wordmark/brand ink; light themes override when the accent is too pale to read as ink */
 
   --grad-titlebar: linear-gradient(180deg, #0997ff 0%, #0053ee 10%, #0050c9 85%, #1a6fe8 100%);
   --grad-button: linear-gradient(180deg, #ffffff 0%, #f0f0ea 45%, #e3e2d8 100%);

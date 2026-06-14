@@ -18,12 +18,30 @@
 
 .card {
   display: grid;
-  grid-template-columns: 240px 300px;
+  grid-template-columns: 232px 1fr;
   width: min(560px, 92%);
   border: 1px solid var(--c-window-frame);
   border-radius: var(--radius-control);
   overflow: hidden;
-  box-shadow: 0 6px 24px rgba(0, 0, 30, 0.4);
+  /* ONE cohesive window face for the whole card. Previously .brand painted the
+     (light) titlebar gradient and .formPane the (near-black, in dark themes)
+     window face — two opaque luminances butted together read as a separate black
+     box split by a hard vertical seam. Now the brand zone is a *continuous*
+     accent wash that fades out before the form, so both halves sit on the same
+     surface with no element boundary. A bevel + themed shadow lifts it as one
+     raised retro window. */
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--c-accent) 16%, transparent) 0%,
+      color-mix(in srgb, var(--c-accent) 5%, transparent) 30%,
+      transparent 52%
+    ),
+    var(--c-window-face);
+  box-shadow:
+    inset 1px 1px 0 var(--c-bevel-hi),
+    inset -1px -1px 0 var(--c-bevel-lo),
+    0 10px 30px var(--c-scrim);
 }
 
 .brand {
@@ -33,28 +51,27 @@
   justify-content: center;
   gap: var(--sp-4);
   padding: var(--sp-6) var(--sp-5);
-  background: var(--grad-titlebar);
-  color: var(--c-titlebar-text);
+  background: transparent;
+  color: var(--c-text);
   text-align: center;
 }
 
 .logo {
-  color: var(--c-titlebar-text);
+  color: var(--c-text);
 }
 
 .wordmark {
   letter-spacing: 0.35em;
-  text-shadow: var(--titlebar-text-glow);
+  color: var(--c-brand-ink);
 }
 
 .tagline {
   font-size: var(--font-size-chrome);
-  opacity: 0.92;
-  text-shadow: var(--titlebar-text-glow);
+  color: var(--c-text-dim);
 }
 
 .formPane {
-  background: var(--c-window-face);
+  background: transparent;
   padding: var(--sp-6) var(--sp-5);
 }
 
