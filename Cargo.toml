@@ -9,6 +9,7 @@ members = [
   "crates/cache",
   "crates/permissions",
   "crates/auth-core",
+  "crates/voice-core",
   "crates/logging",
   "crates/metrics",
   "services/api-gateway",
@@ -39,6 +40,7 @@ dice-database     = { path = "crates/database" }
 dice-cache        = { path = "crates/cache" }
 dice-permissions  = { path = "crates/permissions" }
 dice-auth-core    = { path = "crates/auth-core" }
+dice-voice-core   = { path = "crates/voice-core" }
 dice-logging      = { path = "crates/logging" }
 dice-metrics      = { path = "crates/metrics" }
 api-gateway       = { path = "services/api-gateway" }
