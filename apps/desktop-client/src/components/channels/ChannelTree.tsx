@@ -15,6 +15,7 @@ import {
   voiceMembers,
   voiceUser,
 } from "../../stores/voice";
+import { ipc } from "../../lib/ipc";
 import { SelfStrip } from "../common/SelfStrip";
 import styles from "./ChannelTree.module.css";
 
@@ -32,10 +33,18 @@ export const ChannelTree: Component = () => {
 
   const memberName = (userId: string) => voiceUser(userId)?.displayName ?? displayName(userId);
 
-  // Join/leave are best-effort signaling — no audio yet (on-hardware phase).
   const toggleVoice = (channelId: string) => {
     if (activeVoiceChannel() === channelId) void leaveVoice().catch(() => {});
     else void joinVoice(channelId).catch(() => {});
+  };
+
+  // Create a voice channel (owner only). Auto-named; the ChannelCreate dispatch
+  // adds it live for everyone. The new channel then appears to be joined.
+  const addVoiceChannel = () => {
+    const gid = selectedGuildId();
+    if (!gid) return;
+    const name = `Voice ${voiceChannels().length + 1}`;
+    void ipc.createChannel(gid, name, "voice").catch(() => {});
   };
 
   return (
@@ -80,7 +89,7 @@ export const ChannelTree: Component = () => {
           </ul>
         </Show>
 
-        <Show when={voiceChannels().length > 0}>
+        <Show when={selectedGuildId()}>
           <button
             type="button"
             class={styles.section}
@@ -95,6 +104,18 @@ export const ChannelTree: Component = () => {
               aria-hidden="true"
             />
             <span class={styles.sectionLabel}>VOICE CHANNELS</span>
+            <span
+              class={styles.addBtn}
+              role="button"
+              tabindex="0"
+              title="Add a voice channel"
+              onClick={(e) => {
+                e.stopPropagation();
+                addVoiceChannel();
+              }}
+            >
+              ＋
+            </span>
           </button>
           <Show when={!voiceCollapsed()}>
             <ul class={styles.tree}>

@@ -322,6 +322,20 @@ pub async fn voice_roster(core: Core<'_>, channel_id: String) -> CmdResult<Voice
     core.voice_roster(&channel_id).await.map_err(user)
 }
 
+/// Create a guild channel (`kind` = "voice" | "guild_text"). Requires
+/// MANAGE_CHANNELS (the guild owner has it).
+#[tauri::command]
+pub async fn create_channel(
+    core: Core<'_>,
+    guild_id: String,
+    name: String,
+    kind: String,
+) -> CmdResult<ChannelDto> {
+    core.create_channel(&guild_id, &name, &kind)
+        .await
+        .map_err(user)
+}
+
 /// Pull-style mirror of the `connState` event stream
 /// (`"idle" | "connecting" | "connected" | "reconnecting" | "offline"`).
 #[tauri::command]

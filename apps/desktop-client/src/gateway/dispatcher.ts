@@ -9,6 +9,7 @@ import { ipc } from "../lib/ipc";
 import type { DiceEvent, Message } from "../lib/types";
 import { setConnState, setTransport } from "../stores/connection";
 import {
+  addChannel,
   addDm,
   addGuild,
   applyBootstrap,
@@ -103,6 +104,9 @@ function dispatch(ev: DiceEvent): void {
       break;
     case "guildCreate":
       addGuild(ev.guild, ev.channels);
+      break;
+    case "channelCreate":
+      addChannel(ev.channel);
       break;
     case "dmChannelCreate":
       addDm(ev.channel, ev.users);

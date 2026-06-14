@@ -426,6 +426,9 @@ pub enum DiceEvent {
         guild: GuildDto,
         channels: Vec<ChannelDto>,
     },
+    /// A new channel was created in a guild (text or voice) — add it live.
+    #[serde(rename_all = "camelCase")]
+    ChannelCreate { channel: ChannelDto },
     #[serde(rename_all = "camelCase")]
     DmChannelCreate {
         channel: ChannelDto,

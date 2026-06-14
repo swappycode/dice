@@ -160,6 +160,7 @@ pub fn run() {
             commands::voice_leave,
             commands::voice_state,
             commands::voice_roster,
+            commands::create_channel,
             commands::connection_state,
             commands::notify,
         ])

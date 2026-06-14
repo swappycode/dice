@@ -221,4 +221,18 @@
   letter-spacing: 0.04em;
 }
 
+/* "+" affordance in a section header (create a channel) */
+.addBtn {
+  margin-left: auto;
+  padding: 0 var(--sp-1);
+  cursor: pointer;
+  color: var(--c-text-dim);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.addBtn:hover {
+  color: var(--c-text);
+}
+
 /* footer self strip lives in common/SelfStrip */

@@ -16,6 +16,7 @@ import type {
   Attachment,
   Bootstrap,
   Channel,
+  ChannelKind,
   DiceEvent,
   Friend,
   Guild,
@@ -90,6 +91,8 @@ export interface DiceIpc {
   createGuild(name: string): Promise<Guild>;
   joinGuild(code: string): Promise<Guild>;
   openDm(recipientId: string): Promise<Channel>;
+  /** Create a guild channel (`kind` = "voice" | "guild_text"); needs MANAGE_CHANNELS. */
+  createChannel(guildId: string, name: string, kind: ChannelKind): Promise<Channel>;
 
   /** The caller's friends + pending requests (both directions). */
   listFriends(): Promise<Friend[]>;

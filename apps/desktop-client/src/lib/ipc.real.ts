@@ -119,6 +119,8 @@ export function createTauriIpc(): DiceIpc {
     createGuild: (name) => call<Guild>("create_guild", { name }),
     joinGuild: (code) => call<Guild>("join_guild", { code }),
     openDm: (recipientId) => call<Channel>("open_dm", { recipientId }),
+    createChannel: (guildId, name, kind) =>
+      call<Channel>("create_channel", { guildId, name, kind }),
     listFriends: () => call<Friend[]>("list_friends"),
     addFriend: (username) => call<Friend>("add_friend", { username }),
     acceptFriend: (userId) => call<Friend>("accept_friend", { userId }),

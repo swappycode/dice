@@ -400,6 +400,19 @@ impl Bridge {
                     );
                 }
             }
+            Payload::ChannelCreate(cc) => {
+                if let Err(error) = self.cache.apply_event(payload.clone()).await {
+                    tracing::warn!(%error, "channel cache write failed");
+                }
+                if let Some(channel) = &cc.channel {
+                    emit_dice(
+                        &self.emitter,
+                        &DiceEvent::ChannelCreate {
+                            channel: ChannelDto::from(channel),
+                        },
+                    );
+                }
+            }
             Payload::DmChannelCreate(dc) => {
                 if let Err(error) = self.cache.apply_event(payload.clone()).await {
                     tracing::warn!(%error, "dm cache write failed");

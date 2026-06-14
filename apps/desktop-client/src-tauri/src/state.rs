@@ -983,6 +983,23 @@ impl ClientCore {
         let roster = self.api.voice_roster(channel).await?;
         Ok(VoiceRosterDto::from(&roster))
     }
+
+    /// Create a guild channel (`kind` = "voice" or "guild_text"). The new
+    /// channel reaches every member (incl. us) via the `ChannelCreate` dispatch.
+    pub async fn create_channel(
+        &self,
+        guild_id: &str,
+        name: &str,
+        kind: &str,
+    ) -> Result<ChannelDto, CoreError> {
+        let guild = parse_id(guild_id).ok_or_else(|| CoreError::BadId(guild_id.into()))?;
+        let kind = match kind {
+            "voice" => v1::ChannelKind::Voice,
+            _ => v1::ChannelKind::GuildText,
+        };
+        let channel = self.api.create_channel(guild, name, kind).await?;
+        Ok(ChannelDto::from(&channel))
+    }
 }
 
 // ---------------------------------------------------------------- throttle

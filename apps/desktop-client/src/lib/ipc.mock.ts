@@ -676,6 +676,22 @@ export function createMockIpc(): DiceIpc {
       return { channelId, members: members.map((m) => ({ ...m })), users: rosterUsers(members) };
     },
 
+    async createChannel(guildId, name, kind) {
+      await delay(120);
+      const channel: Channel = {
+        id: genId(Date.now()),
+        guildId,
+        kind,
+        name: name.trim(),
+        position: channels.filter((c) => c.guildId === guildId).length,
+        lastMessageId: null,
+        recipientIds: [],
+      };
+      channels.push(channel);
+      setTimeout(() => emit({ type: "channelCreate", channel: { ...channel } }), 60);
+      return { ...channel };
+    },
+
     async fetchUnread() {
       // The mock has no server-side counts; badges accrue live from the
       // dispatcher as ambient/echoed messages land in non-active channels.

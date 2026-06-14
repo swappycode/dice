@@ -68,6 +68,21 @@ export function addGuild(guild: Guild, channels: Channel[]): void {
   );
 }
 
+export function addChannel(channel: Channel): void {
+  if (!channel.guildId) return;
+  const gid = channel.guildId;
+  setDirectory(
+    produce((d) => {
+      const list = d.channelsByGuild[gid] ?? [];
+      if (!list.some((c) => c.id === channel.id)) {
+        list.push(channel);
+        list.sort(byPosition);
+      }
+      d.channelsByGuild[gid] = list;
+    }),
+  );
+}
+
 export function addDm(channel: Channel, users: User[]): void {
   setDirectory(
     produce((d) => {
