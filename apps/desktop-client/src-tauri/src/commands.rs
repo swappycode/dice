@@ -16,8 +16,8 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::dto::{
-    AttachmentDto, BootstrapDto, ChannelDto, GuildDto, LoginResultDto, MessageDto, SessionDto,
-    TotpEnrollDto, UnreadDto,
+    AttachmentDto, BootstrapDto, ChannelDto, FriendDto, GuildDto, LoginResultDto, MessageDto,
+    SessionDto, TotpEnrollDto, UnreadDto,
 };
 use crate::state::{ClientCore, CoreError};
 
@@ -249,6 +249,36 @@ pub async fn join_guild(core: Core<'_>, code: String) -> CmdResult<GuildDto> {
 #[tauri::command]
 pub async fn open_dm(core: Core<'_>, recipient_id: String) -> CmdResult<ChannelDto> {
     core.open_dm(&recipient_id).await.map_err(user)
+}
+
+/// The caller's friends + pending requests (both directions).
+#[tauri::command]
+pub async fn list_friends(core: Core<'_>) -> CmdResult<Vec<FriendDto>> {
+    core.list_friends().await.map_err(user)
+}
+
+/// Send a friend request by username (a reverse-pending request auto-accepts).
+#[tauri::command]
+pub async fn add_friend(core: Core<'_>, username: String) -> CmdResult<FriendDto> {
+    core.add_friend(&username).await.map_err(user)
+}
+
+/// Accept a pending incoming request.
+#[tauri::command]
+pub async fn accept_friend(core: Core<'_>, user_id: String) -> CmdResult<FriendDto> {
+    core.accept_friend(&user_id).await.map_err(user)
+}
+
+/// Decline an incoming, or cancel an outgoing, pending request.
+#[tauri::command]
+pub async fn decline_friend(core: Core<'_>, user_id: String) -> CmdResult<()> {
+    core.decline_friend(&user_id).await.map_err(user)
+}
+
+/// Remove an accepted friend.
+#[tauri::command]
+pub async fn remove_friend(core: Core<'_>, user_id: String) -> CmdResult<()> {
+    core.remove_friend(&user_id).await.map_err(user)
 }
 
 /// Pull-style mirror of the `connState` event stream

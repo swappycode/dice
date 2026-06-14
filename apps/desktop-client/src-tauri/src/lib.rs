@@ -150,6 +150,11 @@ pub fn run() {
             commands::create_guild,
             commands::join_guild,
             commands::open_dm,
+            commands::list_friends,
+            commands::add_friend,
+            commands::accept_friend,
+            commands::decline_friend,
+            commands::remove_friend,
             commands::connection_state,
             commands::notify,
         ])

@@ -21,8 +21,8 @@ use tokio::task::JoinHandle;
 use crate::bridge::{Bridge, PendingMap, PendingSend, PresenceMap, conn_state_str};
 use crate::cache::{Cache, CacheError};
 use crate::dto::{
-    BootstrapDto, ChannelDto, DiceEvent, GuildDto, LoginResultDto, MessageDto, SessionDto,
-    TotpEnrollDto, UserDto, id_str, parse_id, parse_presence, presence_str,
+    BootstrapDto, ChannelDto, DiceEvent, FriendDto, GuildDto, LoginResultDto, MessageDto,
+    SessionDto, TotpEnrollDto, UserDto, id_str, parse_id, parse_presence, presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
 use crate::keystore::KeyStore;
@@ -909,6 +909,37 @@ impl ClientCore {
             }))
             .await?;
         Ok(ChannelDto::from(&channel))
+    }
+
+    // ---- Friends / social (M3). Friends live in the frontend store, not the
+    // SQLite cache; live changes arrive via the FriendUpdate dispatch. ----
+
+    pub async fn list_friends(&self) -> Result<Vec<FriendDto>, CoreError> {
+        let list = self.api.list_friends().await?;
+        Ok(list.friends.iter().map(FriendDto::from).collect())
+    }
+
+    pub async fn add_friend(&self, username: &str) -> Result<FriendDto, CoreError> {
+        let friend = self.api.add_friend(username).await?;
+        Ok(FriendDto::from(&friend))
+    }
+
+    pub async fn accept_friend(&self, user_id: &str) -> Result<FriendDto, CoreError> {
+        let id = parse_id(user_id).ok_or_else(|| CoreError::BadId(user_id.into()))?;
+        let friend = self.api.accept_friend(id).await?;
+        Ok(FriendDto::from(&friend))
+    }
+
+    pub async fn decline_friend(&self, user_id: &str) -> Result<(), CoreError> {
+        let id = parse_id(user_id).ok_or_else(|| CoreError::BadId(user_id.into()))?;
+        self.api.decline_friend(id).await?;
+        Ok(())
+    }
+
+    pub async fn remove_friend(&self, user_id: &str) -> Result<(), CoreError> {
+        let id = parse_id(user_id).ok_or_else(|| CoreError::BadId(user_id.into()))?;
+        self.api.remove_friend(id).await?;
+        Ok(())
     }
 }
 

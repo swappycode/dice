@@ -337,6 +337,59 @@ impl ApiClient {
             .await
     }
 
+    /// `GET /v1/friends` — the caller's friends + pending requests.
+    pub async fn list_friends(&self) -> Result<v1::FriendList, ApiError> {
+        let url = self.url("/v1/friends")?;
+        let response = self
+            .bearer_send(|token| self.http.get(url.clone()).bearer_auth(token))
+            .await?;
+        decode_response(response).await
+    }
+
+    /// `POST /v1/friends` — send a friend request by username; returns the
+    /// relationship from the caller's side.
+    pub async fn add_friend(&self, username: &str) -> Result<v1::Friend, ApiError> {
+        self.post_bearer(
+            "/v1/friends",
+            &v1::AddFriendRequest {
+                username: username.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/friends/{id}/accept` — accept a pending incoming request.
+    pub async fn accept_friend(&self, user_id: u64) -> Result<v1::Friend, ApiError> {
+        let url = self.url(&format!("/v1/friends/{user_id}/accept"))?;
+        let response = self
+            .bearer_send(|token| self.http.post(url.clone()).bearer_auth(token))
+            .await?;
+        decode_response(response).await
+    }
+
+    /// `POST /v1/friends/{id}/decline` — decline/cancel a pending request (204).
+    pub async fn decline_friend(&self, user_id: u64) -> Result<(), ApiError> {
+        self.post_friend_unit(user_id, "decline").await
+    }
+
+    /// `POST /v1/friends/{id}/remove` — remove an accepted friend (204).
+    pub async fn remove_friend(&self, user_id: u64) -> Result<(), ApiError> {
+        self.post_friend_unit(user_id, "remove").await
+    }
+
+    /// Shared body-less friend mutation that succeeds with 204.
+    async fn post_friend_unit(&self, user_id: u64, action: &str) -> Result<(), ApiError> {
+        let url = self.url(&format!("/v1/friends/{user_id}/{action}"))?;
+        let response = self
+            .bearer_send(|token| self.http.post(url.clone()).bearer_auth(token))
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
     /// `POST /v1/media` — upload one file (protobuf body, larger limit than the
     /// realtime path). Returns the stored attachment metadata; its id is then
     /// referenced in `SendMessage { attachment_ids }`.

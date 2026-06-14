@@ -15,7 +15,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cache::Cache;
 use crate::dto::{
-    ChannelDto, DiceEvent, GuildDto, MessageDto, RESYNC_CHANNEL, UserDto, id_str, presence_str,
+    ChannelDto, DiceEvent, FriendDto, GuildDto, MessageDto, RESYNC_CHANNEL, UserDto, id_str,
+    presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
 use crate::session::SessionManager;
@@ -425,6 +426,19 @@ impl Bridge {
                         last_read_message_id: id_str(rm.last_read_message_id),
                     },
                 );
+            }
+            Payload::FriendUpdate(fu) => {
+                // Friends live in the frontend store, not the SQLite cache — just
+                // forward the change (the payload carries the other user's record).
+                if let Some(friend) = &fu.friend {
+                    emit_dice(
+                        &self.emitter,
+                        &DiceEvent::FriendUpdate {
+                            friend: FriendDto::from(friend),
+                            removed: fu.removed,
+                        },
+                    );
+                }
             }
             // Cache-only dispatches (no dedicated frontend event in M1).
             _ => {

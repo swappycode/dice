@@ -60,6 +60,16 @@ fn kind_str(kind: i32) -> &'static str {
     }
 }
 
+/// `dice.v1.FriendStatus` → frontend string. (Unspecified only appears on
+/// removals, where the client ignores the status, so it maps to "accepted".)
+pub fn friend_status_str(status: i32) -> &'static str {
+    match v1::FriendStatus::try_from(status) {
+        Ok(v1::FriendStatus::PendingIncoming) => "incoming",
+        Ok(v1::FriendStatus::PendingOutgoing) => "outgoing",
+        _ => "accepted",
+    }
+}
+
 // -------------------------------------------------------------------- DTOs
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,6 +95,29 @@ impl From<&v1::User> for UserDto {
                 u.display_name.clone()
             },
             avatar_id: (u.avatar_id != 0).then(|| id_str(u.avatar_id)),
+        }
+    }
+}
+
+/// One row of the Friends page: the other user + the relationship from the
+/// caller's side (`"incoming" | "outgoing" | "accepted"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendDto {
+    pub user: UserDto,
+    pub status: String,
+}
+
+impl From<&v1::Friend> for FriendDto {
+    fn from(f: &v1::Friend) -> Self {
+        Self {
+            user: f.user.as_ref().map(UserDto::from).unwrap_or_else(|| UserDto {
+                id: "0".to_owned(),
+                username: String::new(),
+                display_name: String::new(),
+                avatar_id: None,
+            }),
+            status: friend_status_str(f.status).to_owned(),
         }
     }
 }
@@ -317,6 +350,10 @@ pub enum DiceEvent {
         channel_id: String,
         last_read_message_id: String,
     },
+    /// A friendship changed for the caller. `removed` ⇒ drop it by `friend.user.id`;
+    /// otherwise upsert the friend by id with its status.
+    #[serde(rename_all = "camelCase")]
+    FriendUpdate { friend: FriendDto, removed: bool },
     #[serde(rename_all = "camelCase")]
     GuildCreate {
         guild: GuildDto,
