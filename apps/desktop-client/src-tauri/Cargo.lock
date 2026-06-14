@@ -87,6 +87,7 @@ dependencies = [
  "parking_lot",
  "presence-service",
  "prost",
+ "quinn",
  "subtle",
  "tokio",
  "tokio-util",

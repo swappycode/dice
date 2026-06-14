@@ -196,6 +196,12 @@ impl Bridge {
                     },
                 );
             }
+            ClientEvent::VoiceData(_bytes) => {
+                // Inbound voice datagram (a voice-core VoiceFrame). The audio
+                // device pipeline (cpal capture/playback + Opus + jitter) is the
+                // on-hardware phase: it will decode `_bytes` here and feed the
+                // per-ssrc jitter buffer. Until then, drop it (never to the UI).
+            }
         }
         Pump::Continue
     }
