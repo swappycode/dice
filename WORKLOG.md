@@ -7,6 +7,70 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M3 (4/n): Voice — phases 1–2 (signaling + SFU), buildable slice
+
+**Branch:** `main`. Eight commits (`add02b0`→`d3068ed`). All gate sets green: `just check`
+(fmt + clippy `-D warnings` + full workspace tests + aws-lc clean, incl. `sqlx-prepare` for
+migration 0013), host clippy `-D warnings` + tests (15 lib + 2 host_gate), frontend `tsc` + vite
+(CSS **54 KB**). New Frame dispatches **VoiceJoin #118 / VoiceLeave #119 / VoiceState #120**
+(next free now **121**). Migration **0013**.
+
+**Scope decision.** Voice was the sole remaining M3 item, deferred because the headline gate
+(3+ users at <5 % CPU, graceful at 5 % loss, real PTT/VAD) is an on-hardware, multi-client audio
+measurement. This session shipped everything that's **buildable + verifiable here** — the device-
+independent backend, protocol, and client *signaling* — and explicitly left the audio device I/O
+for the on-hardware phase.
+
+**voice-core (new crate, pure logic, 24 tests).** `framing` (an RTP-like `VoiceFrame`: ssrc/seq/
+timestamp/marker + opaque Opus payload; 11-byte BE header; encoded as a bare QUIC datagram, zero-
+copy decode), `jitter` (a playout jitter buffer: reorders, drops dup/late, reports gaps as
+`Conceal`, handles 16-bit seq wrap via extended-seq unwrapping), `plc` (`LossStats` so loss is
+measurable + a `ConcealmentLimiter` that caps consecutive conceal before silence). Inc. an
+end-to-end lossy+reordered 5 %-loss playout sim. No codec/async/IO.
+
+**Protocol.** `ChannelKind::Voice = 3`; `CreateChannelRequest.kind`; `voice.proto`
+(VoiceMember/VoiceRoster + the three dispatches + VoiceJoin/StateRequest REST bodies);
+`CAP_VOICE_DATAGRAMS` (Identify bit 0, reserved for the phase-3 datagram negotiation).
+
+**Channel VOICE kind (folded into chat-service).** Migration 0013 relaxes the channels CHECK to
+admit `channel_type = 3` (same shape as GUILD_TEXT; old unnamed check dropped by introspection).
+`create_channel` takes a kind (UNSPECIFIED→text, VOICE→voice, DM→InvalidArgument); `guild_channel`
+now carries the stored kind so the two channel-read paths report the real kind. Live test covers
+create + read-back + DM rejection; manifest test → 13.
+
+**voice-service (new crate, mirrors presence).** `Voice` trait (join/leave/update_state/roster/
+disconnect/forward) + Redis-backed state (`voice:ch:{channel}` roster, `voice:u:{user}` one-channel
+pointer; explicit-leave liveness, gateway calls `voice.disconnect` on teardown). Every mutation
+publishes its dispatch **ephemerally** to a new `Subject::GuildVoice(guild)` (added to the gateway's
+`guild_subjects`, so guild members auto-subscribe). `GatewayDeps.voice` threaded through all 5
+construction sites; REST `GET /v1/channels/{id}/voice` + `POST .../voice/{join,leave,state}`. 3 live
+tests (full round-trip over the bus, non-voice/non-member rejection, join-second-leaves-first).
+
+**Phase-2 SFU (the CI-able half).** `Voice::forward(sender, packet, sink)` — forward-only fan-out to
+every OTHER channel member via a `VoiceSink` seam (the gateway will impl it over datagram
+connections). The **synthetic-packet loopback test** (feed a real voice-core frame through a
+recording mock sink, assert fan-out, never echo the sender) is the roadmap's phase-2 gate. QUIC
+datagrams enabled in the shared transport config (64 KiB buffer) with a real-QUIC round-trip test
+(a datagram flows both ways over the actual server+client configs).
+
+**Client signaling (no audio).** network-core `ApiClient` voice methods; host DTOs + dispatch arms +
+ClientCore methods + 4 commands; IPC parity (interface/real/mock — the mock seeds a "Voice Lounge");
+a `voice` store (per-channel rosters + active channel, dispatch-driven, reset on logout); a **VOICE
+CHANNELS** section in `ChannelTree` (click to join/leave, members listed with muted/deaf tags +
+speaking accent).
+
+**Deferred to the on-hardware phase 3** (no client emits voice datagrams until cpal capture exists):
+the gateway per-connection datagram pump (wires `forward()` to real connections via the `VoiceSink`),
+`Identify.capabilities` bit-0 negotiation consumer, `cpal` capture/playback + WebRTC AEC/NS/AGC +
+PTT/VAD + device pickers, per-user speaking orbs driven by real VAD, and the headline <5 % CPU /
+5 %-loss measurement. Plan: `docs/ROADMAP.md` → M3 Voice phases 3–4.
+
+**M3 status:** login-cohesion ✅, Vantablack ✅, theme builder ✅, Friends ✅, **Voice phases 1–2 ✅
+(signaling + SFU routing + datagram transport, all verified here)**; Voice phases 3–4 (audio device
+I/O + headline gate) remain as a dedicated on-hardware pass. Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-14 — M3 (3/n): Friends / social
 
 **Branch:** `main`. Five commits (backend / client-host / client-ui + 2 review fixes). All gates green:
