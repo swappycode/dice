@@ -7,6 +7,47 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M3 (6/n): Voice — phase-3 audio engine (cpal + Opus) + create-channel
+
+**Branch:** `main`. Commits `26635d8` (cpal+Opus foundation) / `e7dd5c1` (VoiceEngine) / `fea3d60`
+(create-channel). Host gate green (clippy `-D warnings`, 21 host tests incl. 3 new audio/codec unit
+tests + host_gate), frontend `tsc` + vite (CSS 54.6 KB). New host deps: `cpal 0.15` (0.18 clashes
+with Tauri's windows-core; 0.15 + windows 0.54 coexist), `audiopus 0.2` (the `opus` crate FAILS to
+build on MSVC — CMake; audiopus uses cc + links), `dice-voice-core`.
+
+**Built here + verified as far as a mic-less agent can** (compiles, clippy, codec/conversion unit
+tests). **User confirmed Step 1** (cpal loopback example → heard themselves; devices = 48 kHz, in
+mono/F32, out stereo/F32 → no resampling needed).
+
+- **`audio.rs`:** `VoiceCodec` trait + `OpusCodec` (libopus via audiopus, 48 kHz mono 20 ms / 960-sample
+  frames, VoIP; round-trip + PLC unit-tested). `VoiceEngine`: a dedicated thread owns the
+  Windows-`!Send` cpal streams and runs capture → f32→i16 → Opus → `voice_core::VoiceFrame` →
+  `VoiceSender` (QUIC datagram), and `VoiceData` → `VoiceFrame::decode` → per-ssrc
+  `voice_core::JitterBuffer` → Opus decode (PLC on Conceal) → mix → playback (backlog gate paces it).
+  `examples/voice_loopback.rs` = the Step-1 mic→speaker probe.
+- **network-core:** cloneable `VoiceSender` (off `GatewayHandle::voice_sender()`) so the audio thread
+  sends without touching the bridge.
+- **bridge:** starts the engine on our own `VoiceJoin` dispatch (server ssrc), drops it on `VoiceLeave`;
+  routes `VoiceData` to it. So clicking a voice channel starts real audio.
+- **create-channel (fea3d60):** `create_channel` command + `ApiClient`/IPC + a "＋" in the VOICE
+  CHANNELS header (owner, auto-named); the bridge now emits a live `ChannelCreate` DiceEvent (was
+  cache-only) → `stores/guilds::addChannel`, so a new channel appears for all members without reload.
+
+**REMAINING (next chat) — Voice phase 3–4 finish:**
+1. **USER runtime verification:** two clients (`just client` + `just client-as <name>`), owner makes a
+   guild + clicks ＋ to add a voice channel, both join, speak/listen on **headphones** (no AEC yet).
+   This is the "does audio actually work" test — not yet done.
+2. **Step 4:** PTT + VAD (currently OPEN MIC — transmits constantly), device-picker dialog, speaking
+   orbs from real VAD (the muted/deaf/speaking tags + VoiceState path already exist).
+3. **Step 5:** AEC seam (WebRTC APM C++ — deferred, headphones for now), resampling for non-48 kHz
+   devices, heartbeat-refreshed voice roster TTL, the headline gate (3+ users <5% CPU, graceful at 5%
+   loss — user-measured), and the M3 close-out docs.
+
+Audio CONTROLS/codec/engine all compile + are unit-tested; the irreducible unverified-here part is the
+live sound, which the user verifies. Voice TRANSPORT (datagrams + SFU) is already E2E-verified (M3 5/n).
+
+---
+
 ## 2026-06-14 — M3 (5/n): Voice — phase 3 transport (SFU datagrams over QUIC)
 
 **Branch:** `main`. Two commits (`23b2ce4` server transport / `e2f55f0` host VoiceData). All
