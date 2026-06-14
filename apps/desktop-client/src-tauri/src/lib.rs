@@ -14,6 +14,7 @@
 //! - when the keystore already holds a session the gateway connects in the
 //!   background at startup; otherwise the first `login`/`register` connects.
 
+pub mod audio;
 pub mod bridge;
 pub mod cache;
 pub mod commands;
