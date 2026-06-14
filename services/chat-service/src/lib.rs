@@ -136,11 +136,14 @@ pub trait Chat: Send + Sync {
     async fn join_guild(&self, actor: UserId, code: &str) -> Result<v1::Guild, ChatError>;
 
     /// Requires MANAGE_CHANNELS. Publishes `ChannelCreate` to the guild subject.
+    /// `kind` selects GUILD_TEXT or VOICE (UNSPECIFIED defaults to text); DM is
+    /// rejected (use `open_dm`).
     async fn create_channel(
         &self,
         actor: UserId,
         guild: GuildId,
         name: String,
+        kind: v1::ChannelKind,
     ) -> Result<v1::Channel, ChatError>;
 
     /// Idempotent via dm_key (`min:max` user ids). Publishes `DmChannelCreate`

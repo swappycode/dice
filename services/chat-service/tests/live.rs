@@ -956,7 +956,7 @@ async fn create_channel_requires_manage_channels() {
     // Plain member: DEFAULT_EVERYONE lacks MANAGE_CHANNELS.
     match ctx
         .svc
-        .create_channel(b, gid, "nope".into())
+        .create_channel(b, gid, "nope".into(), v1::ChannelKind::GuildText)
         .await
         .unwrap_err()
     {
@@ -968,13 +968,13 @@ async fn create_channel_requires_manage_channels() {
     // Non-member and unknown guild.
     let err = ctx
         .svc
-        .create_channel(c, gid, "nope".into())
+        .create_channel(c, gid, "nope".into(), v1::ChannelKind::GuildText)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotAMember), "{err:?}");
     let err = ctx
         .svc
-        .create_channel(a, GuildId::from_raw(1), "x".into())
+        .create_channel(a, GuildId::from_raw(1), "x".into(), v1::ChannelKind::GuildText)
         .await
         .unwrap_err();
     assert!(matches!(err, ChatError::NotFound), "{err:?}");
@@ -983,7 +983,7 @@ async fn create_channel_requires_manage_channels() {
     let mut sub = ctx.bus.subscribe(Subject::GuildMsg(gid)).await.unwrap();
     let ch = ctx
         .svc
-        .create_channel(a, gid, "  announcements ".into())
+        .create_channel(a, gid, "  announcements ".into(), v1::ChannelKind::GuildText)
         .await
         .unwrap();
     assert_eq!(ch.name, "announcements");
@@ -997,6 +997,30 @@ async fn create_channel_requires_manage_channels() {
         panic!("expected ChannelCreate, got {ev:?}");
     };
     assert_eq!(cc.channel.as_ref().unwrap(), &ch);
+
+    // A VOICE channel is creatable and reads back with the VOICE kind.
+    let voice = ctx
+        .svc
+        .create_channel(a, gid, "Lounge".into(), v1::ChannelKind::Voice)
+        .await
+        .unwrap();
+    assert_eq!(voice.kind, v1::ChannelKind::Voice as i32);
+    let _ = next_event(&mut sub).await; // its ChannelCreate
+    // c joins; the full guild snapshot carries the voice channel verbatim.
+    let joined = ctx.svc.join_guild(c, &guild.invite_code).await.unwrap();
+    let lounge = joined
+        .channels
+        .iter()
+        .find(|ch| ch.id == voice.id)
+        .expect("voice channel in snapshot");
+    assert_eq!(lounge.kind, v1::ChannelKind::Voice as i32);
+    // A DM kind is rejected here (DMs go through open_dm).
+    let err = ctx
+        .svc
+        .create_channel(a, gid, "bad".into(), v1::ChannelKind::Dm)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ChatError::InvalidArgument(_)), "{err:?}");
 
     ctx.finish().await;
 }
@@ -1090,7 +1114,7 @@ async fn sync_user_state_builds_the_full_ready_snapshot() {
     ctx.svc.join_guild(b, &guild.invite_code).await.unwrap();
     let extra = ctx
         .svc
-        .create_channel(a, GuildId::from_raw(guild.id), "second".into())
+        .create_channel(a, GuildId::from_raw(guild.id), "second".into(), v1::ChannelKind::GuildText)
         .await
         .unwrap();
     let dm = ctx.svc.open_dm(a, b).await.unwrap();

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, guild_id AS \"guild_id!\", name AS \"name!\", position, last_message_id\n                   FROM channels WHERE guild_id = ANY($1::bigint[])\n                   ORDER BY position, id",
+  "query": "SELECT id, guild_id AS \"guild_id!\", channel_type, name AS \"name!\", position, last_message_id\n                   FROM channels WHERE guild_id = ANY($1::bigint[])\n                   ORDER BY position, id",
   "describe": {
     "columns": [
       {
@@ -15,16 +15,21 @@
       },
       {
         "ordinal": 2,
+        "name": "channel_type",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
         "name": "name!",
         "type_info": "Text"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "position",
         "type_info": "Int4"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "last_message_id",
         "type_info": "Int8"
       }
@@ -37,10 +42,11 @@
     "nullable": [
       false,
       true,
+      false,
       true,
       false,
       true
     ]
   },
-  "hash": "d6f4148313a01ca7f0fba9f3ad360d5c923fafcd2dac0bc92c250ea89b81877e"
+  "hash": "27a2d5c080af829acbd6ccb346a883d85a1b20ada03102d9ef93d06264b6329b"
 }

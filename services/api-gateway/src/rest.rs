@@ -451,10 +451,11 @@ async fn create_channel(
     axum::Extension(Authed(user)): axum::Extension<Authed>,
     Proto(req): Proto<v1::CreateChannelRequest>,
 ) -> Response {
+    let kind = req.kind();
     match gw
         .deps
         .chat
-        .create_channel(user, GuildId::from_raw(req.guild_id), req.name)
+        .create_channel(user, GuildId::from_raw(req.guild_id), req.name, kind)
         .await
     {
         Ok(channel) => proto_response(StatusCode::OK, &channel),

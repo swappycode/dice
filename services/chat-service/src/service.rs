@@ -39,6 +39,7 @@ const INVITE_CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 /// `channels.channel_type` (critique #18: no layer ever remaps enum numbers).
 const KIND_GUILD_TEXT: i16 = v1::ChannelKind::GuildText as i16;
 const KIND_DM: i16 = v1::ChannelKind::Dm as i16;
+const KIND_VOICE: i16 = v1::ChannelKind::Voice as i16;
 
 /// `Guild.members` cap in M1 (protocol §3). The `users` dictionary in
 /// [`UserSyncState`] still covers ALL members, not just the capped list.
@@ -105,7 +106,7 @@ impl Chat for ChatService {
         let mut channels_by_guild: HashMap<i64, Vec<v1::Channel>> = HashMap::new();
         if !gids.is_empty() {
             let rows = sqlx::query!(
-                r#"SELECT id, guild_id AS "guild_id!", name AS "name!", position, last_message_id
+                r#"SELECT id, guild_id AS "guild_id!", channel_type, name AS "name!", position, last_message_id
                    FROM channels WHERE guild_id = ANY($1::bigint[])
                    ORDER BY position, id"#,
                 &gids[..]
@@ -120,6 +121,7 @@ impl Chat for ChatService {
                     .push(guild_channel(
                         r.id,
                         r.guild_id,
+                        r.channel_type,
                         r.name,
                         r.position,
                         r.last_message_id,
@@ -637,7 +639,19 @@ impl Chat for ChatService {
         actor: UserId,
         guild: GuildId,
         name: String,
+        kind: v1::ChannelKind,
     ) -> Result<v1::Channel, ChatError> {
+        // Only guild channels are creatable here; UNSPECIFIED defaults to text
+        // (back-compat), DMs go through open_dm.
+        let stored_kind: i16 = match kind {
+            v1::ChannelKind::Unspecified | v1::ChannelKind::GuildText => KIND_GUILD_TEXT,
+            v1::ChannelKind::Voice => KIND_VOICE,
+            v1::ChannelKind::Dm => {
+                return Err(ChatError::InvalidArgument(
+                    "cannot create a DM channel here".to_owned(),
+                ));
+            }
+        };
         let name = validate_trimmed(&name, MAX_NAME_CHARS, "channel name")?;
         let row = sqlx::query!(
             r#"SELECT g.owner_id AS "owner_id!", gm.permissions AS "permissions?"
@@ -665,7 +679,7 @@ impl Chat for ChatService {
                      (SELECT COALESCE(MAX(position) + 1, 0) FROM channels WHERE guild_id = $3)) \
              RETURNING position",
             id.as_i64(),
-            KIND_GUILD_TEXT,
+            stored_kind,
             guild.as_i64(),
             name.as_str()
         )
@@ -673,7 +687,7 @@ impl Chat for ChatService {
         .await
         .map_err(internal)?;
 
-        let channel = guild_channel(id.as_i64(), guild.as_i64(), name, position, None);
+        let channel = guild_channel(id.as_i64(), guild.as_i64(), stored_kind, name, position, None);
         let event = self.make_event(
             guild.raw(),
             Vec::new(),
@@ -1260,7 +1274,7 @@ impl ChatService {
         .map_err(internal)?
         .ok_or(ChatError::NotFound)?;
         let channels = sqlx::query!(
-            r#"SELECT id, name AS "name!", position, last_message_id
+            r#"SELECT id, channel_type, name AS "name!", position, last_message_id
                FROM channels WHERE guild_id = $1 ORDER BY position, id"#,
             guild.as_i64()
         )
@@ -1268,7 +1282,7 @@ impl ChatService {
         .await
         .map_err(internal)?
         .into_iter()
-        .map(|r| guild_channel(r.id, g.id, r.name, r.position, r.last_message_id))
+        .map(|r| guild_channel(r.id, g.id, r.channel_type, r.name, r.position, r.last_message_id))
         .collect();
         let members = self.load_members(guild).await?;
         Ok(v1::Guild {
@@ -1369,6 +1383,7 @@ impl ChatService {
             channels: vec![guild_channel(
                 channel_id.as_i64(),
                 guild_id.as_i64(),
+                KIND_GUILD_TEXT,
                 GENERAL_CHANNEL.to_owned(),
                 0,
                 None,
@@ -1687,9 +1702,13 @@ fn ms(t: OffsetDateTime) -> u64 {
     u64::try_from(t.unix_timestamp_nanos() / 1_000_000).unwrap_or(0)
 }
 
+/// Build a `v1::Channel` for a guild channel. `kind` is the stored
+/// `channels.channel_type` (the dice.v1 ChannelKind proto value, verbatim) —
+/// GUILD_TEXT or VOICE — so reading a channel back reflects its real kind.
 fn guild_channel(
     id: i64,
     guild_id: i64,
+    kind: i16,
     name: String,
     position: i32,
     last_message_id: Option<i64>,
@@ -1697,7 +1716,7 @@ fn guild_channel(
     v1::Channel {
         id: id as u64,
         guild_id: guild_id as u64,
-        kind: v1::ChannelKind::GuildText as i32,
+        kind: i32::from(kind),
         name,
         position: u32::try_from(position).unwrap_or(0),
         last_message_id: last_message_id.map_or(0, |v| v as u64),
