@@ -448,6 +448,11 @@ impl ClientCore {
         }
         self.session.clear().await;
         self.cache.wipe().await?;
+        // Reset the Ready-applied counter: get_bootstrap waits for the first
+        // Ready only while this is 0. Without the reset it stays >0 from the
+        // previous session, so the NEXT login serves the just-wiped (empty)
+        // cache instead of waiting for the fresh Ready — guilds appear gone.
+        self.ready_tx.send_modify(|n| *n = 0);
         self.pending.lock().expect("pending lock").clear();
         self.presence.lock().expect("presence lock").clear();
         *self.current_user.lock().expect("user lock") = None;
