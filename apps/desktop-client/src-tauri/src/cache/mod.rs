@@ -677,6 +677,8 @@ impl Cache {
                     guild_id: guild_id.map(|g| g.to_string()),
                     kind: if kind == v1::ChannelKind::Dm as i64 {
                         "dm".to_owned()
+                    } else if kind == v1::ChannelKind::Voice as i64 {
+                        "voice".to_owned()
                     } else {
                         "guild_text".to_owned()
                     },

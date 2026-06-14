@@ -1224,7 +1224,9 @@ impl ChatService {
         .map_err(internal)?
         .ok_or(ChatError::NotFound)?;
 
-        if row.channel_type == KIND_GUILD_TEXT {
+        // VOICE channels are guild-scoped like text — same membership/permission
+        // gate (so chat-side access checks on a voice channel don't 500).
+        if row.channel_type == KIND_GUILD_TEXT || row.channel_type == KIND_VOICE {
             let Some(guild_id) = row.guild_id else {
                 return Err(internal("guild channel row without guild_id"));
             };
