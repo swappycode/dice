@@ -1,0 +1,40 @@
+// Friends / social (M3). Directed friend requests + accepted friendships, with
+// a FriendUpdate dispatch (#117) so the other side updates live.
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/common.proto";
+
+// A friendship from the requesting user's point of view.
+enum FriendStatus {
+  FRIEND_STATUS_UNSPECIFIED = 0;
+  FRIEND_STATUS_PENDING_INCOMING = 1; // they asked me — I can accept/decline
+  FRIEND_STATUS_PENDING_OUTGOING = 2; // I asked them — awaiting their accept
+  FRIEND_STATUS_ACCEPTED = 3;         // mutual friends
+}
+
+// One row of the caller's friends view: the other user + the relationship state.
+message Friend {
+  User user = 1;
+  FriendStatus status = 2;
+}
+
+// POST /v1/friends — send a friend request by username (case-insensitive).
+message AddFriendRequest {
+  string username = 1;
+}
+
+// GET /v1/friends — the caller's friends + pending requests (both directions).
+message FriendList {
+  repeated Friend friends = 1;
+}
+
+// Dispatch #117 to a user's own subject when a friendship changes for them.
+// `removed` = the relationship is gone (declined / cancelled / removed) — drop
+// it by `friend.user.id`; otherwise upsert the friend by id with its status.
+// `friend.user` always carries the OTHER user's record so the client never has
+// to render a friend as "unknown".
+message FriendUpdate {
+  Friend friend = 1;
+  bool removed = 2;
+}

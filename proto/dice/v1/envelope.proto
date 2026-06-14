@@ -16,6 +16,7 @@ import "dice/v1/message.proto";
 import "dice/v1/guild.proto";
 import "dice/v1/presence.proto";
 import "dice/v1/user.proto";
+import "dice/v1/friend.proto";
 
 message Frame {
   // Per-session monotonic sequence, gateway-assigned. >0 ONLY on sequenced
@@ -64,5 +65,6 @@ message Frame {
     ReactionUpdate reaction_update = 114;
     UserUpdate user_update = 115;
     ReadMarkerUpdate read_marker_update = 116;
+    FriendUpdate friend_update = 117;
   }
 }

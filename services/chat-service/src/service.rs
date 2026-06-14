@@ -44,6 +44,10 @@ const KIND_DM: i16 = v1::ChannelKind::Dm as i16;
 /// [`UserSyncState`] still covers ALL members, not just the capped list.
 const MEMBER_CAP: i64 = 100;
 
+/// `friendships.status` discriminants (stored verbatim).
+const FRIEND_PENDING: i16 = 1;
+const FRIEND_ACCEPTED: i16 = 2;
+
 const MAX_MESSAGE_CHARS: usize = 4000;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_EMOJI_CHARS: usize = 64; // matches the message_reactions CHECK
@@ -843,9 +847,290 @@ impl Chat for ChatService {
         self.broadcast_user_update(actor, &user).await;
         Ok(user)
     }
+
+    // ---- Friends / social (M3) ----
+
+    async fn list_friends(&self, actor: UserId) -> Result<v1::FriendList, ChatError> {
+        let rows = sqlx::query!(
+            "SELECT user_lo, user_hi, status, requester_id FROM friendships \
+             WHERE user_lo = $1 OR user_hi = $1 \
+             ORDER BY created_at DESC",
+            actor.as_i64()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut friends = Vec::with_capacity(rows.len());
+        for r in rows {
+            let other = if r.user_lo == actor.as_i64() {
+                r.user_hi
+            } else {
+                r.user_lo
+            };
+            let user = self.load_user(UserId::from_raw(other as u64)).await?;
+            friends.push(v1::Friend {
+                user: Some(user),
+                status: friend_status(r.status, r.requester_id, actor) as i32,
+            });
+        }
+        Ok(v1::FriendList { friends })
+    }
+
+    async fn add_friend(&self, actor: UserId, username: &str) -> Result<v1::Friend, ChatError> {
+        let username = username.trim();
+        if username.is_empty() {
+            return Err(ChatError::InvalidArgument(
+                "username must not be empty".to_owned(),
+            ));
+        }
+        let target_id = sqlx::query_scalar!(
+            "SELECT id FROM users WHERE LOWER(username) = LOWER($1)",
+            username
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .ok_or(ChatError::NotFound)?;
+        let target = UserId::from_raw(target_id as u64);
+        if target == actor {
+            return Err(ChatError::InvalidArgument(
+                "you cannot add yourself".to_owned(),
+            ));
+        }
+
+        let (lo, hi) = friend_pair(actor, target);
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let existing = sqlx::query!(
+            "SELECT status, requester_id FROM friendships \
+             WHERE user_lo = $1 AND user_hi = $2 FOR UPDATE",
+            lo,
+            hi
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(internal)?;
+
+        // None = create pending; reverse-pending = accept; same-direction pending
+        // or already-accepted = no DB change.
+        enum Step {
+            Created,
+            Accepted,
+            AlreadyPending,
+            AlreadyFriends,
+        }
+        let step = match existing {
+            None => {
+                sqlx::query!(
+                    "INSERT INTO friendships (user_lo, user_hi, status, requester_id) \
+                     VALUES ($1, $2, $3, $4)",
+                    lo,
+                    hi,
+                    FRIEND_PENDING,
+                    actor.as_i64()
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(internal)?;
+                Step::Created
+            }
+            Some(row) if row.status == FRIEND_ACCEPTED => Step::AlreadyFriends,
+            Some(row) if row.requester_id == actor.as_i64() => Step::AlreadyPending,
+            Some(_) => {
+                // The other user already requested me — adding them accepts it.
+                sqlx::query!(
+                    "UPDATE friendships SET status = $3, updated_at = now() \
+                     WHERE user_lo = $1 AND user_hi = $2",
+                    lo,
+                    hi,
+                    FRIEND_ACCEPTED
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(internal)?;
+                Step::Accepted
+            }
+        };
+        tx.commit().await.map_err(internal)?;
+
+        match step {
+            Step::AlreadyFriends => Err(ChatError::InvalidArgument("already friends".to_owned())),
+            Step::Accepted => self.on_friend_accepted(actor, target).await,
+            Step::Created => {
+                let actor_user = self.load_user(actor).await?;
+                let target_user = self.load_user(target).await?;
+                self.publish_friend_update(
+                    actor,
+                    target_user.clone(),
+                    v1::FriendStatus::PendingOutgoing,
+                    false,
+                )
+                .await;
+                self.publish_friend_update(
+                    target,
+                    actor_user,
+                    v1::FriendStatus::PendingIncoming,
+                    false,
+                )
+                .await;
+                Ok(v1::Friend {
+                    user: Some(target_user),
+                    status: v1::FriendStatus::PendingOutgoing as i32,
+                })
+            }
+            Step::AlreadyPending => {
+                let target_user = self.load_user(target).await?;
+                Ok(v1::Friend {
+                    user: Some(target_user),
+                    status: v1::FriendStatus::PendingOutgoing as i32,
+                })
+            }
+        }
+    }
+
+    async fn accept_friend(&self, actor: UserId, other: UserId) -> Result<v1::Friend, ChatError> {
+        if actor == other {
+            return Err(ChatError::InvalidArgument("invalid friend".to_owned()));
+        }
+        let (lo, hi) = friend_pair(actor, other);
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let row = sqlx::query!(
+            "SELECT status, requester_id FROM friendships \
+             WHERE user_lo = $1 AND user_hi = $2 FOR UPDATE",
+            lo,
+            hi
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(internal)?
+        .ok_or(ChatError::NotFound)?;
+        if row.status == FRIEND_ACCEPTED {
+            tx.rollback().await.ok();
+            let other_user = self.load_user(other).await?;
+            return Ok(v1::Friend {
+                user: Some(other_user),
+                status: v1::FriendStatus::Accepted as i32,
+            });
+        }
+        // Only the recipient of a pending request may accept it.
+        if row.requester_id == actor.as_i64() {
+            return Err(ChatError::Forbidden(
+                "cannot accept your own request".to_owned(),
+            ));
+        }
+        sqlx::query!(
+            "UPDATE friendships SET status = $3, updated_at = now() \
+             WHERE user_lo = $1 AND user_hi = $2",
+            lo,
+            hi,
+            FRIEND_ACCEPTED
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        self.on_friend_accepted(actor, other).await
+    }
+
+    async fn decline_friend(&self, actor: UserId, other: UserId) -> Result<(), ChatError> {
+        let (lo, hi) = friend_pair(actor, other);
+        let deleted = sqlx::query!(
+            "DELETE FROM friendships WHERE user_lo = $1 AND user_hi = $2 AND status = $3",
+            lo,
+            hi,
+            FRIEND_PENDING
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if deleted == 0 {
+            return Err(ChatError::NotFound);
+        }
+        self.publish_friend_removed(actor, other).await;
+        Ok(())
+    }
+
+    async fn remove_friend(&self, actor: UserId, other: UserId) -> Result<(), ChatError> {
+        let (lo, hi) = friend_pair(actor, other);
+        let deleted = sqlx::query!(
+            "DELETE FROM friendships WHERE user_lo = $1 AND user_hi = $2 AND status = $3",
+            lo,
+            hi,
+            FRIEND_ACCEPTED
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if deleted == 0 {
+            return Err(ChatError::NotFound);
+        }
+        self.publish_friend_removed(actor, other).await;
+        Ok(())
+    }
 }
 
 impl ChatService {
+    /// Shared accept path (from `accept_friend` and the reverse-pending case of
+    /// `add_friend`): ensure a DM, then publish `FriendUpdate{accepted}` to both.
+    async fn on_friend_accepted(
+        &self,
+        actor: UserId,
+        other: UserId,
+    ) -> Result<v1::Friend, ChatError> {
+        // Opening the DM (idempotent) seeds both user dictionaries, fans
+        // `DmChannelCreate` to both, and — via the gateway's handling of that —
+        // registers mutual DM presence interest, so friends see each other's
+        // presence and can message with one click. A failure here is non-fatal:
+        // the friendship is already committed.
+        if let Err(error) = self.open_dm(actor, other).await {
+            tracing::warn!(%error, "open_dm on friend-accept failed");
+        }
+        let actor_user = self.load_user(actor).await?;
+        let other_user = self.load_user(other).await?;
+        self.publish_friend_update(actor, other_user.clone(), v1::FriendStatus::Accepted, false)
+            .await;
+        self.publish_friend_update(other, actor_user, v1::FriendStatus::Accepted, false)
+            .await;
+        Ok(v1::Friend {
+            user: Some(other_user),
+            status: v1::FriendStatus::Accepted as i32,
+        })
+    }
+
+    /// Publish a `FriendUpdate` carrying `other_user`'s record to `recipient`'s
+    /// own subject.
+    async fn publish_friend_update(
+        &self,
+        recipient: UserId,
+        other_user: v1::User,
+        status: v1::FriendStatus,
+        removed: bool,
+    ) {
+        let payload = FramePayload::FriendUpdate(v1::FriendUpdate {
+            friend: Some(v1::Friend {
+                user: Some(other_user),
+                status: status as i32,
+            }),
+            removed,
+        });
+        let event = self.make_event(0, vec![recipient.raw()], false, payload);
+        self.publish(Subject::User(recipient), event).await;
+    }
+
+    /// Tell both sides a friendship is gone (each gets the other's record so the
+    /// client can drop it by id regardless of what's cached).
+    async fn publish_friend_removed(&self, actor: UserId, other: UserId) {
+        if let Ok(other_user) = self.load_user(other).await {
+            self.publish_friend_update(actor, other_user, v1::FriendStatus::Unspecified, true)
+                .await;
+        }
+        if let Ok(actor_user) = self.load_user(actor).await {
+            self.publish_friend_update(other, actor_user, v1::FriendStatus::Unspecified, true)
+                .await;
+        }
+    }
+
     /// Fan a `UserUpdate` to the user's own subject + every guild and DM they
     /// share, so peers see profile changes (avatar) without a reconnect.
     async fn broadcast_user_update(&self, actor: UserId, user: &v1::User) {
@@ -1368,6 +1653,27 @@ fn dm_key(a: UserId, b: UserId) -> String {
         (b.raw(), a.raw())
     };
     format!("{lo}:{hi}")
+}
+
+/// Canonical ordered `(lo, hi)` user-id pair for the `friendships` PK.
+fn friend_pair(a: UserId, b: UserId) -> (i64, i64) {
+    if a.raw() <= b.raw() {
+        (a.as_i64(), b.as_i64())
+    } else {
+        (b.as_i64(), a.as_i64())
+    }
+}
+
+/// The friendship's status from `actor`'s point of view (pending requests split
+/// into incoming vs outgoing by who the requester was).
+fn friend_status(status: i16, requester_id: i64, actor: UserId) -> v1::FriendStatus {
+    if status == FRIEND_ACCEPTED {
+        v1::FriendStatus::Accepted
+    } else if requester_id == actor.as_i64() {
+        v1::FriendStatus::PendingOutgoing
+    } else {
+        v1::FriendStatus::PendingIncoming
+    }
 }
 
 fn ms(t: OffsetDateTime) -> u64 {

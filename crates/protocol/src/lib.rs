@@ -126,6 +126,7 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         ReactionUpdate(_) => 114,
         UserUpdate(_) => 115,
         ReadMarkerUpdate(_) => 116,
+        FriendUpdate(_) => 117,
     }
 }
 

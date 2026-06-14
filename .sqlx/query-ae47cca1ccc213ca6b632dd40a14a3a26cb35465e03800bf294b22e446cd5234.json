@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE friendships SET status = $3, updated_at = now() WHERE user_lo = $1 AND user_hi = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ae47cca1ccc213ca6b632dd40a14a3a26cb35465e03800bf294b22e446cd5234"
+}

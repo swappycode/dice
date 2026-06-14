@@ -162,6 +162,19 @@ fn sorted(mut v: Vec<u64>) -> Vec<u64> {
     v
 }
 
+/// The next `FriendUpdate` on a subject, skipping the `DmChannelCreate` that an
+/// accept emits first (accept opens/ensures the DM before publishing accepted).
+async fn next_friend_update(sub: &mut BusSubscription) -> v1::FriendUpdate {
+    loop {
+        let ev = next_event(sub).await;
+        match dispatch(&ev) {
+            frame::Payload::FriendUpdate(fu) => return fu.clone(),
+            frame::Payload::DmChannelCreate(_) => continue,
+            other => panic!("expected FriendUpdate, got {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn create_guild_creates_general_and_publishes_guild_create() {
     let ctx = Ctx::new(1).await;
@@ -1117,6 +1130,124 @@ async fn sync_user_state_builds_the_full_ready_snapshot() {
     let state_b = ctx.svc.sync_user_state(b).await.unwrap();
     assert!(state_b.guilds.iter().any(|g2| g2.id == guild.id));
     assert!(state_b.dm_channels.iter().any(|c| c.id == dm.id));
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
+async fn friends_request_accept_list_and_remove() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let a_name = format!("ct{}", a.raw());
+    let b_name = format!("ct{}", b.raw());
+
+    let mut sub_a = ctx.bus.subscribe(Subject::User(a)).await.unwrap();
+    let mut sub_b = ctx.bus.subscribe(Subject::User(b)).await.unwrap();
+
+    // Self and unknown-username are rejected.
+    assert!(matches!(
+        ctx.svc.add_friend(a, &a_name).await.unwrap_err(),
+        ChatError::InvalidArgument(_)
+    ));
+    assert!(matches!(
+        ctx.svc
+            .add_friend(a, "nobody_at_all_xyz")
+            .await
+            .unwrap_err(),
+        ChatError::NotFound
+    ));
+
+    // a requests b: outgoing for a, incoming for b — published live to each.
+    let f = ctx.svc.add_friend(a, &b_name).await.unwrap();
+    assert_eq!(f.user.as_ref().unwrap().id, b.raw());
+    assert_eq!(f.status, v1::FriendStatus::PendingOutgoing as i32);
+
+    let fu = next_friend_update(&mut sub_a).await;
+    assert!(!fu.removed);
+    let fr = fu.friend.unwrap();
+    assert_eq!(fr.user.unwrap().id, b.raw());
+    assert_eq!(fr.status, v1::FriendStatus::PendingOutgoing as i32);
+
+    let fu = next_friend_update(&mut sub_b).await;
+    let fr = fu.friend.unwrap();
+    assert_eq!(fr.user.unwrap().id, a.raw());
+    assert_eq!(fr.status, v1::FriendStatus::PendingIncoming as i32);
+
+    // Lists reflect both perspectives.
+    let la = ctx.svc.list_friends(a).await.unwrap();
+    assert_eq!(la.friends.len(), 1);
+    assert_eq!(
+        la.friends[0].status,
+        v1::FriendStatus::PendingOutgoing as i32
+    );
+    let lb = ctx.svc.list_friends(b).await.unwrap();
+    assert_eq!(
+        lb.friends[0].status,
+        v1::FriendStatus::PendingIncoming as i32
+    );
+
+    // The requester cannot accept their own request.
+    assert!(matches!(
+        ctx.svc.accept_friend(a, b).await.unwrap_err(),
+        ChatError::Forbidden(_)
+    ));
+
+    // b accepts: a DM is opened + FriendUpdate{accepted} reaches both.
+    let acc = ctx.svc.accept_friend(b, a).await.unwrap();
+    assert_eq!(acc.user.as_ref().unwrap().id, a.raw());
+    assert_eq!(acc.status, v1::FriendStatus::Accepted as i32);
+
+    for (sub, other) in [(&mut sub_a, b.raw()), (&mut sub_b, a.raw())] {
+        let fu = next_friend_update(sub).await;
+        assert!(!fu.removed);
+        let fr = fu.friend.unwrap();
+        assert_eq!(fr.user.unwrap().id, other);
+        assert_eq!(fr.status, v1::FriendStatus::Accepted as i32);
+    }
+
+    // Accepted in both lists; the DM now exists.
+    assert_eq!(
+        ctx.svc.list_friends(a).await.unwrap().friends[0].status,
+        v1::FriendStatus::Accepted as i32
+    );
+    let state = ctx.svc.sync_user_state(a).await.unwrap();
+    assert!(
+        state
+            .dm_channels
+            .iter()
+            .any(|c| c.recipient_ids.contains(&b.raw())),
+        "accept opened a DM"
+    );
+
+    // Remove: both sides get FriendUpdate{removed}; lists go empty.
+    ctx.svc.remove_friend(a, b).await.unwrap();
+    for sub in [&mut sub_a, &mut sub_b] {
+        let fu = next_friend_update(sub).await;
+        assert!(fu.removed, "removal is flagged");
+    }
+    assert!(ctx.svc.list_friends(a).await.unwrap().friends.is_empty());
+    assert!(ctx.svc.list_friends(b).await.unwrap().friends.is_empty());
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
+async fn friend_request_can_be_declined() {
+    let ctx = Ctx::new(2).await;
+    let (a, b) = (ctx.users[0], ctx.users[1]);
+    let b_name = format!("ct{}", b.raw());
+
+    ctx.svc.add_friend(a, &b_name).await.unwrap();
+    // b declines the incoming request.
+    ctx.svc.decline_friend(b, a).await.unwrap();
+    assert!(ctx.svc.list_friends(a).await.unwrap().friends.is_empty());
+    assert!(ctx.svc.list_friends(b).await.unwrap().friends.is_empty());
+
+    // Declining again (nothing pending) is NotFound.
+    assert!(matches!(
+        ctx.svc.decline_friend(b, a).await.unwrap_err(),
+        ChatError::NotFound
+    ));
 
     ctx.finish().await;
 }

@@ -165,4 +165,29 @@ pub trait Chat: Send + Sync {
         actor: UserId,
         media: Option<MediaId>,
     ) -> Result<v1::User, ChatError>;
+
+    // ---- Friends / social (M3) ----
+
+    /// The caller's friends + pending requests (both directions), each carrying
+    /// the other user's full record. Backs the Friends page.
+    async fn list_friends(&self, actor: UserId) -> Result<v1::FriendList, ChatError>;
+
+    /// Send a friend request to `username` (case-insensitive). If that user has
+    /// already sent the caller a pending request, this accepts it instead.
+    /// Publishes `FriendUpdate` to both users; returns the relationship from the
+    /// caller's perspective.
+    async fn add_friend(&self, actor: UserId, username: &str) -> Result<v1::Friend, ChatError>;
+
+    /// Accept a pending INCOMING request from `other`. Ensures a DM (so they see
+    /// each other's presence and can message) and publishes `FriendUpdate`
+    /// (accepted) to both; returns the relationship from the caller's side.
+    async fn accept_friend(&self, actor: UserId, other: UserId) -> Result<v1::Friend, ChatError>;
+
+    /// Decline an incoming, or cancel an outgoing, PENDING request with `other`.
+    /// Publishes `FriendUpdate{removed}` to both.
+    async fn decline_friend(&self, actor: UserId, other: UserId) -> Result<(), ChatError>;
+
+    /// Remove an ACCEPTED friend `other` (any DM is kept). Publishes
+    /// `FriendUpdate{removed}` to both.
+    async fn remove_friend(&self, actor: UserId, other: UserId) -> Result<(), ChatError>;
 }

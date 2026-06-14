@@ -70,6 +70,10 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/guilds/join", post(join_guild))
         .route("/v1/channels", post(create_channel))
         .route("/v1/dms", post(open_dm))
+        .route("/v1/friends", get(list_friends).post(add_friend))
+        .route("/v1/friends/{user_id}/accept", post(accept_friend))
+        .route("/v1/friends/{user_id}/decline", post(decline_friend))
+        .route("/v1/friends/{user_id}/remove", post(remove_friend))
         .route("/v1/unread", get(unread_counts))
         .route("/v1/channels/{channel_id}/read", post(mark_read))
         .route("/v1/users/@me/avatar", put(set_avatar))
@@ -470,6 +474,77 @@ async fn open_dm(
         .await
     {
         Ok(channel) => proto_response(StatusCode::OK, &channel),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// `GET /v1/friends` (bearer): the caller's friends + pending requests.
+async fn list_friends(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+) -> Response {
+    match gw.deps.chat.list_friends(user).await {
+        Ok(list) => proto_response(StatusCode::OK, &list),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// `POST /v1/friends` (bearer): send a friend request by username (accepts a
+/// reverse-pending request if one exists). Returns the relationship.
+async fn add_friend(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Proto(req): Proto<v1::AddFriendRequest>,
+) -> Response {
+    match gw.deps.chat.add_friend(user, &req.username).await {
+        Ok(friend) => proto_response(StatusCode::OK, &friend),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// `POST /v1/friends/{user_id}/accept` (bearer): accept a pending incoming
+/// request. Returns the accepted relationship.
+async fn accept_friend(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(user_id): Path<String>,
+) -> Response {
+    let Ok(other) = user_id.parse::<UserId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid user id", 0);
+    };
+    match gw.deps.chat.accept_friend(user, other).await {
+        Ok(friend) => proto_response(StatusCode::OK, &friend),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// `POST /v1/friends/{user_id}/decline` (bearer): decline an incoming or cancel
+/// an outgoing pending request. 204.
+async fn decline_friend(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(user_id): Path<String>,
+) -> Response {
+    let Ok(other) = user_id.parse::<UserId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid user id", 0);
+    };
+    match gw.deps.chat.decline_friend(user, other).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_chat_error(error),
+    }
+}
+
+/// `POST /v1/friends/{user_id}/remove` (bearer): remove an accepted friend. 204.
+async fn remove_friend(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(user_id): Path<String>,
+) -> Response {
+    let Ok(other) = user_id.parse::<UserId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid user id", 0);
+    };
+    match gw.deps.chat.remove_friend(user, other).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => map_chat_error(error),
     }
 }
