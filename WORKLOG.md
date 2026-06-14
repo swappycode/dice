@@ -7,6 +7,40 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M3 (2/n): in-app theme builder
+
+**Branch:** `main`. Two client commits (`custom-theme state/plumbing` / `builder dialog`). Frontend gate
+green (`tsc` + vite; CSS **50.7 KB** main + a separate **2.5 KB** lazy builder chunk, builder JS a **4.5 KB**
+chunk kept out of the initial/login bundle). No Rust / proto / SQL.
+
+**Custom theme** = a base built-in + five COLOR controls (accent / surface / text / backdrop / titlebar);
+everything else (bevels, button/rail/selection gradients, dim text, frame, rings, ink) is *derived* via
+`color-mix` toward white/black — direction-agnostic, so it reads on any light OR dark surface. Applied as
+inline `--*` overrides on `:root` (inline beats the base `[data-theme]` rule), persisted as a JSON map
+(`dice.customTheme` = `{base, controls, overrides}`), and re-applied by the `index.html` pre-paint before
+first paint (no FOUC). `installThemeEffect` re-derives on every edit for live preview and clears stale inline
+props when switching back to a built-in. Colors only, NO image upload (user decision).
+
+**Builder UI** (`ThemeBuilderDialog`, lazy-loaded): five native `<input type=color>` rows + a base picker +
+a live WCAG **contrast readout** (text/surface, accent/surface) + Save / Cancel (reverts the live preview) /
+Reset. Reached via a "Custom…" entry in the StatusBar theme dropdown + a ✎ button to re-edit. New tokens:
+`--c-brand-ink` (from 1/n) and `--c-page-ink`.
+
+**Adversarial review (7 agents) + fixes.** Confirmed + fixed: **(F1, high)** `readableOn` ink-picker
+threshold was mis-tuned (chose white at ~2:1 in the 0.18–0.42 luminance band) → now picks the higher-contrast
+ink by direct comparison; **(F2)** the login footer keyed ink to the titlebar but sits on the backdrop → new
+`--c-page-ink` derived from the backdrop; **(F4)** the dialog's Escape handler sat on a non-focused div →
+focus the dialog on mount (`tabindex=-1`). **Known limitation (F3, deferred):** `::-webkit-scrollbar` colors
+are hardcoded per `[data-theme]` (Luna/Aero only) and can't be reached by inline var overrides, so a
+Luna/Aero-based custom flipped to a dark surface keeps a light scrollbar — the builder steers users to pick a
+base with matching light/dark polarity; full fix = tokenize scrollbar colors + derive them (future).
+
+**M3 remaining:** **Voice** (headline — `voice-core` + `voice-service` SFU over QUIC datagrams),
+**Friends/social** (`friendships` + REST + `FriendUpdate` dispatch **#117** + presence interest on accept;
+client Friends page). Next free Frame dispatch # = **117**.
+
+---
+
 ## 2026-06-14 — M3 (1/n): login-card cohesion fix + Vantablack OLED theme
 
 **Branch:** `main`. Three client commits (`login-ui` / `vantablack` / `bubble-contrast`).
