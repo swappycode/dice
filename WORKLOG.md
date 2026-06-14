@@ -7,6 +7,41 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M3 (5/n): Voice — phase 3 transport (SFU datagrams over QUIC)
+
+**Branch:** `main`. Two commits (`23b2ce4` server transport / `e2f55f0` host VoiceData). All
+gate sets green: full `just check` (incl. the new real-QUIC voice E2E + the existing QUIC/resume
+suites), host clippy `-D warnings` + compile. No new dispatch # (datagrams are out-of-band, not
+Frames). New api-gateway dep `quinn` (already in-tree).
+
+**What shipped — the *verifiable* half of phase 3.** Voice audio now flows **client → gateway SFU →
+other clients over QUIC datagrams**, proven end-to-end with **synthetic packets over real QUIC** (no
+audio hardware). This is the transport the cpal capture/playback layer plugs into.
+
+- **network-core:** QUIC datagram I/O — server `QuicTransport` exposes `quic_connection()` (new
+  `FramedTransport` method; `None` for WSS), client `QuicTransport::connection()` +
+  `AnyTransport::quic_connection()`. The driver publishes the live QUIC connection in a shared slot on
+  Ready; `GatewayHandle::send_voice()` sends on it; a per-connection reader task surfaces inbound
+  datagrams as `ClientEvent::VoiceData` (try_send → dropped under queue pressure; voice is
+  loss-tolerant). Identify advertises `CAP_VOICE_DATAGRAMS` on QUIC. `ApiClient::create_channel`.
+- **api-gateway `voice_dg`:** a `VoiceDatagrams` registry of voice-capable QUIC connections keyed by
+  user; a per-connection read pump forwards each datagram via `Voice::forward`; the registry is the
+  `VoiceSink` (fan-out via `send_datagram`). Registered per transport-attach in `run_ready` behind an
+  RAII guard (unregister + abort pump on detach/teardown), so voice survives resume. Capability bit is
+  read/logged; QUIC presence is the functional enable.
+- **host:** the bridge handles `ClientEvent::VoiceData` (drops the bytes for now — the audio pipeline
+  decodes them on-hardware).
+- **E2E:** two QUIC clients in one voice channel — A's datagram reaches B verbatim, never echoes to A.
+
+**Remaining = Voice phase 3 audio-device layer + phase 4 (the cowork hand-off).** Genuinely
+not-doable-here (an agent can't verify sound; Opus/WebRTC are C/C++ deps): `cpal` capture/playback
+(cpal builds clean here; `opus` crate FAILS on MSVC — use `audiopus` or system libopus), the WebRTC
+APM (AEC/NS/AGC), PTT + VAD, the device-picker dialog, real-VAD speaking orbs, and the headline
+<5% CPU / 5%-loss measurement. Plan + the cpal pipeline seams in `docs/ROADMAP.md` → M3 Voice
+phase 3–4. The transport above (`send_voice` / `VoiceData` / the SFU) is what that layer feeds.
+
+---
+
 ## 2026-06-14 — M3 (4/n): Voice — phases 1–2 (signaling + SFU), buildable slice
 
 **Branch:** `main`. Eight commits (`add02b0`→`d3068ed`). All gate sets green: `just check`
