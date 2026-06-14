@@ -1,11 +1,9 @@
 import { createSignal, Show, type Component } from "solid-js";
 import { ipc } from "../../lib/ipc";
 import type { PresenceStatus } from "../../lib/types";
-import { resetDirectory } from "../../stores/guilds";
-import { resetMessages } from "../../stores/messages";
-import { presenceOf, resetPresence } from "../../stores/presence";
+import { resetClientState } from "../../gateway/dispatcher";
+import { presenceOf } from "../../stores/presence";
 import { currentUser, setSession } from "../../stores/session";
-import { resetUnread } from "../../stores/unread";
 import { SecurityDialog } from "../dialogs/SecurityDialog";
 import { Avatar } from "./Avatar";
 import { PresenceOrb } from "./PresenceOrb";
@@ -46,10 +44,7 @@ export const SelfStrip: Component = () => {
 
   async function logOff(): Promise<void> {
     await ipc.logout();
-    resetMessages();
-    resetPresence();
-    resetDirectory();
-    resetUnread();
+    resetClientState();
     setSession(null);
   }
 

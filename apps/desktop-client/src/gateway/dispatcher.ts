@@ -24,6 +24,7 @@ import {
   applyReactionDelta,
   resetMessages,
 } from "../stores/messages";
+import { setHomeTab } from "../components/home/homeTab";
 import { applyFriendUpdate, loadFriends, resetFriends } from "../stores/friends";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
 import {
@@ -115,17 +116,25 @@ function dispatch(ev: DiceEvent): void {
     case "sessionExpired":
       // The host already cleared credentials + cache; drop to login cleanly
       // instead of stranding the user on an "Offline" shell (Issue 1).
-      resetMessages();
-      resetPresence();
-      resetDirectory();
-      resetUnread();
-      resetFriends();
+      resetClientState();
       setConnState("idle");
       setTransport(null);
       setLoginNotice("Your session expired. Please log in again.");
       setSession(null);
       break;
   }
+}
+
+/** Wipe all per-account client stores. The ONE place both logout paths (the
+ *  SelfStrip "Log off" button and the sessionExpired dispatch) clear state, so
+ *  a newly-added store can't be forgotten in one path and leak across accounts. */
+export function resetClientState(): void {
+  resetMessages();
+  resetPresence();
+  resetDirectory();
+  resetUnread();
+  resetFriends();
+  setHomeTab("messages");
 }
 
 export function installDispatcher(): () => void {
