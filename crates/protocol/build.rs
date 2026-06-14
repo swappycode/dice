@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../proto/dice/v1/presence.proto",
         "../../proto/dice/v1/user.proto",
         "../../proto/dice/v1/friend.proto",
+        "../../proto/dice/v1/voice.proto",
         "../../proto/dice/internal/v1/events.proto",
         "../../proto/dice/internal/v1/rpc.proto",
     ];

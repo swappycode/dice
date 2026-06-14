@@ -20,7 +20,7 @@ message ClientProperties {
 message Identify {
   string access_token = 1;       // JWT from auth REST
   ClientProperties properties = 2;
-  uint64 capabilities = 3;       // bit 0 reserved: typing via QUIC datagram (post-M1)
+  uint64 capabilities = 3;       // bit 0: voice over QUIC datagrams (M3); see dice_protocol::CAP_VOICE_DATAGRAMS
   uint32 protocol_version = 4;   // minor; major is in ALPN/URL
 }
 

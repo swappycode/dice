@@ -17,6 +17,7 @@ import "dice/v1/guild.proto";
 import "dice/v1/presence.proto";
 import "dice/v1/user.proto";
 import "dice/v1/friend.proto";
+import "dice/v1/voice.proto";
 
 message Frame {
   // Per-session monotonic sequence, gateway-assigned. >0 ONLY on sequenced
@@ -66,5 +67,8 @@ message Frame {
     UserUpdate user_update = 115;
     ReadMarkerUpdate read_marker_update = 116;
     FriendUpdate friend_update = 117;
+    VoiceJoin voice_join = 118;     // ephemeral: not replayed on resume
+    VoiceLeave voice_leave = 119;   // ephemeral
+    VoiceState voice_state = 120;   // ephemeral
   }
 }

@@ -1,0 +1,65 @@
+// Voice channels (M3). Signaling/state only — the actual Opus audio rides QUIC
+// datagrams (see voice-core + the SFU in voice-service/gateway), never these
+// frames. VoiceJoin/VoiceLeave/VoiceState are dispatches #118/#119/#120,
+// published to a guild's voice subject and delivered EPHEMERALLY (never
+// replayed on resume — the client re-syncs the roster via GET on reconnect).
+syntax = "proto3";
+package dice.v1;
+
+import "dice/v1/common.proto";
+
+// One member's live state in a voice channel.
+message VoiceMember {
+  fixed64 user_id = 1;
+  fixed64 channel_id = 2;
+  fixed64 guild_id = 3;
+  uint32 ssrc = 4;     // synthetic audio-source id for this join (jitter/SFU key)
+  bool muted = 5;      // self-mute (microphone off)
+  bool deafened = 6;   // self-deafen (output off; implies muted on the client)
+  bool speaking = 7;   // currently transmitting (PTT held / VAD active)
+}
+
+// Snapshot of who is in a voice channel right now. Returned by the join REST
+// call and by GET; `users` is a warm dictionary for the members so the client
+// never renders a participant as "unknown".
+message VoiceRoster {
+  fixed64 channel_id = 1;
+  repeated VoiceMember members = 2;
+  repeated User users = 3;
+}
+
+// -- dispatch events (100+, delivered ephemerally) --
+
+// #118 — a user joined a voice channel. Carries the joiner's User (warm
+// dictionary, like GuildMemberAdd) so peers can render them immediately.
+message VoiceJoin {
+  VoiceMember member = 1;
+  User user = 2;
+}
+
+// #119 — a user left a voice channel (left explicitly or disconnected).
+message VoiceLeave {
+  fixed64 channel_id = 1;
+  fixed64 user_id = 2;
+  fixed64 guild_id = 3;
+}
+
+// #120 — a member's mute / deafen / speaking state changed.
+message VoiceState {
+  VoiceMember member = 1;
+}
+
+// -- REST bodies --
+
+// POST /v1/channels/{id}/voice/join — initial self mute/deafen for the join.
+message VoiceJoinRequest {
+  bool muted = 1;
+  bool deafened = 2;
+}
+
+// POST /v1/channels/{id}/voice/state — update the caller's own voice state.
+message VoiceStateRequest {
+  bool muted = 1;
+  bool deafened = 2;
+  bool speaking = 3;
+}

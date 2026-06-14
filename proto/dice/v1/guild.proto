@@ -34,5 +34,6 @@ message JoinGuildRequest { string code = 1; }
 message CreateChannelRequest {
   fixed64 guild_id = 1;
   string name = 2;
+  ChannelKind kind = 3;   // UNSPECIFIED defaults to GUILD_TEXT (back-compat)
 }
 message OpenDmRequest { fixed64 recipient_id = 1; }   // idempotent via dm_key

@@ -26,6 +26,11 @@ pub const RESUME_WINDOW_MS: u32 = 60_000;
 /// WS close code / QUIC application close code = 4000 + ErrorCode.
 pub const CLOSE_CODE_BASE: u32 = 4000;
 
+/// `Identify.capabilities` bit 0: the client sends and accepts voice audio over
+/// QUIC datagrams (the SFU path). Set only on a QUIC transport; over WSS the
+/// gateway leaves it clear and voice audio is unavailable for that session.
+pub const CAP_VOICE_DATAGRAMS: u64 = 1 << 0;
+
 /// Delivery class of a frame. See docs/protocol.md §6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameClass {
@@ -127,6 +132,9 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         UserUpdate(_) => 115,
         ReadMarkerUpdate(_) => 116,
         FriendUpdate(_) => 117,
+        VoiceJoin(_) => 118,
+        VoiceLeave(_) => 119,
+        VoiceState(_) => 120,
     }
 }
 

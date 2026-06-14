@@ -15,6 +15,7 @@ enum ChannelKind {
   CHANNEL_KIND_UNSPECIFIED = 0;
   CHANNEL_KIND_GUILD_TEXT = 1;
   CHANNEL_KIND_DM = 2;
+  CHANNEL_KIND_VOICE = 3;   // guild-scoped audio channel (M3)
 }
 
 message Channel {
