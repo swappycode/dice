@@ -1266,6 +1266,7 @@ dependencies = [
  "dice-event-bus",
  "dice-network-core",
  "dice-protocol",
+ "dice-voice-core",
  "futures-util",
  "keyring",
  "media-service",
@@ -1344,6 +1345,14 @@ dependencies = [
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dice-voice-core"
+version = "0.1.0"
+dependencies = [
+ "bytes",
  "thiserror 2.0.18",
 ]
 

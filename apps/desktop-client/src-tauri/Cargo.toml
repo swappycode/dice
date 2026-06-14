@@ -33,6 +33,7 @@ tauri-build = { version = "2", features = [] }
 dice-network-core = { path = "../../../crates/network-core", default-features = false, features = ["client"] }
 dice-protocol     = { path = "../../../crates/protocol" }
 dice-common       = { path = "../../../crates/common" }
+dice-voice-core   = { path = "../../../crates/voice-core" }
 
 # ---- tauri host ----
 tauri                        = { version = "2", features = [] }

@@ -28,7 +28,7 @@ pub mod transport;
 pub use api::{ApiClient, ApiError, LoginOutcome};
 pub use gateway::{
     ClientEvent, Command, ConnState, ConnStateLite, GatewayClientConfig, GatewayHandle, SendError,
-    connect,
+    VoiceSender, connect,
 };
 pub use policy::{DEFAULT_QUIC_TIMEOUT, PreferredTransport, TransportPolicy};
 pub use quic::{InvalidQuicEndpoint, QuicAddr, QuicEndpoint, QuicTransport};

@@ -71,6 +71,12 @@ pub struct Bridge {
     resync_pending: bool,
     presence_buf: Arc<StdMutex<HashMap<u64, i32>>>,
     flush_scheduled: Arc<AtomicBool>,
+    /// Cloneable voice-datagram sender for the audio engine (set in `run` from
+    /// the gateway handle).
+    voice_sender: Option<dice_network_core::client::VoiceSender>,
+    /// The running voice session, if the user is in a voice channel. Started on
+    /// the self `VoiceJoin` dispatch, dropped on the self `VoiceLeave`.
+    voice: Option<crate::audio::VoiceEngine>,
 }
 
 impl Bridge {
@@ -97,6 +103,8 @@ impl Bridge {
             resync_pending: false,
             presence_buf: Arc::default(),
             flush_scheduled: Arc::new(AtomicBool::new(false)),
+            voice_sender: None,
+            voice: None,
         }
     }
 
@@ -104,6 +112,8 @@ impl Bridge {
     /// commands. `Command::Shutdown` (or the relay closing) cleanly shuts the
     /// driver down.
     pub async fn run(mut self, mut handle: GatewayHandle, mut cmds: mpsc::Receiver<Command>) {
+        // Voice audio sends datagrams independently of the control channel.
+        self.voice_sender = Some(handle.voice_sender());
         enum Next {
             Event(Option<ClientEvent>),
             Cmd(Option<Command>),
@@ -196,11 +206,12 @@ impl Bridge {
                     },
                 );
             }
-            ClientEvent::VoiceData(_bytes) => {
-                // Inbound voice datagram (a voice-core VoiceFrame). The audio
-                // device pipeline (cpal capture/playback + Opus + jitter) is the
-                // on-hardware phase: it will decode `_bytes` here and feed the
-                // per-ssrc jitter buffer. Until then, drop it (never to the UI).
+            ClientEvent::VoiceData(bytes) => {
+                // Inbound voice datagram → the audio engine's playback path
+                // (decode + per-ssrc jitter buffer). Dropped if not in voice.
+                if let Some(engine) = &self.voice {
+                    engine.on_voice_data(bytes);
+                }
             }
         }
         Pump::Continue
@@ -449,6 +460,14 @@ impl Bridge {
             Payload::VoiceJoin(vj) => {
                 // Voice membership lives in the frontend store, not the cache.
                 if let Some(member) = &vj.member {
+                    // Our OWN join starts the audio engine (capture + playback).
+                    if self.is_self(member.user_id)
+                        && self.voice.is_none()
+                        && let Some(sender) = self.voice_sender.clone()
+                    {
+                        tracing::info!(ssrc = member.ssrc, "starting voice audio");
+                        self.voice = Some(crate::audio::VoiceEngine::start(member.ssrc, sender));
+                    }
                     emit_dice(
                         &self.emitter,
                         &DiceEvent::VoiceJoin {
@@ -459,6 +478,10 @@ impl Bridge {
                 }
             }
             Payload::VoiceLeave(vl) => {
+                // Our OWN leave stops the audio engine (drop = stop thread).
+                if self.is_self(vl.user_id) {
+                    self.voice = None;
+                }
                 emit_dice(
                     &self.emitter,
                     &DiceEvent::VoiceLeave {
@@ -485,6 +508,16 @@ impl Bridge {
                 }
             }
         }
+    }
+
+    /// Whether `user_id` is the logged-in user (drives self-only voice engine
+    /// start/stop).
+    fn is_self(&self, user_id: u64) -> bool {
+        self.current_user
+            .lock()
+            .expect("user lock")
+            .as_ref()
+            .is_some_and(|u| u.id == user_id)
     }
 
     /// Coalesce presence: update the RAM map immediately, buffer the emit,

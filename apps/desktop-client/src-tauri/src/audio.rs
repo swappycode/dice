@@ -10,6 +10,19 @@
 //! Codec correctness is unit-tested here (encode→decode round-trip) without any
 //! audio hardware; the device I/O is verified on-hardware.
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{FromSample, Sample, SizedSample};
+use dice_network_core::client::VoiceSender;
+use dice_protocol::bytes::Bytes;
+use dice_voice_core::{JitterBuffer, JitterConfig, Playout, VoiceFrame};
+
 /// Voice sample rate (Hz). Opus-native; the whole pipeline runs at this rate.
 pub const SAMPLE_RATE: u32 = 48_000;
 /// Frame duration (ms). 20 ms is the Opus/voice default.
@@ -64,13 +77,312 @@ fn opus_err(e: audiopus::Error) -> CodecError {
 
 impl VoiceCodec for OpusCodec {
     fn encode(&mut self, pcm: &[i16]) -> Result<Vec<u8>, CodecError> {
-        let n = self.encoder.encode(pcm, &mut self.scratch).map_err(opus_err)?;
+        let n = self
+            .encoder
+            .encode(pcm, &mut self.scratch)
+            .map_err(opus_err)?;
         Ok(self.scratch[..n].to_vec())
     }
 
     fn decode(&mut self, packet: Option<&[u8]>, out: &mut [i16]) -> Result<usize, CodecError> {
         self.decoder.decode(packet, out, false).map_err(opus_err)
     }
+}
+
+// ---------------------------------------------------------------- conversions
+
+/// Clamp + scale a normalized f32 sample to i16 (Opus input).
+fn f32_to_i16(s: f32) -> i16 {
+    (s.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16
+}
+
+/// i16 sample → normalized f32 (cpal output).
+fn i16_to_f32(s: i16) -> f32 {
+    f32::from(s) / 32_768.0
+}
+
+/// Clamp a mixed (summed) i32 accumulator back to i16.
+fn mix_clip(acc: i32) -> i16 {
+    acc.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+}
+
+// -------------------------------------------------------------- voice engine
+
+/// One remote speaker's playout state: a jitter buffer + its own Opus decoder
+/// (decoder state is per-stream) + a reusable decode scratch.
+struct RemoteStream {
+    jitter: JitterBuffer,
+    codec: OpusCodec,
+    pcm: Vec<i16>,
+}
+
+impl RemoteStream {
+    fn new() -> Result<Self, CodecError> {
+        Ok(Self {
+            jitter: JitterBuffer::new(JitterConfig::default()),
+            codec: OpusCodec::new()?,
+            pcm: vec![0i16; FRAME_SAMPLES],
+        })
+    }
+}
+
+/// A live voice session. A dedicated thread owns the (Windows-`!Send`) cpal
+/// streams and runs capture→encode→send and recv→jitter→decode→playback; the
+/// bridge talks to it only through `Send` channels. Created on join, dropped on
+/// leave (drop stops the thread + streams).
+pub struct VoiceEngine {
+    /// Inbound voice datagrams (raw `VoiceFrame` bytes) → playback.
+    inbox: mpsc::Sender<Bytes>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl VoiceEngine {
+    /// Start capture + playback. `ssrc` stamps this client's outgoing frames;
+    /// `sender` ships them on the active QUIC connection.
+    pub fn start(ssrc: u32, sender: VoiceSender) -> Self {
+        let (inbox_tx, inbox_rx) = mpsc::channel::<Bytes>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("dice-voice".to_owned())
+            .spawn(move || {
+                if let Err(error) = run_engine(ssrc, &sender, &inbox_rx, &stop_thread) {
+                    tracing::error!(%error, "voice engine stopped");
+                }
+            })
+            .expect("spawn voice thread");
+        Self {
+            inbox: inbox_tx,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// Feed an inbound voice datagram to playback (best-effort; dropped if the
+    /// engine is gone — voice is loss-tolerant).
+    pub fn on_voice_data(&self, bytes: Bytes) {
+        let _ = self.inbox.send(bytes);
+    }
+}
+
+impl Drop for VoiceEngine {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+type SharedPcm = Arc<Mutex<VecDeque<f32>>>;
+
+/// Runs on the dedicated voice thread: owns the cpal streams + the encode/decode
+/// loop until `stop` is set.
+fn run_engine(
+    ssrc: u32,
+    sender: &VoiceSender,
+    inbox: &mpsc::Receiver<Bytes>,
+    stop: &AtomicBool,
+) -> anyhow::Result<()> {
+    let host = cpal::default_host();
+    let input = host
+        .default_input_device()
+        .ok_or_else(|| anyhow::anyhow!("no default input device"))?;
+    let output = host
+        .default_output_device()
+        .ok_or_else(|| anyhow::anyhow!("no default output device"))?;
+    let in_cfg = input.default_input_config()?;
+    let out_cfg = output.default_output_config()?;
+    if in_cfg.sample_rate().0 != SAMPLE_RATE || out_cfg.sample_rate().0 != SAMPLE_RATE {
+        // No resampler yet (Step-1 devices are 48 kHz); warn and proceed.
+        tracing::warn!(
+            in_rate = in_cfg.sample_rate().0,
+            out_rate = out_cfg.sample_rate().0,
+            "voice device not at 48 kHz — pitch will be off until resampling lands"
+        );
+    }
+
+    let capture: SharedPcm = Arc::new(Mutex::new(VecDeque::new()));
+    let playback: SharedPcm = Arc::new(Mutex::new(VecDeque::new()));
+
+    let in_stream = build_capture(&input, &in_cfg, Arc::clone(&capture))?;
+    let out_stream = build_playback(&output, &out_cfg, Arc::clone(&playback))?;
+    in_stream.play()?;
+    out_stream.play()?;
+    tracing::info!(ssrc, "voice engine running");
+
+    let mut encoder = OpusCodec::new()?;
+    let mut seq: u16 = 0;
+    let mut timestamp: u32 = 0;
+    let mut frame = vec![0i16; FRAME_SAMPLES];
+    let mut remotes: HashMap<u32, RemoteStream> = HashMap::new();
+    // Keep ~2 frames (40 ms) queued for the output device.
+    let target_backlog = FRAME_SAMPLES * 2;
+
+    while !stop.load(Ordering::Relaxed) {
+        // 1. Capture → encode → send every full 20 ms frame.
+        loop {
+            let chunk = match capture.lock() {
+                Ok(mut cap) if cap.len() >= FRAME_SAMPLES => {
+                    cap.drain(..FRAME_SAMPLES).collect::<Vec<f32>>()
+                }
+                _ => break,
+            };
+            for (dst, &s) in frame.iter_mut().zip(chunk.iter()) {
+                *dst = f32_to_i16(s);
+            }
+            if let Ok(payload) = encoder.encode(&frame) {
+                let vf = VoiceFrame {
+                    ssrc,
+                    seq,
+                    timestamp,
+                    marker: seq == 0,
+                    payload: Bytes::from(payload),
+                };
+                sender.send(vf.encode());
+                seq = seq.wrapping_add(1);
+                timestamp = timestamp.wrapping_add(FRAME_SAMPLES as u32);
+            }
+        }
+
+        // 2. Inbound datagrams → per-ssrc jitter buffers.
+        while let Ok(bytes) = inbox.try_recv() {
+            if let Ok(vf) = VoiceFrame::decode(bytes) {
+                match remotes.entry(vf.ssrc) {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        e.get_mut().jitter.push(vf);
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        if let Ok(rs) = RemoteStream::new() {
+                            e.insert(rs).jitter.push(vf);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Playout: while the output backlog is low, pop one frame per remote,
+        //    decode (PLC on a gap), mix, and queue. The backlog gate paces this
+        //    to the real-time output rate.
+        let backlog = playback.lock().map(|p| p.len()).unwrap_or(target_backlog);
+        if backlog < target_backlog {
+            let mut mixed = [0i32; FRAME_SAMPLES];
+            let mut produced = false;
+            for rs in remotes.values_mut() {
+                let decoded = match rs.jitter.pop() {
+                    Some(Playout::Frame(vf)) => {
+                        rs.codec.decode(Some(vf.payload.as_ref()), &mut rs.pcm)
+                    }
+                    Some(Playout::Conceal) => rs.codec.decode(None, &mut rs.pcm),
+                    None => continue,
+                };
+                if let Ok(n) = decoded {
+                    for (m, &s) in mixed.iter_mut().zip(rs.pcm[..n.min(FRAME_SAMPLES)].iter()) {
+                        *m += i32::from(s);
+                    }
+                    produced = true;
+                }
+            }
+            if produced && let Ok(mut pb) = playback.lock() {
+                for &m in &mixed {
+                    pb.push_back(i16_to_f32(mix_clip(m)));
+                }
+            }
+        }
+
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    tracing::info!("voice engine stopped");
+    Ok(())
+}
+
+/// Capture stream: downmix each frame to mono f32 into `buf`, bounding backlog.
+fn build_capture(
+    device: &cpal::Device,
+    cfg: &cpal::SupportedStreamConfig,
+    buf: SharedPcm,
+) -> anyhow::Result<cpal::Stream> {
+    let config = cfg.config();
+    Ok(match cfg.sample_format() {
+        cpal::SampleFormat::F32 => capture_stream::<f32>(device, &config, buf)?,
+        cpal::SampleFormat::I16 => capture_stream::<i16>(device, &config, buf)?,
+        cpal::SampleFormat::U16 => capture_stream::<u16>(device, &config, buf)?,
+        other => anyhow::bail!("unsupported input sample format: {other:?}"),
+    })
+}
+
+fn capture_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    buf: SharedPcm,
+) -> anyhow::Result<cpal::Stream>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let channels = config.channels as usize;
+    let max_backlog = config.sample_rate.0 as usize; // ~1 s safety cap
+    let stream = device.build_input_stream(
+        config,
+        move |data: &[T], _: &cpal::InputCallbackInfo| {
+            let Ok(mut b) = buf.lock() else { return };
+            for frame in data.chunks(channels) {
+                let mono =
+                    frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>() / channels as f32;
+                b.push_back(mono);
+            }
+            while b.len() > max_backlog {
+                b.pop_front();
+            }
+        },
+        |error| tracing::warn!(%error, "voice input stream error"),
+        None,
+    )?;
+    Ok(stream)
+}
+
+/// Playback stream: pull mono f32 from `buf` (silence on underrun), fan to all
+/// output channels.
+fn build_playback(
+    device: &cpal::Device,
+    cfg: &cpal::SupportedStreamConfig,
+    buf: SharedPcm,
+) -> anyhow::Result<cpal::Stream> {
+    let config = cfg.config();
+    Ok(match cfg.sample_format() {
+        cpal::SampleFormat::F32 => playback_stream::<f32>(device, &config, buf)?,
+        cpal::SampleFormat::I16 => playback_stream::<i16>(device, &config, buf)?,
+        cpal::SampleFormat::U16 => playback_stream::<u16>(device, &config, buf)?,
+        other => anyhow::bail!("unsupported output sample format: {other:?}"),
+    })
+}
+
+fn playback_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    buf: SharedPcm,
+) -> anyhow::Result<cpal::Stream>
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let channels = config.channels as usize;
+    let stream = device.build_output_stream(
+        config,
+        move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+            let mut guard = buf.lock().ok();
+            for out_frame in data.chunks_mut(channels) {
+                let mono = guard.as_mut().and_then(|b| b.pop_front()).unwrap_or(0.0);
+                let sample = T::from_sample(mono);
+                for x in out_frame.iter_mut() {
+                    *x = sample;
+                }
+            }
+        },
+        |error| tracing::warn!(%error, "voice output stream error"),
+        None,
+    )?;
+    Ok(stream)
 }
 
 #[cfg(test)]
@@ -104,5 +416,21 @@ mod tests {
         // Packet loss: PLC still yields a full frame.
         let concealed = codec.decode(None, &mut out).unwrap();
         assert_eq!(concealed, FRAME_SAMPLES, "PLC produces a frame on loss");
+    }
+
+    #[test]
+    fn sample_conversions_round_trip_and_clamp() {
+        // f32 → i16 → f32 stays close for in-range samples.
+        for &s in &[-1.0f32, -0.5, 0.0, 0.5, 0.99] {
+            let back = i16_to_f32(f32_to_i16(s));
+            assert!((back - s).abs() < 0.001, "{s} -> {back}");
+        }
+        // Out-of-range f32 clamps, not wraps.
+        assert_eq!(f32_to_i16(2.0), i16::MAX);
+        assert_eq!(f32_to_i16(-2.0), -i16::MAX);
+        // Mixing clamps instead of overflowing.
+        assert_eq!(mix_clip(i32::from(i16::MAX) * 3), i16::MAX);
+        assert_eq!(mix_clip(i32::from(i16::MIN) * 3), i16::MIN);
+        assert_eq!(mix_clip(100), 100);
     }
 }

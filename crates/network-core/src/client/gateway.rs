@@ -227,6 +227,24 @@ pub struct SendError;
 /// not on QUIC (no voice).
 type VoiceConn = Arc<std::sync::Mutex<Option<quinn::Connection>>>;
 
+/// A cheap, cloneable handle for sending voice datagrams on the active QUIC
+/// connection, detached from the [`GatewayHandle`] so the audio capture thread
+/// can send without touching the bridge. Best-effort + loss-tolerant.
+#[derive(Clone)]
+pub struct VoiceSender {
+    conn: VoiceConn,
+}
+
+impl VoiceSender {
+    /// Send one voice datagram on the active QUIC connection (no-op when not
+    /// connected / not on QUIC / too large).
+    pub fn send(&self, packet: dice_protocol::bytes::Bytes) {
+        if let Some(conn) = self.conn.lock().expect("voice slot").clone() {
+            let _ = conn.send_datagram(packet);
+        }
+    }
+}
+
 /// Caller-side handle: command sink, event source, state watch.
 pub struct GatewayHandle {
     cmds: mpsc::Sender<Command>,
@@ -246,8 +264,14 @@ impl GatewayHandle {
     /// not on QUIC, or the datagram is too large — voice is loss-tolerant, so
     /// failures are dropped, never queued or retried.
     pub fn send_voice(&self, packet: dice_protocol::bytes::Bytes) {
-        if let Some(conn) = self.voice_conn.lock().expect("voice slot").clone() {
-            let _ = conn.send_datagram(packet);
+        self.voice_sender().send(packet);
+    }
+
+    /// A cloneable [`VoiceSender`] over the active connection — hand it to the
+    /// audio capture thread so it can send datagrams independently.
+    pub fn voice_sender(&self) -> VoiceSender {
+        VoiceSender {
+            conn: self.voice_conn.clone(),
         }
     }
 
