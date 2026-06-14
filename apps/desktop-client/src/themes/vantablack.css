@@ -1,0 +1,91 @@
+/* Vantablack — Layer B overrides. The true-black (OLED) member of the dark pack:
+   absolute #000 app/chat fields, barely-lifted near-black panels (#050505–#141414)
+   so bevels/etches still read, one *restrained* silver accent in the seams, text
+   dimmed a touch so white-on-black doesn't buzz, and a FLAT black backdrop (no
+   gradient — OLED power-saver). Same geometry as Aero/Midnight; reuses the shared
+   recipes. No glass blur (free perf). Source: docs/ROADMAP.md M3. */
+
+[data-theme="vantablack"] {
+  --radius-window: 6px;
+  --scrollbar-w: 13px;
+
+  --font-ui: "Segoe UI", "SegoeUI", Tahoma, "Noto Sans", "Cantarell", -apple-system, sans-serif;
+
+  --c-window-face: #070707; /* barely-lifted near-black panel */
+  --c-content: #000000; /* the true-black field */
+  --c-text: #d6d6d6; /* dimmed so white-on-black doesn't buzz */
+  --c-text-dim: #7c7c7c;
+  --c-text-invert: #000000;
+
+  /* faint light top-left / deep shadow bottom-right so bevels read on pure black */
+  --c-bevel-hi: rgba(255, 255, 255, 0.13);
+  --c-bevel-lo: rgba(0, 0, 0, 0.85);
+  --c-bevel-dark: #000000;
+
+  --c-accent: #c6ccd2; /* the one restrained accent: cool silver */
+  --c-accent-soft: #15171a; /* tinted near-black hover fill, NOT bright silver */
+  --c-accent-border: #9aa3ac;
+  --c-link: #8fb6d6; /* a faint cool blue so links still read as links */
+  --c-titlebar-text: #e2e2e2;
+
+  --grad-titlebar: linear-gradient(180deg, #141414 0%, #0c0c0c 50%, #050505 100%);
+  --grad-button: linear-gradient(180deg, #131313 0%, #0d0d0d 49%, #080808 51%, #050505 100%);
+  --grad-button-pressed: linear-gradient(180deg, #050505 0%, #0a0a0a 51%, #101010 100%);
+  --grad-selection: linear-gradient(180deg, #2a2e33, #191c20);
+  --grad-rail: linear-gradient(160deg, #0a0a0a, #030303);
+  --grad-start: linear-gradient(180deg, #1a1a1a 0%, #121212 49%, #0a0a0a 51%, #0f0f0f 100%);
+  --grad-page: #000000; /* flat true black — no gradient (the OLED win) */
+  --grad-caption: linear-gradient(180deg, #161616 0%, #0d0d0d 50%, #060606 100%);
+  --grad-close: var(--grad-caption);
+  --grad-close-hover: radial-gradient(ellipse at 50% 120%, #d24a36, #8a2a1c 65%);
+  --c-caption-glyph: #cfcfcf;
+
+  --glass-blur: 0px; /* OLED black does no glass — free perf */
+  --c-glass-edge: rgba(255, 255, 255, 0.12);
+
+  --orb-online: #2faa55; /* slightly dimmed so the orbs don't buzz on pure black */
+  --orb-idle: #c79a2e;
+  --orb-dnd: #c2473a;
+  --orb-off: #484848;
+
+  --focus-marquee: 1px dotted #cfcfcf;
+  --focus-marquee-offset: -3px;
+  --c-focus-field: var(--c-accent);
+  --c-default-ring: #c6ccd2;
+  --c-hover-ring: rgba(198, 204, 210, 0.45);
+  --c-active-ring: #c6ccd2;
+
+  --c-window-frame: #2a2a2a; /* a visible dark-grey step against the flat-#000 backdrop (a #000 frame is invisible; a black drop-shadow can't lift the card on black) */
+  --c-tooltip-bg: #0c0c0c;
+  --c-tooltip-border: #333333;
+  --c-unread: #c6ccd2;
+  --c-titlebar-shadow: rgba(0, 0, 0, 0.8);
+  --titlebar-text-glow: 0 1px 1px var(--c-titlebar-shadow);
+  --c-scrim: rgba(0, 0, 0, 0.72);
+  --c-shadow-soft: rgba(0, 0, 0, 0.6);
+  --c-well-shadow: rgba(0, 0, 0, 0.7);
+
+  --c-select-bg: #4a505a; /* lifted from #2a2e33 so the selection band actually reads against the true-#000 field */
+  --c-select-text: #eaeaea;
+}
+
+/* The shared .gloss / .glass-panel recipes hardcode bright-white stops that blow
+   out on pure black. These additive overrides (every other theme untouched) tone
+   them down to a graphite gloss + a near-black glass. */
+[data-theme="vantablack"] .glass-panel {
+  background: linear-gradient(160deg, rgba(30, 30, 30, 0.5), rgba(8, 8, 8, 0.42));
+}
+
+[data-theme="vantablack"] .gloss {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.04) 49%,
+      rgba(0, 0, 0, 0.22) 51%,
+      rgba(255, 255, 255, 0.03) 100%
+    ),
+    #141414;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}

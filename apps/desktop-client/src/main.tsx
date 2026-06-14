@@ -9,6 +9,7 @@ import "./themes/luna.css";
 import "./themes/aero.css";
 import "./themes/midnight.css";
 import "./themes/nocturne.css";
+import "./themes/vantablack.css";
 import "./themes/bubble.css";
 import "./themes/phosphor.css";
 

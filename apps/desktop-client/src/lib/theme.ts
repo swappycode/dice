@@ -1,6 +1,6 @@
 import { createSignal, createEffect } from "solid-js";
 
-export type Theme = "luna" | "aero" | "midnight" | "nocturne" | "bubble" | "phosphor";
+export type Theme = "luna" | "aero" | "midnight" | "nocturne" | "vantablack" | "bubble" | "phosphor";
 
 /** All selectable themes + their display labels (order = dropdown order). */
 export const THEMES: ReadonlyArray<{ id: Theme; label: string }> = [
@@ -8,6 +8,7 @@ export const THEMES: ReadonlyArray<{ id: Theme; label: string }> = [
   { id: "aero", label: "Aero" },
   { id: "midnight", label: "Midnight" },
   { id: "nocturne", label: "Nocturne" },
+  { id: "vantablack", label: "Vantablack" },
   { id: "bubble", label: "Bubble" },
   { id: "phosphor", label: "Phosphor" },
 ];
