@@ -20,6 +20,7 @@ import type {
   PresenceStatus,
   Session,
   User,
+  VoiceMember,
 } from "./types";
 
 /* ---- snowflake-ish id generator (string, BigInt-safe) ---- */
@@ -86,8 +87,38 @@ const guilds: Guild[] = [guildHq, guildRetro];
 const chGeneral = mkChannel(guildHq.id, "general", 0);
 const chDev = mkChannel(guildHq.id, "dev", 1);
 const chOffTopic = mkChannel(guildHq.id, "off-topic", 2);
+const chVoice = mkChannel(guildHq.id, "Voice Lounge", 3);
+chVoice.kind = "voice";
 const chLounge = mkChannel(guildRetro.id, "lounge", 0);
-const channels: Channel[] = [chGeneral, chDev, chOffTopic, chLounge];
+const channels: Channel[] = [chGeneral, chDev, chOffTopic, chVoice, chLounge];
+
+/* ---- voice rosters (signaling-only demo; no audio in the mock) ---- */
+let ssrcSeq = 1;
+/** channelId → current voice members. Ayaan idles in the HQ voice channel so
+ *  the roster isn't empty before the local user joins. */
+const voiceRosters = new Map<string, VoiceMember[]>([
+  [
+    chVoice.id,
+    [
+      {
+        userId: AYAAN.id,
+        channelId: chVoice.id,
+        guildId: guildHq.id,
+        ssrc: ssrcSeq++,
+        muted: false,
+        deafened: false,
+        speaking: false,
+      },
+    ],
+  ],
+]);
+
+function rosterUsers(members: VoiceMember[]): User[] {
+  return members.flatMap((m) => {
+    const u = users.find((x) => x.id === m.userId);
+    return u ? [{ ...u }] : [];
+  });
+}
 
 const dmPriya = mkChannel(null, "", 0);
 dmPriya.recipientIds = [SELF.id, PRIYA.id];
@@ -598,6 +629,51 @@ export function createMockIpc(): DiceIpc {
           60,
         );
       }
+    },
+
+    async voiceJoin(channelId, muted, deafened) {
+      await delay(120);
+      const ch = channels.find((c) => c.id === channelId);
+      if (!ch || ch.kind !== "voice") throw new Error("Not a voice channel.");
+      const guildId = ch.guildId ?? "";
+      const members = (voiceRosters.get(channelId) ?? []).filter((m) => m.userId !== SELF.id);
+      const me: VoiceMember = {
+        userId: SELF.id,
+        channelId,
+        guildId,
+        ssrc: ssrcSeq++,
+        muted,
+        deafened,
+        speaking: false,
+      };
+      members.push(me);
+      voiceRosters.set(channelId, members);
+      setTimeout(() => emit({ type: "voiceJoin", member: { ...me }, user: { ...SELF } }), 60);
+      return { channelId, members: members.map((m) => ({ ...m })), users: rosterUsers(members) };
+    },
+
+    async voiceLeave(channelId) {
+      await delay(80);
+      const guildId = channels.find((c) => c.id === channelId)?.guildId ?? "";
+      const members = (voiceRosters.get(channelId) ?? []).filter((m) => m.userId !== SELF.id);
+      voiceRosters.set(channelId, members);
+      setTimeout(() => emit({ type: "voiceLeave", channelId, userId: SELF.id, guildId }), 60);
+    },
+
+    async voiceState(channelId, muted, deafened, speaking) {
+      await delay(60);
+      const me = (voiceRosters.get(channelId) ?? []).find((m) => m.userId === SELF.id);
+      if (!me) throw new Error("Not in this voice channel.");
+      me.muted = muted;
+      me.deafened = deafened;
+      me.speaking = speaking;
+      setTimeout(() => emit({ type: "voiceState", member: { ...me } }), 60);
+    },
+
+    async voiceRoster(channelId) {
+      await delay(60);
+      const members = voiceRosters.get(channelId) ?? [];
+      return { channelId, members: members.map((m) => ({ ...m })), users: rosterUsers(members) };
     },
 
     async fetchUnread() {

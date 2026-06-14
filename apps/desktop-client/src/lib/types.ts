@@ -10,7 +10,7 @@
 
 export type PresenceStatus = "online" | "idle" | "dnd" | "offline";
 
-export type ChannelKind = "guild_text" | "dm";
+export type ChannelKind = "guild_text" | "dm" | "voice";
 
 export interface User {
   id: string;
@@ -83,6 +83,24 @@ export interface Friend {
   status: FriendStatus;
 }
 
+/** A participant in a voice channel (signaling state; audio is separate). */
+export interface VoiceMember {
+  userId: string;
+  channelId: string;
+  guildId: string;
+  ssrc: number;
+  muted: boolean;
+  deafened: boolean;
+  speaking: boolean;
+}
+
+/** A voice channel's current roster + user records for its members. */
+export interface VoiceRoster {
+  channelId: string;
+  members: VoiceMember[];
+  users: User[];
+}
+
 /** Result of `ipc.login`: either a `session` (no 2FA) or a `totpTicket` to
  *  answer the 2FA challenge with `ipc.completeTotpLogin`. Exactly one is set. */
 export interface LoginResult {
@@ -134,5 +152,8 @@ export type DiceEvent =
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }
   | { type: "friendUpdate"; friend: Friend; removed: boolean }
+  | { type: "voiceJoin"; member: VoiceMember; user?: User }
+  | { type: "voiceLeave"; channelId: string; userId: string; guildId: string }
+  | { type: "voiceState"; member: VoiceMember }
   | { type: "connState"; state: ConnState; transport?: "quic" | "wss" | null }
   | { type: "sessionExpired" };

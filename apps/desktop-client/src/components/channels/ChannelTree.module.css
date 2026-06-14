@@ -185,4 +185,40 @@
   color: var(--c-select-text);
 }
 
+/* ---- voice channel rosters (signaling only; no audio yet) ---- */
+.voiceRoster {
+  list-style: none;
+  margin: 1px 0 4px 24px;
+  padding: 0;
+}
+
+.voiceMember {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 1px var(--sp-2);
+  font-size: var(--font-size-base);
+  color: var(--c-text-dim);
+}
+
+.voiceMemberName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* a speaking member's name lifts to the accent colour (one-shot, no loop) */
+.speaking {
+  color: var(--c-accent);
+  font-weight: 700;
+}
+
+.voiceTag {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--c-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* footer self strip lives in common/SelfStrip */

@@ -26,6 +26,7 @@ import {
 } from "../stores/messages";
 import { setHomeTab } from "../components/home/homeTab";
 import { applyFriendUpdate, loadFriends, resetFriends } from "../stores/friends";
+import { applyVoiceJoin, applyVoiceLeave, applyVoiceState, resetVoice } from "../stores/voice";
 import { loadPresence, resetPresence, setPresenceLocal } from "../stores/presence";
 import {
   bumpUnread,
@@ -109,6 +110,15 @@ function dispatch(ev: DiceEvent): void {
     case "friendUpdate":
       applyFriendUpdate(ev.friend, ev.removed);
       break;
+    case "voiceJoin":
+      applyVoiceJoin(ev.member, ev.user);
+      break;
+    case "voiceLeave":
+      applyVoiceLeave(ev.channelId, ev.userId);
+      break;
+    case "voiceState":
+      applyVoiceState(ev.member);
+      break;
     case "connState":
       setConnState(ev.state);
       setTransport(ev.state === "connected" ? (ev.transport ?? null) : null);
@@ -134,6 +144,7 @@ export function resetClientState(): void {
   resetDirectory();
   resetUnread();
   resetFriends();
+  resetVoice();
   setHomeTab("messages");
 }
 

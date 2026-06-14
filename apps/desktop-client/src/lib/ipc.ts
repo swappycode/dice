@@ -24,6 +24,7 @@ import type {
   PresenceStatus,
   Session,
   TotpEnroll,
+  VoiceRoster,
 } from "./types";
 
 export interface DiceIpc {
@@ -100,6 +101,21 @@ export interface DiceIpc {
   declineFriend(userId: string): Promise<void>;
   /** Remove an accepted friend. */
   removeFriend(userId: string): Promise<void>;
+
+  /** Join a voice channel; returns the current roster (signaling only — no
+      audio capture/playback yet, that's the on-hardware phase). */
+  voiceJoin(channelId: string, muted: boolean, deafened: boolean): Promise<VoiceRoster>;
+  /** Leave a voice channel. */
+  voiceLeave(channelId: string): Promise<void>;
+  /** Update the caller's own mute / deafen / speaking state. */
+  voiceState(
+    channelId: string,
+    muted: boolean,
+    deafened: boolean,
+    speaking: boolean,
+  ): Promise<void>;
+  /** The current roster of a voice channel (re-sync on open / reconnect). */
+  voiceRoster(channelId: string): Promise<VoiceRoster>;
 
   /** Per-channel unread counts for badges (channelId → count); for boot/resync. */
   fetchUnread(): Promise<Record<string, number>>;

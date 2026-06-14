@@ -24,6 +24,7 @@ import type {
   Message,
   Session,
   TotpEnroll,
+  VoiceRoster,
 } from "./types";
 
 /** The single host→webview event stream (src-tauri/src/dto.rs EVENT_CHANNEL). */
@@ -123,6 +124,12 @@ export function createTauriIpc(): DiceIpc {
     acceptFriend: (userId) => call<Friend>("accept_friend", { userId }),
     declineFriend: (userId) => call<void>("decline_friend", { userId }),
     removeFriend: (userId) => call<void>("remove_friend", { userId }),
+    voiceJoin: (channelId, muted, deafened) =>
+      call<VoiceRoster>("voice_join", { channelId, muted, deafened }),
+    voiceLeave: (channelId) => call<void>("voice_leave", { channelId }),
+    voiceState: (channelId, muted, deafened, speaking) =>
+      call<void>("voice_state", { channelId, muted, deafened, speaking }),
+    voiceRoster: (channelId) => call<VoiceRoster>("voice_roster", { channelId }),
     fetchUnread: async () => {
       const list = await call<{ channelId: string; count: number }[]>("fetch_unread");
       const map: Record<string, number> = {};
