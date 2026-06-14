@@ -200,3 +200,41 @@ integration tests.
 - [ ] Chime on background/other-channel message; OS toast when unfocused (built client)
 - [ ] `cargo test -p dice-event-bus rpc::` and `-p presence-service --test presence_rpc` pass
 - [ ] `just check`, host clippy+tests, `npm run check` + `build` all green
+
+---
+
+## 8. Post-M2 fixes — verify now
+
+Bug fixes shipped after the M2 close (rebuild the client: `just client-build`).
+
+- **Presence cycle** (`17ded92`) — click your own orb in the SelfStrip: it now cycles
+  **online → idle → dnd** only (offline is no longer offered, because the server can't represent
+  "offline while connected" — that's the deferred *Invisible* feature). Confirm with two clients that
+  online/idle/dnd propagate to the other; **offline still shows on the other client only when you
+  actually disconnect** (close the window).
+- **Re-login keeps your guilds** (`a7af01f`) — log out, then log back in *in the same app*: your
+  guilds/DMs are still there. (Before the fix the list came back empty until a refresh.)
+- **Known-minor, not a bug** — opening a brand-new DM may show the partner as **"unknown" for a
+  split second**, then the name fills in (their profile record lands a beat after the channel). It
+  self-corrects. (Optional future polish ships the name *with* the channel to remove the flash.)
+
+---
+
+## 9. Milestone 3 — to test once built (placeholder)
+
+NOT IMPLEMENTED YET — this is the test plan for when M3 ships (Voice + the client additions below).
+Fill these in after the work lands.
+
+- **Vantablack theme** — appears in the StatusBar theme dropdown; backgrounds are *true* `#000000`
+  (not dark grey); bevels/etches still readable on the near-black panels; readable text; flat black
+  backdrop. (On an OLED screen, visibly darker than Midnight.)
+- **Theme builder** — open the "Custom" theme builder; change accent / backdrop / surface / text /
+  titlebar via color pickers with live preview; reload → the custom theme persists; **colors only**
+  (no image-upload control exists); toggling Perf still works and the app stays smooth (no perf
+  regression).
+- **Friends / social** — add a friend by username from client A; an incoming request shows on client
+  B; accept it; both now see each other in a **Friends page** grouped by presence (Online / Idle /
+  DND up top, Offline collapsed); a friend's online/idle/dnd shows **even with no shared guild**;
+  one click on a friend opens a DM (and the name is *not* "unknown").
+- **Voice** — see the M3 gate in `docs/ROADMAP.md` (3+ users in an SFU voice channel, PTT + VAD,
+  graceful degradation under packet loss).
