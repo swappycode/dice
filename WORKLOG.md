@@ -7,6 +7,38 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-14 — M3 (1/n): login-card cohesion fix + Vantablack OLED theme
+
+**Branch:** `main`. Three client commits (`login-ui` / `vantablack` / `bubble-contrast`).
+Frontend gate green (`tsc` + vite, CSS **50.5 KB** vs the 100 KB budget). No Rust / proto / SQL
+touched. **First M3 work** — both are M3 *Client / themes* items from the ROADMAP.
+
+**Login card cohesion (user-flagged).** The 2-pane card painted `.brand` with the light titlebar
+gradient and `.formPane` with `--c-window-face`; in dark themes the near-black form pane read as a
+separate black box split by a hard vertical seam. Repainted the whole card as ONE `--c-window-face`
+surface with a continuous left→right accent wash that fades out before the form (no element
+boundary = no seam); brand text moved onto the face (wordmark → new `--c-brand-ink` token, tagline →
+`--c-text-dim`); bevel + themed shadow lift it as one raised window. All token-driven.
+
+**Vantablack theme.** The true-black OLED dark theme: `#000` fields, barely-lifted `#070707` panels
+(bevels still read via a 13%-white inset hi), one restrained silver accent, dimmed text, flat-black
+backdrop (no gradient — the power-saver win), `--glass-blur:0`. Additive `.gloss`/`.glass-panel`
+cool-down (mirrors Midnight). The theme dropdown grows 6 → 7; registered in the `Theme` union/list,
+`index.html` pre-paint array, and `main.tsx`.
+
+**Cross-theme review + fixes.** A 7-agent adversarial review resolved the new tokens against every
+theme and confirmed **4** real contrast issues, all fixed: Bubble wordmark ink (2.4:1 → deep-teal
+`--c-brand-ink`), Bubble `--c-text-dim` (sub-AA → `#426170`), Vantablack card lift on flat black
+(`--c-window-frame` `#000` → `#2a2a2a`, `--c-bevel-hi` 0.10 → 0.13), Vantablack text-selection band
+(1.5:1 → `--c-select-bg #4a505a`).
+
+**M3 remaining** (see `docs/ROADMAP.md` M3): **Voice** (the headline — `voice-core` + `voice-service`
+SFU over QUIC datagrams), **in-app theme builder** (Custom = base + color overrides, colors-only),
+**Friends / social** (`friendships` table + REST + `FriendUpdate` dispatch **#117** + mutual presence
+interest on accept; client Friends page grouped by presence). Next free Frame dispatch # = **117**.
+
+---
+
 ## 2026-06-14 — M2 (9/n): UI funk + theme pack + chime/toast + split-mode RPC — **M2 COMPLETE**
 
 **Branch:** `main`. Four commits (items 12–15). Full `just check` green (two new live RPC tests over
