@@ -402,6 +402,11 @@ async fn cleanup(gw: &Gateway, st: &SessionState) {
     {
         tracing::debug!(%error, user = %st.user, "presence disconnect failed");
     }
+    // Drop the user from any voice channel (mirrors presence: explicit
+    // leave-on-teardown is how voice membership stays live).
+    if let Err(error) = gw.deps.voice.disconnect(st.user).await {
+        tracing::debug!(%error, user = %st.user, "voice disconnect failed");
+    }
 }
 
 async fn ready_loop(

@@ -76,6 +76,10 @@ pub(crate) fn build_router(gw: Arc<Gateway>) -> axum::Router {
         .route("/v1/friends/{user_id}/remove", post(remove_friend))
         .route("/v1/unread", get(unread_counts))
         .route("/v1/channels/{channel_id}/read", post(mark_read))
+        .route("/v1/channels/{channel_id}/voice", get(voice_roster))
+        .route("/v1/channels/{channel_id}/voice/join", post(voice_join))
+        .route("/v1/channels/{channel_id}/voice/leave", post(voice_leave))
+        .route("/v1/channels/{channel_id}/voice/state", post(voice_state))
         .route("/v1/users/@me/avatar", put(set_avatar))
         .route("/v1/users/@me/totp/enroll", post(totp_enroll))
         .route("/v1/users/@me/totp/confirm", post(totp_confirm))
@@ -190,6 +194,24 @@ fn map_chat_error(error: chat_service::ChatError) -> Response {
         return error_response(code, "internal error", 0);
     }
     error_response(code, error.to_string(), 0)
+}
+
+fn map_voice_error(error: voice_service::VoiceError) -> Response {
+    use voice_service::VoiceError as E;
+    match error {
+        E::NotFound => error_response(ErrorCode::NotFound, "channel not found", 0),
+        E::NotAVoiceChannel => error_response(ErrorCode::InvalidArgument, "not a voice channel", 0),
+        E::NotAMember => {
+            error_response(ErrorCode::PermissionDenied, "not a member of this guild", 0)
+        }
+        E::NotInChannel => {
+            error_response(ErrorCode::InvalidArgument, "not in this voice channel", 0)
+        }
+        E::Internal(source) => {
+            tracing::error!(error = %source, "voice call failed");
+            error_response(ErrorCode::Internal, "internal error", 0)
+        }
+    }
 }
 
 fn map_media_error(error: MediaError) -> Response {
@@ -607,6 +629,81 @@ async fn mark_read(
         tracing::warn!(%error, "unread clear failed (marker still recorded)");
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// `POST /v1/channels/{id}/voice/join` (bearer): join a VOICE channel. Returns
+/// the current roster; voice-service publishes `VoiceJoin` to the guild.
+async fn voice_join(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(channel_id): Path<String>,
+    Proto(req): Proto<v1::VoiceJoinRequest>,
+) -> Response {
+    let Ok(channel) = channel_id.parse::<ChannelId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
+    };
+    match gw
+        .deps
+        .voice
+        .join(user, channel, req.muted, req.deafened)
+        .await
+    {
+        Ok(roster) => proto_response(StatusCode::OK, &roster),
+        Err(error) => map_voice_error(error),
+    }
+}
+
+/// `POST /v1/channels/{id}/voice/leave` (bearer): leave a voice channel. 204.
+/// Idempotent; publishes `VoiceLeave` if the caller was in it.
+async fn voice_leave(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(channel_id): Path<String>,
+) -> Response {
+    let Ok(channel) = channel_id.parse::<ChannelId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
+    };
+    match gw.deps.voice.leave(user, channel).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_voice_error(error),
+    }
+}
+
+/// `POST /v1/channels/{id}/voice/state` (bearer): update the caller's own
+/// mute/deafen/speaking flags. 204; publishes `VoiceState`.
+async fn voice_state(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(user)): axum::Extension<Authed>,
+    Path(channel_id): Path<String>,
+    Proto(req): Proto<v1::VoiceStateRequest>,
+) -> Response {
+    let Ok(channel) = channel_id.parse::<ChannelId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
+    };
+    match gw
+        .deps
+        .voice
+        .update_state(user, channel, req.muted, req.deafened, req.speaking)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_voice_error(error),
+    }
+}
+
+/// `GET /v1/channels/{id}/voice` (bearer): the channel's current voice roster.
+async fn voice_roster(
+    State(gw): State<Arc<Gateway>>,
+    axum::Extension(Authed(_user)): axum::Extension<Authed>,
+    Path(channel_id): Path<String>,
+) -> Response {
+    let Ok(channel) = channel_id.parse::<ChannelId>() else {
+        return error_response(ErrorCode::InvalidArgument, "invalid channel id", 0);
+    };
+    match gw.deps.voice.roster(channel).await {
+        Ok(roster) => proto_response(StatusCode::OK, &roster),
+        Err(error) => map_voice_error(error),
+    }
 }
 
 /// `PUT /v1/users/@me/avatar` (bearer): set or clear the caller's avatar.

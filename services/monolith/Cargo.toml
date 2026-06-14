@@ -13,6 +13,7 @@ chat-service     = { workspace = true }
 media-service    = { workspace = true }
 notification-service = { workspace = true }
 presence-service = { workspace = true }
+voice-service    = { workspace = true }
 
 # internal crates
 dice-auth-core    = { workspace = true }

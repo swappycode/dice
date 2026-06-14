@@ -54,11 +54,12 @@ struct SessionRecord {
     interests: HashSet<Subject>,
 }
 
-fn guild_subjects(guild: GuildId) -> [Subject; 3] {
+fn guild_subjects(guild: GuildId) -> [Subject; 4] {
     [
         Subject::GuildMsg(guild),
         Subject::GuildTyping(guild),
         Subject::GuildPresence(guild),
+        Subject::GuildVoice(guild),
     ]
 }
 

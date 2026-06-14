@@ -126,6 +126,12 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
             pool.clone(),
             ids.clone(),
         )),
+        voice: Arc::new(voice_service::VoiceService::new(
+            cache.clone(),
+            bus.clone(),
+            pool.clone(),
+            ids.clone(),
+        )),
         bus,
         jwt,
         ids,

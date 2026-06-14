@@ -1,0 +1,24 @@
+[package]
+name = "voice-service"
+description = "Voice-channel membership + speaking state (Redis-backed) with bus fan-out. Signaling only — audio rides QUIC datagrams via the gateway SFU."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dice-common = { workspace = true }
+dice-protocol = { workspace = true }
+dice-cache = { workspace = true }
+dice-database = { workspace = true }
+dice-event-bus = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -3,7 +3,7 @@
 //! Subjects are constructed only through this enum so they cannot be
 //! fat-fingered at publish/subscribe sites. String forms:
 //!
-//! - `dice.evt.guild.{guild_id}.msg|typing|presence`
+//! - `dice.evt.guild.{guild_id}.msg|typing|presence|voice`
 //! - `dice.evt.dm.{channel_id}.msg|typing|presence`
 //! - `dice.evt.user.{user_id}`
 
@@ -17,6 +17,8 @@ pub enum Subject {
     GuildMsg(GuildId),
     GuildTyping(GuildId),
     GuildPresence(GuildId),
+    /// Voice-channel membership + speaking state for a guild (VoiceJoin/Leave/State).
+    GuildVoice(GuildId),
     DmMsg(ChannelId),
     DmTyping(ChannelId),
     DmPresence(ChannelId),
@@ -30,6 +32,7 @@ impl fmt::Display for Subject {
             Self::GuildMsg(id) => write!(f, "dice.evt.guild.{id}.msg"),
             Self::GuildTyping(id) => write!(f, "dice.evt.guild.{id}.typing"),
             Self::GuildPresence(id) => write!(f, "dice.evt.guild.{id}.presence"),
+            Self::GuildVoice(id) => write!(f, "dice.evt.guild.{id}.voice"),
             Self::DmMsg(id) => write!(f, "dice.evt.dm.{id}.msg"),
             Self::DmTyping(id) => write!(f, "dice.evt.dm.{id}.typing"),
             Self::DmPresence(id) => write!(f, "dice.evt.dm.{id}.presence"),
@@ -65,6 +68,7 @@ impl FromStr for Subject {
                     "msg" => Self::GuildMsg(id),
                     "typing" => Self::GuildTyping(id),
                     "presence" => Self::GuildPresence(id),
+                    "voice" => Self::GuildVoice(id),
                     _ => return Err(err()),
                 }
             }
@@ -105,6 +109,10 @@ mod tests {
             (
                 Subject::GuildPresence(GuildId::from_raw(42)),
                 "dice.evt.guild.42.presence",
+            ),
+            (
+                Subject::GuildVoice(GuildId::from_raw(42)),
+                "dice.evt.guild.42.voice",
             ),
             (Subject::DmMsg(ChannelId::from_raw(7)), "dice.evt.dm.7.msg"),
             (

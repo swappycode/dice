@@ -60,6 +60,7 @@ pub struct GatewayDeps {
     pub chat: std::sync::Arc<dyn chat_service::Chat>,
     pub media: std::sync::Arc<dyn media_service::Media>,
     pub presence: std::sync::Arc<dyn presence_service::Presence>,
+    pub voice: std::sync::Arc<dyn voice_service::Voice>,
     pub bus: std::sync::Arc<dyn dice_event_bus::EventBus>,
     /// Verify-capable JWT keys (public half is enough; gateway never signs).
     pub jwt: std::sync::Arc<dice_auth_core::token::JwtKeys>,

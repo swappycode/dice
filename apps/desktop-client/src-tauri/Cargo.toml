@@ -65,6 +65,7 @@ auth-service     = { path = "../../../services/auth-service" }
 chat-service     = { path = "../../../services/chat-service" }
 media-service    = { path = "../../../services/media-service" }
 presence-service = { path = "../../../services/presence-service" }
+voice-service    = { path = "../../../services/voice-service" }
 dice-auth-core   = { path = "../../../crates/auth-core" }
 dice-cache       = { path = "../../../crates/cache" }
 dice-database    = { path = "../../../crates/database" }

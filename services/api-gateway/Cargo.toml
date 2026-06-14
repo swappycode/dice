@@ -16,6 +16,7 @@ auth-service      = { workspace = true }
 chat-service      = { workspace = true }
 media-service     = { workspace = true }
 presence-service  = { workspace = true }
+voice-service     = { workspace = true }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

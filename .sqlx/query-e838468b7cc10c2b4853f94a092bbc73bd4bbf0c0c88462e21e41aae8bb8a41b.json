@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO channels (id, channel_type, guild_id, name, position) VALUES ($1, $2, $3, 'Lounge', 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e838468b7cc10c2b4853f94a092bbc73bd4bbf0c0c88462e21e41aae8bb8a41b"
+}

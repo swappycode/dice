@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.channel_type, c.guild_id,\n                      EXISTS(SELECT 1 FROM guild_members gm\n                             WHERE gm.guild_id = c.guild_id AND gm.user_id = $2) AS \"is_member!\"\n               FROM channels c WHERE c.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_type",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "guild_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_member!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "0c2bdc02195a3c02a0f6ae25c5c65a00bfea1dfdd3f34b6fbd00ccec8a22b05d"
+}

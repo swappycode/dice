@@ -18,6 +18,7 @@ members = [
   "services/media-service",
   "services/notification-service",
   "services/presence-service",
+  "services/voice-service",
   "services/monolith",
 ]
 # services/* is deliberately NOT a glob: placeholder dirs (voice/search) hold
@@ -49,6 +50,7 @@ chat-service      = { path = "services/chat-service" }
 media-service     = { path = "services/media-service" }
 notification-service = { path = "services/notification-service" }
 presence-service  = { path = "services/presence-service" }
+voice-service     = { path = "services/voice-service" }
 
 # ---- async runtime ----
 tokio        = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }

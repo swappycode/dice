@@ -28,6 +28,7 @@ use dice_common::shutdown::Shutdown;
 use dice_protocol::{HEARTBEAT_INTERVAL_MS, RESUME_WINDOW_MS};
 use media_service::{LocalFsStore, MediaService};
 use presence_service::PresenceService;
+use voice_service::VoiceService;
 
 use crate::config::MonolithConfig;
 
@@ -84,6 +85,12 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
             ids.clone(),
         )),
         presence: Arc::new(PresenceService::new(
+            cache.clone(),
+            bus.clone(),
+            pool.clone(),
+            ids.clone(),
+        )),
+        voice: Arc::new(VoiceService::new(
             cache.clone(),
             bus.clone(),
             pool.clone(),
