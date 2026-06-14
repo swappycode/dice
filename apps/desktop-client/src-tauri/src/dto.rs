@@ -53,10 +53,10 @@ pub fn parse_presence(status: &str) -> i32 {
 }
 
 fn kind_str(kind: i32) -> &'static str {
-    if kind == v1::ChannelKind::Dm as i32 {
-        "dm"
-    } else {
-        "guild_text"
+    match v1::ChannelKind::try_from(kind) {
+        Ok(v1::ChannelKind::Dm) => "dm",
+        Ok(v1::ChannelKind::Voice) => "voice",
+        _ => "guild_text",
     }
 }
 
@@ -111,13 +111,63 @@ pub struct FriendDto {
 impl From<&v1::Friend> for FriendDto {
     fn from(f: &v1::Friend) -> Self {
         Self {
-            user: f.user.as_ref().map(UserDto::from).unwrap_or_else(|| UserDto {
-                id: "0".to_owned(),
-                username: String::new(),
-                display_name: String::new(),
-                avatar_id: None,
-            }),
+            user: f
+                .user
+                .as_ref()
+                .map(UserDto::from)
+                .unwrap_or_else(|| UserDto {
+                    id: "0".to_owned(),
+                    username: String::new(),
+                    display_name: String::new(),
+                    avatar_id: None,
+                }),
             status: friend_status_str(f.status).to_owned(),
+        }
+    }
+}
+
+/// One participant in a voice channel (signaling state; audio is separate).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceMemberDto {
+    pub user_id: String,
+    pub channel_id: String,
+    pub guild_id: String,
+    pub ssrc: u32,
+    pub muted: bool,
+    pub deafened: bool,
+    pub speaking: bool,
+}
+
+impl From<&v1::VoiceMember> for VoiceMemberDto {
+    fn from(m: &v1::VoiceMember) -> Self {
+        Self {
+            user_id: id_str(m.user_id),
+            channel_id: id_str(m.channel_id),
+            guild_id: id_str(m.guild_id),
+            ssrc: m.ssrc,
+            muted: m.muted,
+            deafened: m.deafened,
+            speaking: m.speaking,
+        }
+    }
+}
+
+/// A voice channel's current roster + a warm user dictionary for its members.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceRosterDto {
+    pub channel_id: String,
+    pub members: Vec<VoiceMemberDto>,
+    pub users: Vec<UserDto>,
+}
+
+impl From<&v1::VoiceRoster> for VoiceRosterDto {
+    fn from(r: &v1::VoiceRoster) -> Self {
+        Self {
+            channel_id: id_str(r.channel_id),
+            members: r.members.iter().map(VoiceMemberDto::from).collect(),
+            users: r.users.iter().map(UserDto::from).collect(),
         }
     }
 }
@@ -127,7 +177,7 @@ impl From<&v1::Friend> for FriendDto {
 pub struct ChannelDto {
     pub id: String,
     pub guild_id: Option<String>,
-    pub kind: String, // "guild_text" | "dm"
+    pub kind: String, // "guild_text" | "dm" | "voice"
     pub name: String,
     pub position: u32,
     pub last_message_id: Option<String>,
@@ -354,6 +404,23 @@ pub enum DiceEvent {
     /// otherwise upsert the friend by id with its status.
     #[serde(rename_all = "camelCase")]
     FriendUpdate { friend: FriendDto, removed: bool },
+    /// A user joined a voice channel; `user` carries their record (warm dict).
+    #[serde(rename_all = "camelCase")]
+    VoiceJoin {
+        member: VoiceMemberDto,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<UserDto>,
+    },
+    /// A user left a voice channel.
+    #[serde(rename_all = "camelCase")]
+    VoiceLeave {
+        channel_id: String,
+        user_id: String,
+        guild_id: String,
+    },
+    /// A voice member's mute / deafen / speaking state changed.
+    #[serde(rename_all = "camelCase")]
+    VoiceState { member: VoiceMemberDto },
     #[serde(rename_all = "camelCase")]
     GuildCreate {
         guild: GuildDto,

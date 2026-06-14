@@ -17,7 +17,7 @@ use tauri::State;
 
 use crate::dto::{
     AttachmentDto, BootstrapDto, ChannelDto, FriendDto, GuildDto, LoginResultDto, MessageDto,
-    SessionDto, TotpEnrollDto, UnreadDto,
+    SessionDto, TotpEnrollDto, UnreadDto, VoiceRosterDto,
 };
 use crate::state::{ClientCore, CoreError};
 
@@ -88,7 +88,9 @@ pub async fn request_password_reset(core: Core<'_>, email: String) -> CmdResult<
 /// Set a new password from a reset token.
 #[tauri::command]
 pub async fn reset_password(core: Core<'_>, token: String, new_password: String) -> CmdResult<()> {
-    core.reset_password(&token, &new_password).await.map_err(user)
+    core.reset_password(&token, &new_password)
+        .await
+        .map_err(user)
 }
 
 #[tauri::command]
@@ -279,6 +281,45 @@ pub async fn decline_friend(core: Core<'_>, user_id: String) -> CmdResult<()> {
 #[tauri::command]
 pub async fn remove_friend(core: Core<'_>, user_id: String) -> CmdResult<()> {
     core.remove_friend(&user_id).await.map_err(user)
+}
+
+/// Join a voice channel; returns its current roster.
+#[tauri::command]
+pub async fn voice_join(
+    core: Core<'_>,
+    channel_id: String,
+    muted: bool,
+    deafened: bool,
+) -> CmdResult<VoiceRosterDto> {
+    core.voice_join(&channel_id, muted, deafened)
+        .await
+        .map_err(user)
+}
+
+/// Leave a voice channel.
+#[tauri::command]
+pub async fn voice_leave(core: Core<'_>, channel_id: String) -> CmdResult<()> {
+    core.voice_leave(&channel_id).await.map_err(user)
+}
+
+/// Update the caller's own mute / deafen / speaking state in a voice channel.
+#[tauri::command]
+pub async fn voice_state(
+    core: Core<'_>,
+    channel_id: String,
+    muted: bool,
+    deafened: bool,
+    speaking: bool,
+) -> CmdResult<()> {
+    core.voice_state(&channel_id, muted, deafened, speaking)
+        .await
+        .map_err(user)
+}
+
+/// The current roster of a voice channel (re-sync on reconnect / channel open).
+#[tauri::command]
+pub async fn voice_roster(core: Core<'_>, channel_id: String) -> CmdResult<VoiceRosterDto> {
+    core.voice_roster(&channel_id).await.map_err(user)
 }
 
 /// Pull-style mirror of the `connState` event stream

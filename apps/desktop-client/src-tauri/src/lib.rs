@@ -155,6 +155,10 @@ pub fn run() {
             commands::accept_friend,
             commands::decline_friend,
             commands::remove_friend,
+            commands::voice_join,
+            commands::voice_leave,
+            commands::voice_state,
+            commands::voice_roster,
             commands::connection_state,
             commands::notify,
         ])

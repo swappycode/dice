@@ -22,7 +22,8 @@ use crate::bridge::{Bridge, PendingMap, PendingSend, PresenceMap, conn_state_str
 use crate::cache::{Cache, CacheError};
 use crate::dto::{
     BootstrapDto, ChannelDto, DiceEvent, FriendDto, GuildDto, LoginResultDto, MessageDto,
-    SessionDto, TotpEnrollDto, UserDto, id_str, parse_id, parse_presence, presence_str,
+    SessionDto, TotpEnrollDto, UserDto, VoiceRosterDto, id_str, parse_id, parse_presence,
+    presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
 use crate::keystore::KeyStore;
@@ -940,6 +941,47 @@ impl ClientCore {
         let id = parse_id(user_id).ok_or_else(|| CoreError::BadId(user_id.into()))?;
         self.api.remove_friend(id).await?;
         Ok(())
+    }
+
+    // ---- Voice (M3, signaling only — audio capture/playback is the
+    // on-hardware phase). Voice membership lives in the frontend store; live
+    // changes arrive via the VoiceJoin/VoiceLeave/VoiceState dispatches. ----
+
+    pub async fn voice_join(
+        &self,
+        channel_id: &str,
+        muted: bool,
+        deafened: bool,
+    ) -> Result<VoiceRosterDto, CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        let roster = self.api.voice_join(channel, muted, deafened).await?;
+        Ok(VoiceRosterDto::from(&roster))
+    }
+
+    pub async fn voice_leave(&self, channel_id: &str) -> Result<(), CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        self.api.voice_leave(channel).await?;
+        Ok(())
+    }
+
+    pub async fn voice_state(
+        &self,
+        channel_id: &str,
+        muted: bool,
+        deafened: bool,
+        speaking: bool,
+    ) -> Result<(), CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        self.api
+            .voice_state(channel, muted, deafened, speaking)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn voice_roster(&self, channel_id: &str) -> Result<VoiceRosterDto, CoreError> {
+        let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        let roster = self.api.voice_roster(channel).await?;
+        Ok(VoiceRosterDto::from(&roster))
     }
 }
 

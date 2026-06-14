@@ -448,6 +448,82 @@ impl ApiClient {
         Err(error_from(status, response.bytes().await?.as_ref()))
     }
 
+    /// `POST /v1/channels/{id}/voice/join` — join a voice channel; returns the
+    /// current roster. The `VoiceJoin` dispatch propagates the join to peers.
+    pub async fn voice_join(
+        &self,
+        channel_id: u64,
+        muted: bool,
+        deafened: bool,
+    ) -> Result<v1::VoiceRoster, ApiError> {
+        let url = self.url(&format!("/v1/channels/{channel_id}/voice/join"))?;
+        let body = v1::VoiceJoinRequest { muted, deafened }.encode_to_vec();
+        let response = self
+            .bearer_send(|token| {
+                self.http
+                    .post(url.clone())
+                    .header(CONTENT_TYPE, PROTOBUF)
+                    .body(body.clone())
+                    .bearer_auth(token)
+            })
+            .await?;
+        decode_response(response).await
+    }
+
+    /// `POST /v1/channels/{id}/voice/leave` — leave a voice channel (204).
+    pub async fn voice_leave(&self, channel_id: u64) -> Result<(), ApiError> {
+        let url = self.url(&format!("/v1/channels/{channel_id}/voice/leave"))?;
+        let response = self
+            .bearer_send(|token| self.http.post(url.clone()).bearer_auth(token))
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
+    /// `POST /v1/channels/{id}/voice/state` — update the caller's own
+    /// mute/deafen/speaking flags (204). Broadcasts `VoiceState`.
+    pub async fn voice_state(
+        &self,
+        channel_id: u64,
+        muted: bool,
+        deafened: bool,
+        speaking: bool,
+    ) -> Result<(), ApiError> {
+        let url = self.url(&format!("/v1/channels/{channel_id}/voice/state"))?;
+        let body = v1::VoiceStateRequest {
+            muted,
+            deafened,
+            speaking,
+        }
+        .encode_to_vec();
+        let response = self
+            .bearer_send(|token| {
+                self.http
+                    .post(url.clone())
+                    .header(CONTENT_TYPE, PROTOBUF)
+                    .body(body.clone())
+                    .bearer_auth(token)
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(error_from(status, response.bytes().await?.as_ref()))
+    }
+
+    /// `GET /v1/channels/{id}/voice` — the channel's current voice roster.
+    pub async fn voice_roster(&self, channel_id: u64) -> Result<v1::VoiceRoster, ApiError> {
+        let url = self.url(&format!("/v1/channels/{channel_id}/voice"))?;
+        let response = self
+            .bearer_send(|token| self.http.get(url.clone()).bearer_auth(token))
+            .await?;
+        decode_response(response).await
+    }
+
     /// `PUT /v1/users/@me/avatar` — set (`media_id`) or clear (`0`) the avatar.
     /// 204 on success; the change propagates via the `UserUpdate` dispatch.
     pub async fn set_avatar(&self, media_id: u64) -> Result<(), ApiError> {

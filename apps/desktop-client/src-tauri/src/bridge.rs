@@ -15,8 +15,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cache::Cache;
 use crate::dto::{
-    ChannelDto, DiceEvent, FriendDto, GuildDto, MessageDto, RESYNC_CHANNEL, UserDto, id_str,
-    presence_str,
+    ChannelDto, DiceEvent, FriendDto, GuildDto, MessageDto, RESYNC_CHANNEL, UserDto,
+    VoiceMemberDto, id_str, presence_str,
 };
 use crate::emit::{Emitter, emit_dice};
 use crate::session::SessionManager;
@@ -436,6 +436,38 @@ impl Bridge {
                         &DiceEvent::FriendUpdate {
                             friend: FriendDto::from(friend),
                             removed: fu.removed,
+                        },
+                    );
+                }
+            }
+            Payload::VoiceJoin(vj) => {
+                // Voice membership lives in the frontend store, not the cache.
+                if let Some(member) = &vj.member {
+                    emit_dice(
+                        &self.emitter,
+                        &DiceEvent::VoiceJoin {
+                            member: VoiceMemberDto::from(member),
+                            user: vj.user.as_ref().map(UserDto::from),
+                        },
+                    );
+                }
+            }
+            Payload::VoiceLeave(vl) => {
+                emit_dice(
+                    &self.emitter,
+                    &DiceEvent::VoiceLeave {
+                        channel_id: id_str(vl.channel_id),
+                        user_id: id_str(vl.user_id),
+                        guild_id: id_str(vl.guild_id),
+                    },
+                );
+            }
+            Payload::VoiceState(vs) => {
+                if let Some(member) = &vs.member {
+                    emit_dice(
+                        &self.emitter,
+                        &DiceEvent::VoiceState {
+                            member: VoiceMemberDto::from(member),
                         },
                     );
                 }
