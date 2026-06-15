@@ -7,6 +7,64 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-15 — M3 (6.5/n): Voice — make the no-audio bug diagnosable (logs + diagnostics)
+
+**Branch:** `main`. Four commits (`4618632` network-core `is_connected` / `b578362` host file-log /
+`034b479` voice diagnostics / `898f97c` frontend self-leave), all pushed. Gates green at the level
+runnable without infra: frontend `tsc` + vite (CSS 54.6 KB), host `clippy --lib --bins -D warnings`,
+network-core `clippy --lib -D warnings`, `cargo fmt` both workspaces. **NOT re-run (Postgres/infra was
+down): full `just check` workspace tests + the host_gate integration test** — but these changes are
+non-SQL (diagnostics + a frontend store fix) and don't touch any service/DB path. Run `just infra-up`
+then `just check` to confirm before the next feature commit.
+
+**Root cause of yesterday's bug (a) "client logs NOTHING — not even `starting voice audio`":** the
+two-client test runs the **release exe** (`just client-as alice/bob`), and `main.rs` sets
+`#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` → the release build is a
+**windowless GUI app with no console**, so every `tracing` line went to a stdout attached to nothing.
+The tracing *filter* was fine (`dice_desktop` prefix-matches the `dice_desktop_lib` crate; `info` is
+the default level). So the audio bug was never visible — debugging was blocked at step 0.
+
+**What shipped (all to make the next live test decisive — no behaviour change to the audio path):**
+- **Per-profile file log** (`lib.rs`): tracing now also tees to a truncated-per-launch `dice.log` next
+  to each profile's `cache.db` in the app-data dir (`%APPDATA%\com.dice.app\[profiles\<name>\]dice.log`).
+  No `unsafe` (the crate `deny`s it) — a `Mutex<File>` `MakeWriter`, not a console attach. Stdout layer
+  stays, so `tauri dev` is unchanged.
+- **`VoiceSender::is_connected()`** (network-core): true iff a live QUIC datagram conn exists. `send` is
+  a silent no-op on WSS — this exposes that.
+- **Engine diagnostics** (`audio.rs`): `voice engine running` now logs `quic_voice_path` + device
+  rates/formats; a **one-time `warn!`** fires if we're capturing audio but `!is_connected()` (i.e. on
+  WSS → nothing transmitted). So a WSS session announces itself loudly instead of being silent.
+- **Join trace** (`bridge.rs`): every `VoiceJoin` dispatch logs `is_self` / `engine_running`, so a
+  self-join that fails to start the engine (is_self false, or already running) is visible.
+- **Frontend self-leave fix** (`stores/voice.ts` + `dispatcher.ts`): the empty "clear active if we left"
+  block is completed with an explicit `isSelf` from the dispatcher — a server-driven removal (kick /
+  joining voice elsewhere) now clears our `active` channel; a remote peer leaving our channel does not.
+  (NOT confirmed to be bug (b) — see below.)
+
+**bug (b) "channel switch not reactive" — status:** could NOT reproduce by inspection. The server is
+correct (`joining_a_second_channel_leaves_the_first` proves a switch publishes VoiceLeave(old) then
+VoiceJoin(new) on the GuildVoice subject), and the Solid store/`ChannelTree` wiring looks reactive
+(`voice.rosters[ch]` / `voice.active` are tracked store reads). Needs the live log to see whether the
+switch dispatches actually ARRIVE at the client. Deferred until the re-test gives data.
+
+**NEXT — the re-test (user runs, I read the logs):**
+1. `just infra-up` → `just check` (confirm infra-gated tests still green). Then `just client-build`.
+2. `just client-as alice` and (2nd terminal) `just client-as bob`. **Logs now appear in each terminal's
+   stdout AND in `%APPDATA%\com.dice.app\profiles\{alice,bob}\dice.log`** (truncated each launch).
+3. Both join the same voice channel; speak (HEADPHONES — no AEC yet). Then read each `dice.log` for:
+   - `voice join dispatch ... is_self=true` then `starting voice audio` then `voice engine running
+     quic_voice_path=<?>`. If `quic_voice_path=false` or the `no QUIC datagram path` warn fires → the
+     session is on **WSS**, not QUIC (status bar should show QUIC); that's bug (a). If `is_self=false` or
+     no `voice engine running` → engine-start path; if `voice engine stopped` with an error → cpal/device.
+4. Send me the two `dice.log` files (or the relevant lines) and we close bug (a), then chase (b) with the
+   dispatch trace.
+
+**Still remaining after the bugs (unchanged):** Step 4 PTT + VAD (currently OPEN MIC), device-picker,
+real-VAD speaking orbs; Step 5 AEC seam, non-48 kHz resampling, heartbeat roster TTL, headline
+<5% CPU / 5%-loss gate, M3 close-out docs. Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-14 — M3 (6/n): Voice — phase-3 audio engine (cpal + Opus) + create-channel
 
 **Branch:** `main`. Commits `26635d8` (cpal+Opus foundation) / `e7dd5c1` (VoiceEngine) / `fea3d60`
