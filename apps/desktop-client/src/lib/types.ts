@@ -12,6 +12,14 @@ export type PresenceStatus = "online" | "idle" | "dnd" | "offline";
 
 export type ChannelKind = "guild_text" | "dm" | "voice";
 
+/** Available capture/playback devices + the system defaults (voice settings). */
+export interface AudioDevices {
+  inputs: string[];
+  outputs: string[];
+  defaultInput: string | null;
+  defaultOutput: string | null;
+}
+
 export interface User {
   id: string;
   username: string;

@@ -14,6 +14,7 @@ import { createMockIpc } from "./ipc.mock";
 import { createTauriIpc } from "./ipc.real";
 import type {
   Attachment,
+  AudioDevices,
   Bootstrap,
   Channel,
   ChannelKind,
@@ -131,6 +132,12 @@ export interface DiceIpc {
   /** Enable/disable global push-to-talk and bind its key (host registers the
       OS-wide shortcut). No-op in the browser mock. */
   setPtt(enabled: boolean, key: string): Promise<void>;
+
+  /** List input/output audio devices + system defaults (for the picker). */
+  listAudioDevices(): Promise<AudioDevices>;
+  /** Choose capture/playback devices by name (null = system default). Applies
+      on the next voice join. */
+  setAudioDevices(input: string | null, output: string | null): Promise<void>;
 
   /** Subscribe to the gateway event stream. Returns an unsubscribe fn. */
   onEvent(cb: (ev: DiceEvent) => void): () => void;

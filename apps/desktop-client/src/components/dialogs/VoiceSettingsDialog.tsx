@@ -1,21 +1,46 @@
-import { For, type Component } from "solid-js";
+import { createSignal, For, onMount, type Component } from "solid-js";
+import { ipc } from "../../lib/ipc";
+import type { AudioDevices } from "../../lib/types";
 import {
+  inputDevice,
+  outputDevice,
   PTT_KEY_LABELS,
   PTT_KEYS,
   pttEnabled,
   pttKey,
+  setInputDevice,
+  setOutputDevice,
   setPttEnabled,
   setPttKey,
   type PttKey,
 } from "../../stores/voiceSettings";
 import styles from "./VoiceSettingsDialog.module.css";
 
-/** Voice settings: push-to-talk on/off + its global key. The host binds the key
- *  OS-wide and gates the mic; this dialog just edits the persisted preference. */
+/** Voice settings: push-to-talk on/off + its global key, and the capture /
+ *  playback device. The host binds the key OS-wide and gates the mic; device
+ *  changes apply on the next voice join. */
 export const VoiceSettingsDialog: Component<{ onClose: () => void }> = (props) => {
+  const [devices, setDevices] = createSignal<AudioDevices>({
+    inputs: [],
+    outputs: [],
+    defaultInput: null,
+    defaultOutput: null,
+  });
+
+  onMount(async () => {
+    try {
+      setDevices(await ipc.listAudioDevices());
+    } catch {
+      /* leave the lists empty → only "System default" is offered */
+    }
+  });
+
   function onKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") props.onClose();
   }
+
+  const defaultLabel = (name: string | null): string =>
+    name ? `System default (${name})` : "System default";
 
   return (
     <div class={styles.scrim} onClick={() => props.onClose()}>
@@ -40,6 +65,26 @@ export const VoiceSettingsDialog: Component<{ onClose: () => void }> = (props) =
         </header>
         <div class={styles.body}>
           <label class={styles.row}>
+            <span>Input (microphone)</span>
+            <select
+              value={inputDevice() ?? ""}
+              onChange={(e) => setInputDevice(e.currentTarget.value || null)}
+            >
+              <option value="">{defaultLabel(devices().defaultInput)}</option>
+              <For each={devices().inputs}>{(d) => <option value={d}>{d}</option>}</For>
+            </select>
+          </label>
+          <label class={styles.row}>
+            <span>Output (speakers)</span>
+            <select
+              value={outputDevice() ?? ""}
+              onChange={(e) => setOutputDevice(e.currentTarget.value || null)}
+            >
+              <option value="">{defaultLabel(devices().defaultOutput)}</option>
+              <For each={devices().outputs}>{(d) => <option value={d}>{d}</option>}</For>
+            </select>
+          </label>
+          <label class={styles.row}>
             <input
               type="checkbox"
               checked={pttEnabled()}
@@ -58,8 +103,8 @@ export const VoiceSettingsDialog: Component<{ onClose: () => void }> = (props) =
             </select>
           </label>
           <p class={styles.hint}>
-            The key works globally (even when Dice isn't focused). Off = open mic. Use headphones —
-            there's no echo cancellation yet.
+            Device changes apply the next time you join voice. PTT works globally (even when Dice
+            isn't focused). Use headphones — there's no echo cancellation yet.
           </p>
         </div>
       </div>

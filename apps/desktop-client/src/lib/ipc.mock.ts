@@ -710,6 +710,14 @@ export function createMockIpc(): DiceIpc {
       /* no global shortcuts in the browser mock */
     },
 
+    async listAudioDevices() {
+      return { inputs: [], outputs: [], defaultInput: null, defaultOutput: null };
+    },
+
+    async setAudioDevices(_input, _output) {
+      /* no audio devices in the browser mock */
+    },
+
     onEvent(cb) {
       subscribers.add(cb);
       startAmbient();

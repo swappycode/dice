@@ -15,6 +15,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DiceIpc } from "./ipc";
 import type {
   Attachment,
+  AudioDevices,
   Bootstrap,
   Channel,
   DiceEvent,
@@ -141,6 +142,8 @@ export function createTauriIpc(): DiceIpc {
     markRead: (channelId) => call<void>("mark_read", { channelId }),
     notify: (title, body) => call<void>("notify", { title, body }),
     setPtt: (enabled, key) => call<void>("set_ptt", { enabled, key }),
+    listAudioDevices: () => call<AudioDevices>("list_audio_devices"),
+    setAudioDevices: (input, output) => call<void>("set_audio_devices", { input, output }),
     onEvent: (cb) => {
       let unlisten: UnlistenFn | null = null;
       let cancelled = false;

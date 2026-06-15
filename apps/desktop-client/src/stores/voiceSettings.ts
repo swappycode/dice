@@ -27,50 +27,93 @@ export const PTT_KEY_LABELS: Record<PttKey, string> = {
 interface Persisted {
   pttEnabled: boolean;
   pttKey: PttKey;
+  /** Chosen device NAMES; null = system default. */
+  inputDevice: string | null;
+  outputDevice: string | null;
 }
 
 function load(): Persisted {
+  const fallback: Persisted = {
+    pttEnabled: false,
+    pttKey: "Backquote",
+    inputDevice: null,
+    outputDevice: null,
+  };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<Persisted>;
-      const key = PTT_KEYS.includes(p.pttKey as PttKey) ? (p.pttKey as PttKey) : "Backquote";
-      return { pttEnabled: Boolean(p.pttEnabled), pttKey: key };
+      return {
+        pttEnabled: Boolean(p.pttEnabled),
+        pttKey: PTT_KEYS.includes(p.pttKey as PttKey) ? (p.pttKey as PttKey) : "Backquote",
+        inputDevice: typeof p.inputDevice === "string" ? p.inputDevice : null,
+        outputDevice: typeof p.outputDevice === "string" ? p.outputDevice : null,
+      };
     }
   } catch {
     /* corrupt / unavailable storage → defaults */
   }
-  return { pttEnabled: false, pttKey: "Backquote" };
+  return fallback;
 }
 
 const initial = load();
 const [pttEnabled, setPttEnabledSig] = createSignal(initial.pttEnabled);
 const [pttKey, setPttKeySig] = createSignal<PttKey>(initial.pttKey);
+const [inputDevice, setInputDeviceSig] = createSignal<string | null>(initial.inputDevice);
+const [outputDevice, setOutputDeviceSig] = createSignal<string | null>(initial.outputDevice);
 
-export { pttEnabled, pttKey };
+export { pttEnabled, pttKey, inputDevice, outputDevice };
 
-function persistAndPush(): void {
-  const enabled = pttEnabled();
-  const key = pttKey();
+function persist(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ pttEnabled: enabled, pttKey: key }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        pttEnabled: pttEnabled(),
+        pttKey: pttKey(),
+        inputDevice: inputDevice(),
+        outputDevice: outputDevice(),
+      }),
+    );
   } catch {
     /* ignore storage failures */
   }
-  void ipc.setPtt(enabled, key).catch(() => {});
+}
+
+function pushPtt(): void {
+  void ipc.setPtt(pttEnabled(), pttKey()).catch(() => {});
+}
+
+function pushDevices(): void {
+  void ipc.setAudioDevices(inputDevice(), outputDevice()).catch(() => {});
 }
 
 export function setPttEnabled(enabled: boolean): void {
   setPttEnabledSig(enabled);
-  persistAndPush();
+  persist();
+  pushPtt();
 }
 
 export function setPttKey(key: PttKey): void {
   setPttKeySig(key);
-  persistAndPush();
+  persist();
+  pushPtt();
+}
+
+export function setInputDevice(name: string | null): void {
+  setInputDeviceSig(name);
+  persist();
+  pushDevices();
+}
+
+export function setOutputDevice(name: string | null): void {
+  setOutputDeviceSig(name);
+  persist();
+  pushDevices();
 }
 
 /** Push the persisted settings to the host once at startup. */
 export function syncVoiceSettings(): void {
-  void ipc.setPtt(pttEnabled(), pttKey()).catch(() => {});
+  pushPtt();
+  pushDevices();
 }
