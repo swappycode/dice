@@ -7,6 +7,41 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-16 — M3 (9/n): Voice — input/output device picker (Step 4 complete)
+
+**Branch:** `main`. Two commits (`151a671` host / `45cd2d7` UI), pushed. Gate green: host `clippy
+--lib --bins -D warnings` + fmt; frontend `tsc` + vite (CSS 56.54 KB). **PTT (M3 8/n) was VERIFIED
+working by the user** before this. **Step 4 (PTT + VAD + device-picker + mute/deafen orbs) is now
+complete** pending the device-picker verify.
+
+- **Enumeration + selection (host).** `audio::list_devices()` lists cpal input/output device names +
+  the system defaults; `VoiceControl` now holds the chosen input/output device NAMES (`None` = system
+  default), and the engine picks by name at start (`pick_input`/`pick_output`, falling back to default)
+  and logs which it opened (`in_device`/`out_device` on "voice engine running"). Commands
+  `list_audio_devices` (cpal enum via `spawn_blocking`) + `set_audio_devices`. **Applies on the next
+  voice join** (cpal streams are bound at engine start) — noted in the UI.
+- **UI.** The Voice settings dialog (🎚️) now lists capture/playback devices (fetched on open) with a
+  "System default" option; the choice persists in localStorage and pushes to the host on change + at
+  startup. `ipc.listAudioDevices`/`setAudioDevices` parity; `AudioDevices` type.
+
+**NEXT — Step 5 (M3 close-out):** the remaining items are hardening/edge-cases (the headline voice
+functionality is done + verified):
+- **Headline gate** — user-measured: 3+ users < 5% CPU, graceful at 5% loss. The loss-resilience
+  (jitter buffer + PLC + `LossStats`) already exists in `dice-voice-core`; needs the measurement +
+  doc. (I can't measure; provide the procedure.)
+- **Heartbeat-refreshed voice-roster TTL** — server robustness vs. a gateway *crash* orphaning voice
+  members (normal teardown already calls `voice.disconnect`). Assess feasibility against the `Cache`
+  trait; implement or document as a carried limitation.
+- **Resampling for non-48 kHz devices** — the engine warns + proceeds today. NEITHER the dev box nor
+  the user (both 48 kHz) can verify resampled audio, so likely a documented known-limitation rather
+  than ship-blind.
+- **AEC seam** (WebRTC APM, C++/abseil) — still deferred; headphones for now.
+- **Robustness Fix 3** — start the engine from the local `voice_join` command too (defense-in-depth;
+  the dispatch path works + is verified, so lower priority now).
+- **M3 close-out docs.** Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-16 — M3 (8/n): Voice — global push-to-talk
 
 **Branch:** `main`. Two commits (`7f96365` host / `418074f` UI), pushed. Gate green: host `cargo check`
