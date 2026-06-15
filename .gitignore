@@ -31,3 +31,5 @@ apps/desktop-client/dist/
 Thumbs.db
 
 # NOTE: .sqlx/ and Cargo.lock are COMMITTED — never add them here
+/client-build.log
+/monolith-run.log
