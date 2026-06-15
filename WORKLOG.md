@@ -1137,9 +1137,8 @@ worker), schema.rs}}.
    fetchMessages pages→offline restart serves bootstrap from cache.
 6. Gates: cargo check/test/clippy -D warnings for the src-tauri package; npm run build;
    try `npm run tauri dev` once (60 s, kill after; report if WebView2/bundling blocks).
-The full original agent prompt (richer detail) is preserved in the workflow script:
-`C:\Users\HP\.claude\projects\D--Dice\ad09a65c-eb63-4f90-afb2-72d383a4fd90\workflows\scripts\dice-phase3-client-wf_2a494195-a40.js`
-(TauriHost phase). Review/fix the partial files against it before continuing.
+The full original agent prompt (richer detail) is preserved in a local build
+script (TauriHost phase). Review/fix the partial files against it before continuing.
 
 **After Phase 3:** Phase 4 = QUIC client transport (fill AnyTransport::Quic; QuicFirst{3 s}
 policy, 2-failure WSS preference, persist last-good transport in cache meta) + verify dev-CA
@@ -1285,5 +1284,5 @@ framing codec u32-BE/256 KiB + forward-compat tests) → `dice-common` (snowflak
 shutdown) → `dice-permissions`, `dice-auth-core`, `dice-logging`, `dice-metrics`, `dice-cache`,
 `dice-event-bus` (Local impl first, NATS second), `dice-database` (migrations 0001–0004).
 Gate: `just infra-up && just db-setup && just sqlx-prepare`, commit `.sqlx/`,
-whole workspace compiles with `SQLX_OFFLINE=true`. Master reference: the approved plan
-(`C:\Users\HP\.claude\plans\master-prompt-build-cheeky-stream.md`) and `docs/design/*`.
+whole workspace compiles with `SQLX_OFFLINE=true`. Master reference: the approved
+local build plan and `docs/design/*`.
