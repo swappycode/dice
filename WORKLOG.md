@@ -7,6 +7,38 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-16 — M3 (8/n): Voice — global push-to-talk
+
+**Branch:** `main`. Two commits (`7f96365` host / `418074f` UI), pushed. Gate green: host `cargo check`
++ `clippy --lib --bins -D warnings` + fmt; frontend `tsc` + vite (CSS 56.54 KB). **M3 7/n
+(mute/deafen + VAD orbs) was VERIFIED working by the user** before this. New host dep
+`tauri-plugin-global-shortcut 2` (pulls `global-hotkey`).
+
+- **Engine gate generalised.** `VoiceControl` gains `ptt_enabled`/`ptt_held` atomics and
+  `transmitting() = !muted && (open-mic || ptt_held)`; the engine now gates capture + VAD on
+  `transmitting()` (was just `muted`), so releasing the PTT key cuts the mic and clears the speaking
+  orb instantly. Mute still independent; deafen still gates playback.
+- **Binding (host).** New `ptt` module binds ONE curated key (Backquote / CapsLock / Insert / F8–F10)
+  via the global-shortcut plugin and mirrors press/release into `ClientCore::set_ptt_held`. The
+  `set_ptt(app, enabled, key)` command (re)binds or clears it; registration is **Rust-side**, so no JS
+  capability is needed (mirrors how `notify` uses the notification plugin). Plugin initialised in
+  `lib.rs` with `ptt::on_shortcut` as the handler.
+- **UI + persistence.** `stores/voiceSettings.ts` (PTT enabled + key, localStorage-persisted) pushes to
+  the host on change AND once at startup (`App.tsx` `onMount` → `syncVoiceSettings()`), so PTT re-binds
+  if it was on last session. A 🎚️ button in `SelfStrip` opens `VoiceSettingsDialog` (checkbox + key
+  `<select>`). `ipc.setPtt` parity across interface/real/mock.
+
+**Verification note:** global shortcuts are runtime/OS-specific — needs a live check that the key
+press/release actually gates the mic (and that a bare key registers globally on Windows). Rebuilt the
+client for the user to verify PTT.
+
+**NEXT:** verify PTT, then **device-picker** (enumerate cpal in/out devices, select into the engine —
+the last grouped Step-4 item), then robustness **Fix 3** (start engine from the local `voice_join`
+command too), then **Step 5** (non-48 kHz resampling, heartbeat roster TTL, headline <5% CPU/5%-loss
+gate, AEC seam still deferred, M3 close-out docs). Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-16 — M3 (7/n): Voice — self-controls (mute/deafen) + VAD speaking orbs
 
 **Branch:** `main`. Four commits (`1a412ce` host mute/deafen / `8c98384` UI mute/deafen / `043135d` host
