@@ -35,9 +35,11 @@ use crate::state::{ClientCore, CoreConfig};
 /// Entry point shared by `main.rs` and the bundler glue.
 pub fn run() {
     dice_network_core::tls::install_ring_provider();
-    init_tracing();
 
+    // Resolve the profile first so the log file is profile-scoped (alice/bob get
+    // their own log for the two-client voice test).
     let profile = active_profile();
+    init_tracing(open_log_file(profile.as_deref()));
     if let Some(name) = &profile {
         tracing::info!(profile = %name, "isolated dev profile: own cache + keyring + window");
     }
@@ -172,14 +174,72 @@ pub fn run() {
     rt.shutdown_background();
 }
 
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
+fn init_tracing(log_file: Option<FileLog>) {
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{EnvFilter, fmt};
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,dice_desktop=debug,dice_network_core=debug"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
+    // The file layer (ANSI off) is a no-op when there's no file. Stdout stays so
+    // `tauri dev` (which has a console) is unchanged; the file is what makes the
+    // release build — a windowless GUI app with no console — debuggable.
+    let file_layer = log_file.map(|log_file| {
+        fmt::layer()
+            .with_ansi(false)
+            .with_target(true)
+            .with_writer(move || log_file.clone())
+    });
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_target(true))
+        .with(file_layer)
         .init();
+}
+
+/// A cloneable, thread-safe writer over a single log file, for the tracing file
+/// layer (one lock per event; events are small and low-volume).
+#[derive(Clone)]
+struct FileLog(Arc<std::sync::Mutex<std::fs::File>>);
+
+impl std::io::Write for FileLog {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("log file lock").write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.lock().expect("log file lock").flush()
+    }
+}
+
+/// Open (truncate) this instance's `dice.log`, next to its `cache.db` in the
+/// Tauri app-data dir (profile-scoped). Truncated per launch so a log reflects
+/// exactly the current session. `None` (→ stdout only) if the dir is
+/// unavailable — logging must never block startup.
+fn open_log_file(profile: Option<&str>) -> Option<FileLog> {
+    use std::io::Write as _;
+
+    let base = app_data_dir()?;
+    let dir = match profile {
+        Some(name) => base.join("profiles").join(name),
+        None => base,
+    };
+    std::fs::create_dir_all(&dir).ok()?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(dir.join("dice.log"))
+        .ok()?;
+    // A marker so the user can tell a fresh run apart from a stale file.
+    let _ = writeln!(file, "--- dice desktop log (truncated at launch) ---");
+    Some(FileLog(Arc::new(std::sync::Mutex::new(file))))
+}
+
+/// `%APPDATA%\com.dice.app` — the dir Tauri's `app_data_dir()` resolves to on
+/// Windows for our `com.dice.app` identifier (see tauri.conf.json). Mirrored
+/// here so the log lands beside `cache.db`, before the Tauri app handle exists.
+fn app_data_dir() -> Option<std::path::PathBuf> {
+    let appdata = std::env::var_os("APPDATA")?;
+    Some(std::path::Path::new(&appdata).join("com.dice.app"))
 }
 
 /// WebView2 browser arguments, applied at webview creation. Tuned for RAM:
