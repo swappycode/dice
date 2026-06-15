@@ -207,10 +207,22 @@
   text-overflow: ellipsis;
 }
 
-/* a speaking member's name lifts to the accent colour (one-shot, no loop) */
+/* a speaking member: a green orb leads the name, which lifts to the accent
+   colour + bold (static, no animation loop) */
 .speaking {
   color: var(--c-accent);
   font-weight: 700;
+}
+
+.speaking::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--orb-online);
+  vertical-align: middle;
 }
 
 .voiceTag {
