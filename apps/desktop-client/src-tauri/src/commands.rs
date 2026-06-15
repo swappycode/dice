@@ -359,3 +359,21 @@ pub fn notify(app: tauri::AppHandle, title: String, body: String) {
 pub fn set_ptt(app: tauri::AppHandle, core: Core<'_>, enabled: bool, key: String) -> CmdResult<()> {
     crate::ptt::apply(&app, &core, enabled, &key)
 }
+
+/// List input/output audio devices + the system defaults (for the picker).
+#[tauri::command]
+pub async fn list_audio_devices(core: Core<'_>) -> CmdResult<crate::audio::AudioDevices> {
+    Ok(core.list_audio_devices().await)
+}
+
+/// Choose capture/playback devices by name (`null` = system default). Applies on
+/// the next voice join.
+#[tauri::command]
+pub fn set_audio_devices(
+    core: Core<'_>,
+    input: Option<String>,
+    output: Option<String>,
+) -> CmdResult<()> {
+    core.set_audio_devices(input, output);
+    Ok(())
+}

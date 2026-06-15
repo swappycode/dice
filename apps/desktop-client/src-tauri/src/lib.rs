@@ -174,6 +174,8 @@ pub fn run() {
             commands::connection_state,
             commands::notify,
             commands::set_ptt,
+            commands::list_audio_devices,
+            commands::set_audio_devices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Dice desktop host");

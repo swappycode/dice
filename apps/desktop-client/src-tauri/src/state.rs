@@ -1033,6 +1033,20 @@ impl ClientCore {
         self.voice_control.set_ptt_held(held);
     }
 
+    /// Choose capture/playback devices by name (`None` = system default). Takes
+    /// effect on the next voice join (cpal streams are bound at engine start).
+    pub fn set_audio_devices(&self, input: Option<String>, output: Option<String>) {
+        self.voice_control.set_devices(input, output);
+    }
+
+    /// Enumerate input/output devices for the picker (blocking cpal call, off
+    /// the runtime).
+    pub async fn list_audio_devices(&self) -> crate::audio::AudioDevices {
+        tokio::task::spawn_blocking(crate::audio::list_devices)
+            .await
+            .unwrap_or_default()
+    }
+
     pub async fn voice_roster(&self, channel_id: &str) -> Result<VoiceRosterDto, CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
         let roster = self.api.voice_roster(channel).await?;

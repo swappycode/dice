@@ -128,6 +128,10 @@ pub struct VoiceControl {
     /// Push-to-talk mode: when on, the mic only transmits while `ptt_held`.
     ptt_enabled: AtomicBool,
     ptt_held: AtomicBool,
+    /// Chosen input/output device NAMES (`None` = system default). Read by the
+    /// engine when it starts, so a change applies on the next voice join.
+    input_device: Mutex<Option<String>>,
+    output_device: Mutex<Option<String>>,
     speaking: tokio::sync::watch::Sender<bool>,
 }
 
@@ -141,9 +145,24 @@ impl VoiceControl {
             deafened: AtomicBool::new(false),
             ptt_enabled: AtomicBool::new(false),
             ptt_held: AtomicBool::new(false),
+            input_device: Mutex::new(None),
+            output_device: Mutex::new(None),
             speaking,
         });
         (control, rx)
+    }
+
+    /// Choose input/output devices by name (`None` = system default). Applies on
+    /// the next voice join (cpal streams are bound at engine start).
+    pub fn set_devices(&self, input: Option<String>, output: Option<String>) {
+        *self.input_device.lock().expect("device lock") = input;
+        *self.output_device.lock().expect("device lock") = output;
+    }
+    fn input_device(&self) -> Option<String> {
+        self.input_device.lock().expect("device lock").clone()
+    }
+    fn output_device(&self) -> Option<String> {
+        self.output_device.lock().expect("device lock").clone()
     }
 
     pub fn set(&self, muted: bool, deafened: bool) {
@@ -182,6 +201,62 @@ fn rms_i16(frame: &[i16]) -> f32 {
     }
     let sum: f64 = frame.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
     (sum / frame.len() as f64).sqrt() as f32
+}
+
+// ----------------------------------------------------------- device picking
+
+/// The available capture/playback devices + the system defaults, for the picker.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDevices {
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub default_input: Option<String>,
+    pub default_output: Option<String>,
+}
+
+/// Enumerate the host's input/output devices by name (best-effort: a device
+/// whose name can't be read is skipped). Blocking — call off the async runtime.
+pub fn list_devices() -> AudioDevices {
+    let host = cpal::default_host();
+    // `input_devices()` / `output_devices()` return different iterator types, so
+    // collect each inline rather than through one shared helper.
+    let inputs = host
+        .input_devices()
+        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default();
+    let outputs = host
+        .output_devices()
+        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default();
+    AudioDevices {
+        inputs,
+        outputs,
+        default_input: host.default_input_device().and_then(|d| d.name().ok()),
+        default_output: host.default_output_device().and_then(|d| d.name().ok()),
+    }
+}
+
+/// The chosen input device by name, falling back to the system default.
+fn pick_input(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
+    if let Some(name) = name
+        && let Ok(mut devs) = host.input_devices()
+        && let Some(dev) = devs.find(|d| d.name().ok().as_deref() == Some(name))
+    {
+        return Some(dev);
+    }
+    host.default_input_device()
+}
+
+/// The chosen output device by name, falling back to the system default.
+fn pick_output(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
+    if let Some(name) = name
+        && let Ok(mut devs) = host.output_devices()
+        && let Some(dev) = devs.find(|d| d.name().ok().as_deref() == Some(name))
+    {
+        return Some(dev);
+    }
+    host.default_output_device()
 }
 
 // -------------------------------------------------------------- voice engine
@@ -266,12 +341,10 @@ fn run_engine(
     control: &VoiceControl,
 ) -> anyhow::Result<()> {
     let host = cpal::default_host();
-    let input = host
-        .default_input_device()
-        .ok_or_else(|| anyhow::anyhow!("no default input device"))?;
-    let output = host
-        .default_output_device()
-        .ok_or_else(|| anyhow::anyhow!("no default output device"))?;
+    let input = pick_input(&host, control.input_device().as_deref())
+        .ok_or_else(|| anyhow::anyhow!("no input device"))?;
+    let output = pick_output(&host, control.output_device().as_deref())
+        .ok_or_else(|| anyhow::anyhow!("no output device"))?;
     let in_cfg = input.default_input_config()?;
     let out_cfg = output.default_output_config()?;
     if in_cfg.sample_rate().0 != SAMPLE_RATE || out_cfg.sample_rate().0 != SAMPLE_RATE {
@@ -293,6 +366,8 @@ fn run_engine(
     tracing::info!(
         ssrc,
         quic_voice_path = sender.is_connected(),
+        in_device = %input.name().unwrap_or_default(),
+        out_device = %output.name().unwrap_or_default(),
         in_rate = in_cfg.sample_rate().0,
         out_rate = out_cfg.sample_rate().0,
         in_format = ?in_cfg.sample_format(),
