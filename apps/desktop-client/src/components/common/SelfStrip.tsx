@@ -3,6 +3,13 @@ import { ipc } from "../../lib/ipc";
 import type { PresenceStatus } from "../../lib/types";
 import { resetClientState } from "../../gateway/dispatcher";
 import { presenceOf } from "../../stores/presence";
+import {
+  activeVoiceChannel,
+  isSelfDeafened,
+  isSelfMuted,
+  toggleSelfDeafen,
+  toggleSelfMute,
+} from "../../stores/voice";
 import { currentUser, setSession } from "../../stores/session";
 import { SecurityDialog } from "../dialogs/SecurityDialog";
 import { Avatar } from "./Avatar";
@@ -71,6 +78,28 @@ export const SelfStrip: Component = () => {
             <PresenceOrb status={presenceOf(me().id)()} />
           </button>
           <span class={styles.selfName}>{me().displayName}</span>
+          <Show when={activeVoiceChannel()}>
+            <button
+              type="button"
+              class={styles.voiceCtl}
+              classList={{ [styles.voiceOn!]: isSelfMuted() }}
+              title={isSelfMuted() ? "Unmute" : "Mute"}
+              aria-label={isSelfMuted() ? "Unmute microphone" : "Mute microphone"}
+              onClick={() => toggleSelfMute(me().id)}
+            >
+              🎙
+            </button>
+            <button
+              type="button"
+              class={styles.voiceCtl}
+              classList={{ [styles.voiceOn!]: isSelfDeafened() }}
+              title={isSelfDeafened() ? "Undeafen" : "Deafen"}
+              aria-label={isSelfDeafened() ? "Undeafen" : "Deafen"}
+              onClick={() => toggleSelfDeafen(me().id)}
+            >
+              🎧
+            </button>
+          </Show>
           <button
             type="button"
             class={styles.security}

@@ -7,6 +7,7 @@
  * there (the client receives its own voice events via the guild voice subject).
  */
 
+import { createSignal } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { ipc } from "../lib/ipc";
 import type { User, VoiceMember } from "../lib/types";
@@ -41,6 +42,53 @@ export function activeVoiceChannel(): string | null {
   return voice.active;
 }
 
+// --- Self mute / deafen. The signals drive the buttons; the host mirrors them
+// into the audio engine (mute stops the mic, deafen stops playback) and fans the
+// state out so peers see the muted/deaf tags. Deafen implies mute. ---
+
+const [selfMuted, setSelfMuted] = createSignal(false);
+const [selfDeafened, setSelfDeafened] = createSignal(false);
+
+/** Whether this client's mic is muted. */
+export const isSelfMuted = selfMuted;
+/** Whether this client is deafened (own output silenced). */
+export const isSelfDeafened = selfDeafened;
+
+/** Optimistically tag our own roster member, then fan the state to the server
+ *  (the VoiceState dispatch reconciles it on every client, including us). */
+function pushSelfVoiceState(selfId: string): void {
+  const channelId = voice.active;
+  if (!channelId) return;
+  const muted = selfMuted();
+  const deafened = selfDeafened();
+  setVoice(
+    produce((s) => {
+      const me = s.rosters[channelId]?.find((m) => m.userId === selfId);
+      if (me) {
+        me.muted = muted;
+        me.deafened = deafened;
+      }
+    }),
+  );
+  void ipc.voiceState(channelId, muted, deafened, false).catch(() => {});
+}
+
+/** Toggle our mic mute. Unmuting also lifts deafen. */
+export function toggleSelfMute(selfId: string): void {
+  setSelfMuted((m) => !m);
+  if (!selfMuted()) setSelfDeafened(false);
+  pushSelfVoiceState(selfId);
+}
+
+/** Toggle deafen — silences our own output and (since you can't usefully talk
+ *  while deafened) mutes the mic too. */
+export function toggleSelfDeafen(selfId: string): void {
+  const next = !selfDeafened();
+  setSelfDeafened(next);
+  setSelfMuted(next);
+  pushSelfVoiceState(selfId);
+}
+
 function upsertMember(channelId: string, member: VoiceMember): void {
   setVoice(
     produce((s) => {
@@ -56,6 +104,9 @@ function upsertMember(channelId: string, member: VoiceMember): void {
 /** Join a voice channel: seed its roster from the snapshot, then let the
  *  dispatches keep it live. Returns once the server has accepted the join. */
 export async function joinVoice(channelId: string): Promise<void> {
+  // Fresh join is unmuted/undeafened (matches the args below + the host engine).
+  setSelfMuted(false);
+  setSelfDeafened(false);
   const roster = await ipc.voiceJoin(channelId, false, false);
   setVoice(
     produce((s) => {
@@ -71,6 +122,8 @@ export async function leaveVoice(): Promise<void> {
   const channelId = voice.active;
   if (!channelId) return;
   setVoice("active", null);
+  setSelfMuted(false);
+  setSelfDeafened(false);
   await ipc.voiceLeave(channelId);
 }
 
@@ -103,6 +156,8 @@ export function applyVoiceState(member: VoiceMember): void {
 /** Clear everything on logout / account switch. */
 export function resetVoice(): void {
   setVoice(reconcile({ rosters: {}, users: {}, active: null }));
+  setSelfMuted(false);
+  setSelfDeafened(false);
 }
 
 export { voice };

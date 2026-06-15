@@ -57,3 +57,38 @@
   color: var(--c-link);
   text-decoration: underline;
 }
+
+/* Voice self-controls (shown only while in a voice channel). */
+.voiceCtl {
+  position: relative;
+  flex: none;
+  background: none;
+  border: none;
+  padding: 0 var(--sp-1);
+  font-size: var(--font-size-chrome);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.voiceCtl:hover {
+  opacity: 1;
+}
+
+/* Engaged (muted / deafened): a red diagonal slash across the icon. */
+.voiceOn {
+  opacity: 1;
+}
+
+.voiceOn::after {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 2px;
+  background: var(--orb-dnd);
+  transform: rotate(-20deg);
+  transform-origin: center;
+  pointer-events: none;
+}
