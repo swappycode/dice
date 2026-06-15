@@ -193,6 +193,15 @@ impl VoiceControl {
     }
 }
 
+/// xorshift64 → uniform f64 in `[0, 1)`. Only used by the `DICE_VOICE_LOSS`
+/// test aid, so a tiny non-crypto PRNG (no `rand` dependency) is plenty.
+fn next_unit(state: &mut u64) -> f64 {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    (*state >> 11) as f64 / (1u64 << 53) as f64
+}
+
 /// Root-mean-square level of a frame (i16 scale). Cheap voice-activity signal:
 /// near-zero on silence, hundreds-to-thousands on speech.
 fn rms_i16(frame: &[i16]) -> f32 {
@@ -348,11 +357,11 @@ fn run_engine(
     let in_cfg = input.default_input_config()?;
     let out_cfg = output.default_output_config()?;
     if in_cfg.sample_rate().0 != SAMPLE_RATE || out_cfg.sample_rate().0 != SAMPLE_RATE {
-        // No resampler yet (Step-1 devices are 48 kHz); warn and proceed.
-        tracing::warn!(
+        // Off-rate devices are linearly resampled to/from 48 kHz (see below).
+        tracing::info!(
             in_rate = in_cfg.sample_rate().0,
             out_rate = out_cfg.sample_rate().0,
-            "voice device not at 48 kHz — pitch will be off until resampling lands"
+            "voice device not at 48 kHz — resampling (linear) to/from 48 kHz"
         );
     }
 
@@ -384,6 +393,21 @@ fn run_engine(
     // VAD speaking state + a short hangover so the orb doesn't flicker.
     let mut speaking = false;
     let mut hangover: u32 = 0;
+    // Test aid: DICE_VOICE_LOSS=0.05 drops 5% of INBOUND frames so the headline
+    // "graceful at 5% loss" gate is testable (jitter buffer + PLC conceal the
+    // gaps). 0 / unset = off (production path untouched).
+    let loss: f64 = std::env::var("DICE_VOICE_LOSS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(0.0);
+    if loss > 0.0 {
+        tracing::warn!(
+            loss,
+            "DICE_VOICE_LOSS active: dropping inbound voice frames (test aid)"
+        );
+    }
+    let mut rng: u64 = u64::from(ssrc).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
     let mut frame = vec![0i16; FRAME_SAMPLES];
     let mut remotes: HashMap<u32, RemoteStream> = HashMap::new();
     // Keep ~2 frames (40 ms) queued for the output device.
@@ -458,6 +482,9 @@ fn run_engine(
             if deafened {
                 continue;
             }
+            if loss > 0.0 && next_unit(&mut rng) < loss {
+                continue; // simulated network loss (test aid)
+            }
             if let Ok(vf) = VoiceFrame::decode(bytes) {
                 match remotes.entry(vf.ssrc) {
                     std::collections::hash_map::Entry::Occupied(mut e) => {
@@ -508,6 +535,90 @@ fn run_engine(
     Ok(())
 }
 
+// ------------------------------------------------------------- resampling
+
+// The pipeline is 48 kHz; if a device runs at another rate we linearly resample
+// to/from 48 kHz. Linear interpolation is basic (a polyphase resampler would be
+// higher quality), but it's bypassed entirely at 48 kHz, so the common path is
+// untouched. Capture pushes arriving blocks through `PushResampler`; playback
+// pulls one device-rate sample at a time through `PullResampler`.
+
+/// Capture-side resampler (`in_rate` → 48 kHz): feed arriving blocks, append
+/// 48 kHz samples to `out`.
+struct PushResampler {
+    /// Input samples advanced per output sample.
+    step: f64,
+    /// Read position within the stream `[prev, block[0], block[1], …]`.
+    pos: f64,
+    /// Last sample of the previous block (index 0 of the read stream).
+    prev: f32,
+}
+
+impl PushResampler {
+    fn new(in_rate: u32, out_rate: u32) -> Self {
+        Self {
+            step: f64::from(in_rate) / f64::from(out_rate),
+            pos: 1.0,
+            prev: 0.0,
+        }
+    }
+
+    fn process(&mut self, block: &[f32], out: &mut Vec<f32>) {
+        let n = block.len();
+        if n == 0 {
+            return;
+        }
+        let prev = self.prev;
+        let at = |idx: usize| -> f32 { if idx == 0 { prev } else { block[idx - 1] } };
+        while self.pos < n as f64 {
+            let i = self.pos.floor() as usize;
+            let frac = (self.pos - i as f64) as f32;
+            out.push(at(i) * (1.0 - frac) + at(i + 1) * frac);
+            self.pos += self.step;
+        }
+        self.prev = block[n - 1];
+        self.pos -= n as f64;
+    }
+}
+
+/// Playback-side resampler (48 kHz → `out_rate`): one output sample per `next`,
+/// pulling 48 kHz samples on demand (`pull` returns 0.0 on underrun).
+struct PullResampler {
+    step: f64,
+    pos: f64,
+    cur: f32,
+    nxt: f32,
+    primed: bool,
+}
+
+impl PullResampler {
+    fn new(in_rate: u32, out_rate: u32) -> Self {
+        Self {
+            step: f64::from(in_rate) / f64::from(out_rate),
+            pos: 0.0,
+            cur: 0.0,
+            nxt: 0.0,
+            primed: false,
+        }
+    }
+
+    fn next_sample(&mut self, pull: &mut impl FnMut() -> f32) -> f32 {
+        if !self.primed {
+            self.cur = pull();
+            self.nxt = pull();
+            self.primed = true;
+        }
+        let out = self.cur * (1.0 - self.pos as f32) + self.nxt * self.pos as f32;
+        self.pos += self.step;
+        while self.pos >= 1.0 {
+            self.pos -= 1.0;
+            self.cur = self.nxt;
+            self.nxt = pull();
+        }
+        out
+    }
+}
+
 /// Capture stream: downmix each frame to mono f32 into `buf`, bounding backlog.
 fn build_capture(
     device: &cpal::Device,
@@ -533,15 +644,35 @@ where
     f32: FromSample<T>,
 {
     let channels = config.channels as usize;
-    let max_backlog = config.sample_rate.0 as usize; // ~1 s safety cap
+    let in_rate = config.sample_rate.0;
+    let max_backlog = SAMPLE_RATE as usize; // ~1 s at 48 kHz (post-resample)
+    let mut resampler = (in_rate != SAMPLE_RATE).then(|| PushResampler::new(in_rate, SAMPLE_RATE));
+    let mut mono: Vec<f32> = Vec::new();
+    let mut resampled: Vec<f32> = Vec::new();
     let stream = device.build_input_stream(
         config,
         move |data: &[T], _: &cpal::InputCallbackInfo| {
             let Ok(mut b) = buf.lock() else { return };
-            for frame in data.chunks(channels) {
-                let mono =
-                    frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>() / channels as f32;
-                b.push_back(mono);
+            match &mut resampler {
+                Some(r) => {
+                    mono.clear();
+                    for frame in data.chunks(channels) {
+                        mono.push(
+                            frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>()
+                                / channels as f32,
+                        );
+                    }
+                    resampled.clear();
+                    r.process(&mono, &mut resampled);
+                    b.extend(resampled.iter().copied());
+                }
+                None => {
+                    for frame in data.chunks(channels) {
+                        let m = frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>()
+                            / channels as f32;
+                        b.push_back(m);
+                    }
+                }
             }
             while b.len() > max_backlog {
                 b.pop_front();
@@ -578,12 +709,20 @@ where
     T: SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
+    let out_rate = config.sample_rate.0;
+    let mut resampler =
+        (out_rate != SAMPLE_RATE).then(|| PullResampler::new(SAMPLE_RATE, out_rate));
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
             let mut guard = buf.lock().ok();
             for out_frame in data.chunks_mut(channels) {
-                let mono = guard.as_mut().and_then(|b| b.pop_front()).unwrap_or(0.0);
+                let mono = match &mut resampler {
+                    Some(r) => r.next_sample(&mut || {
+                        guard.as_mut().and_then(|b| b.pop_front()).unwrap_or(0.0)
+                    }),
+                    None => guard.as_mut().and_then(|b| b.pop_front()).unwrap_or(0.0),
+                };
                 let sample = T::from_sample(mono);
                 for x in out_frame.iter_mut() {
                     *x = sample;
@@ -627,6 +766,30 @@ mod tests {
         // Packet loss: PLC still yields a full frame.
         let concealed = codec.decode(None, &mut out).unwrap();
         assert_eq!(concealed, FRAME_SAMPLES, "PLC produces a frame on loss");
+    }
+
+    #[test]
+    fn resamplers_change_length_by_ratio_and_preserve_a_constant() {
+        // Capture 24k → 48k roughly doubles the sample count.
+        let mut up = PushResampler::new(24_000, 48_000);
+        let mut out = Vec::new();
+        up.process(&[0.5f32; 2400], &mut out); // 100 ms @ 24k
+        assert!((out.len() as i32 - 4800).abs() <= 4, "got {}", out.len());
+        assert!(
+            out.iter().all(|&s| (s - 0.5).abs() < 0.01),
+            "constant preserved"
+        );
+
+        // Playback 48k → 24k roughly halves: pulling 2400 outputs eats ~4800 in.
+        let mut down = PullResampler::new(48_000, 24_000);
+        let mut src: VecDeque<f32> = std::iter::repeat_n(0.5f32, 4800).collect();
+        let produced: Vec<f32> = (0..2400)
+            .map(|_| down.next_sample(&mut || src.pop_front().unwrap_or(0.0)))
+            .collect();
+        assert!(
+            produced.iter().take(2000).all(|&s| (s - 0.5).abs() < 0.01),
+            "constant preserved through downsample"
+        );
     }
 
     #[test]
