@@ -36,14 +36,22 @@ device picker** (all user-verified). Voice audio + roster were **user-verified w
   heartbeat TTL is a storage redesign — deferred (was a documented phase-1 limitation already).
 - **Engine-start Fix 3** — engine starts on the self `VoiceJoin` dispatch (now reliable + verified);
   also starting from the local `voice_join` ack is belt-and-suspenders — deferred.
+- **Live device switching → M4 (user-flagged 2026-06-16).** Changing the input/output device is NOT
+  applied live — the engine binds cpal streams at start, so a change only takes effect on the next
+  engine start (the user found a full **re-login** applies it). **M4 task:** apply it live — add a
+  device-generation `watch` to `VoiceControl` (bump in `set_devices`); the bridge subscribes and, if
+  the engine is running, drops + recreates it with the stored ssrc (clean drop+recreate, brief gap, no
+  membership change / no VoiceLeave-Join to peers). Store the current ssrc on the bridge when it starts
+  the engine.
 
 **Carried follow-ups (optional, from M2, still open):** Auth+Chat over split-mode RPC + `services/*/
 src/bin/*.rs` split bins; orphaned-media GC; "unread divider line" UI; email-verify as an enforced
 login gate; TOTP-secret encryption-at-rest; per-`--profile` WebView2 data-dir.
 
-**NEXT MILESTONE (M4) — to be defined with the user.** Candidates: the carried follow-ups above;
-voice hardening (AEC via a Linux/WebRTC path, polyphase resampling, roster-TTL redesign); or new
-feature area. Next free Frame dispatch # = **121**. Infra: `just infra-up` + `just run-full`; client:
+**NEXT MILESTONE (M4) — starts 2026-06-17 (tomorrow), theme TBD with the user.** First concrete task
+the user flagged: **live device switching** (see the limitation above). Other candidates: the carried
+follow-ups above; voice hardening (AEC via a Linux/WebRTC path, polyphase resampling, roster-TTL
+redesign); or a new feature area. Next free Frame dispatch # = **121**. Infra: `just infra-up` + `just run-full`; client:
 `just client-build` + `just client-as <name>`; logs at `%APPDATA%\com.dice.app\profiles\<name>\dice.log`.
 
 ---
