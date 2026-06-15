@@ -7,6 +7,57 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-15 — M3 (6.6/n): Voice — ROOT CAUSE FOUND + fixed (client dropped voice dispatches)
+
+**Branch:** `main`. One commit (`3a64ec5`), pushed. Gate green: `cargo fmt`, `cargo clippy
+-p dice-network-core --features client -D warnings`, all 33 network-core lib tests (incl. the new
+regression test), host `clippy --lib --bins -D warnings`.
+
+**Live re-test (2026-06-15) reproduced BOTH bugs** with two real clients (swappy + asfawfaf), both
+**Connected (QUIC)**, same guild/voice channel: (a) NO audio either way; (b) asfawfaf (joined 1st) saw
+only itself in the roster, swappy (joined 2nd) saw both. (Prereq fixed first this session: backend
+wasn't running → started monolith via `just run-full`; then a stale Redis session → re-login.)
+
+**ROOT CAUSE (one client-side line; found via an 11-agent adversarial Workflow + own trace).** The
+gateway **driver** only surfaced a frame as `ClientEvent::Dispatch` for `TypingStart` **or** `seq > 0`
+(`crates/network-core/src/client/gateway.rs`, the `handle_frame` match). Voice control frames
+(`VoiceJoin`/`Leave`/`State`) are published **ephemeral**, so they arrive with **seq = 0**, and — not
+being `TypingStart` — fell through to the `_ => Continue` (ignore) arm and were **silently dropped
+before the bridge ever saw them.** That ONE drop explains BOTH symptoms:
+- **Stale roster:** asfawfaf never received `VoiceJoin(swappy)`. swappy saw both only from its REST
+  join *snapshot* (`voice-service join()` returns the roster incl. prior members) — which is why the
+  symptom was asymmetric and looked like a frontend bug but wasn't.
+- **No audio:** the cpal `VoiceEngine` starts at exactly one site (`bridge.rs` `Payload::VoiceJoin` arm,
+  `is_self`), i.e. off the client's OWN `VoiceJoin` dispatch — also dropped → no engine ever started →
+  neither side captured or played, so the (correct, unit-tested) QUIC SFU/datagram path was inert.
+- **Why presence worked:** presence is published **non-ephemeral** (`seq > 0`) → passed the `seq > 0`
+  arm. Voice was the only ephemeral *non-typing* dispatch, so it was uniquely affected.
+
+The Workflow **refuted** the leading "gateway not subscribing/delivering" hypothesis and the
+"frontend reactivity" hypothesis — gateway `guild_subjects` includes `GuildVoice`, `deliver()` fans to
+all senders incl. self with no filter, and the Solid store/`ChannelTree` are reactive. All correct;
+the only fault was the client driver's `seq=0` filter.
+
+**Fix (`3a64ec5`):** extract the rule into a pure `is_app_dispatch(payload, seq)` that admits
+`TypingStart` **and** the three voice frames, used by `handle_frame`; updated the stale `Dispatch`
+doc comment; added a **regression unit test** so a future voice dispatch can't be silently forgotten.
+Additive, client-driver-only — cannot affect the server voice-service tests or presence/typing.
+
+**NEXT — verify (rebuild in progress, `just client-build`):**
+1. Relaunch `just client-as alice` + `just client-as bob` (or swappy/asfawfaf), join the same voice
+   channel, speak on **headphones**. Expect: rosters update live on BOTH clients, and audio is audible.
+2. Confirm in each `%APPDATA%\com.dice.app\profiles\<name>\dice.log`: `voice join dispatch ...
+   is_self=true` → `starting voice audio` → `voice engine running quic_voice_path=true`, and inbound
+   `VoiceData` lines. If rosters now update but audio still fails, the residual fault is in the QUIC
+   datagram SFU path (separate investigation) — but that path is already E2E-verified, so audio is
+   expected to work.
+3. **Deferred robustness (Fix 3, not yet done):** start/stop the engine from the LOCAL `voice_join`/
+   `voice_leave` command result too (not solely the self broadcast dispatch), so a single dropped
+   ephemeral can't leave a joined client permanently silent. Then Step 4 (PTT/VAD/device-picker/orbs)
+   + Step 5 (AEC/resampling/roster-TTL/headline-gate/docs).
+
+---
+
 ## 2026-06-15 — M3 (6.5/n): Voice — make the no-audio bug diagnosable (logs + diagnostics)
 
 **Branch:** `main`. Four commits (`4618632` network-core `is_connected` / `b578362` host file-log /
