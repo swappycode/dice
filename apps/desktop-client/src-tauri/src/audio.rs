@@ -30,6 +30,13 @@ pub const FRAME_MS: u32 = 20;
 /// Samples in one mono frame (960 @ 48 kHz / 20 ms).
 pub const FRAME_SAMPLES: usize = (SAMPLE_RATE as usize / 1000) * FRAME_MS as usize;
 
+/// VAD: i16 RMS at/above this over a 20 ms frame counts as speech (tuned for a
+/// quiet-room noise floor vs. normal speech; refine once measured on real mics).
+const VAD_RMS_THRESHOLD: f32 = 900.0;
+/// Hold "speaking" this many frames (20 ms each) after the level dips, so the
+/// orb doesn't flicker between syllables. 15 ≈ 300 ms.
+const VAD_HANGOVER_FRAMES: u32 = 15;
+
 /// Encode/decode one 20 ms mono frame. Behind a trait so the rest of the
 /// pipeline never names a concrete codec.
 pub trait VoiceCodec: Send {
@@ -108,18 +115,32 @@ fn mix_clip(acc: i32) -> i16 {
 
 // ------------------------------------------------------------ voice control
 
-/// Shared, lock-free mic/output gating the audio thread reads each tick. Owned
-/// by `ClientCore` (set from the `voice_state` command) and read by the running
+/// Shared mic/output gating the audio thread reads each tick. Owned by
+/// `ClientCore` (set from the `voice_state` command) and read by the running
 /// [`VoiceEngine`] — so muting/deafening takes effect without restarting it.
 /// `muted` stops capture from being transmitted; `deafened` stops remote audio
-/// from being played (and drops inbound so the jitter buffers can't grow).
-#[derive(Default)]
+/// from being played (and drops inbound so the jitter buffers can't grow). The
+/// engine's VAD pushes `speaking` here on each transition; a `ClientCore` task
+/// watches it and fans it out as `VoiceState` (driving the per-user orbs).
 pub struct VoiceControl {
     muted: AtomicBool,
     deafened: AtomicBool,
+    speaking: tokio::sync::watch::Sender<bool>,
 }
 
 impl VoiceControl {
+    /// Create the control plus the receiver a `ClientCore` task watches to
+    /// publish speaking transitions as `VoiceState`.
+    pub fn new() -> (Arc<Self>, tokio::sync::watch::Receiver<bool>) {
+        let (speaking, rx) = tokio::sync::watch::channel(false);
+        let control = Arc::new(Self {
+            muted: AtomicBool::new(false),
+            deafened: AtomicBool::new(false),
+            speaking,
+        });
+        (control, rx)
+    }
+
     pub fn set(&self, muted: bool, deafened: bool) {
         self.muted.store(muted, Ordering::Relaxed);
         self.deafened.store(deafened, Ordering::Relaxed);
@@ -130,6 +151,20 @@ impl VoiceControl {
     pub fn deafened(&self) -> bool {
         self.deafened.load(Ordering::Relaxed)
     }
+    /// Publish a VAD speaking transition (call only on change).
+    pub fn set_speaking(&self, speaking: bool) {
+        let _ = self.speaking.send_replace(speaking);
+    }
+}
+
+/// Root-mean-square level of a frame (i16 scale). Cheap voice-activity signal:
+/// near-zero on silence, hundreds-to-thousands on speech.
+fn rms_i16(frame: &[i16]) -> f32 {
+    if frame.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = frame.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+    (sum / frame.len() as f64).sqrt() as f32
 }
 
 // -------------------------------------------------------------- voice engine
@@ -254,6 +289,9 @@ fn run_engine(
     // Warn ONCE if we're capturing audio but have no QUIC datagram path (a WSS
     // session is silent — voice rides QUIC only). Makes "no audio" diagnosable.
     let mut warned_no_path = false;
+    // VAD speaking state + a short hangover so the orb doesn't flicker.
+    let mut speaking = false;
+    let mut hangover: u32 = 0;
     let mut frame = vec![0i16; FRAME_SAMPLES];
     let mut remotes: HashMap<u32, RemoteStream> = HashMap::new();
     // Keep ~2 frames (40 ms) queued for the output device.
@@ -262,6 +300,13 @@ fn run_engine(
     while !stop.load(Ordering::Relaxed) {
         let muted = control.muted();
         let deafened = control.deafened();
+
+        // Muted is never "speaking"; clear the orb the instant the mic is cut.
+        if muted && speaking {
+            speaking = false;
+            hangover = 0;
+            control.set_speaking(false);
+        }
 
         // 1. Capture → encode → send every full 20 ms frame. When muted we still
         //    drain the capture buffer (so it can't back up) but transmit nothing.
@@ -277,6 +322,17 @@ fn run_engine(
             }
             for (dst, &s) in frame.iter_mut().zip(chunk.iter()) {
                 *dst = f32_to_i16(s);
+            }
+            // Voice activity → speaking orb (publish only on a transition).
+            if rms_i16(&frame) >= VAD_RMS_THRESHOLD {
+                hangover = VAD_HANGOVER_FRAMES;
+            } else {
+                hangover = hangover.saturating_sub(1);
+            }
+            let now_speaking = hangover > 0;
+            if now_speaking != speaking {
+                speaking = now_speaking;
+                control.set_speaking(speaking);
             }
             if let Ok(payload) = encoder.encode(&frame) {
                 let vf = VoiceFrame {
@@ -352,6 +408,7 @@ fn run_engine(
 
         std::thread::sleep(Duration::from_millis(5));
     }
+    control.set_speaking(false);
     tracing::info!("voice engine stopped");
     Ok(())
 }
@@ -475,6 +532,18 @@ mod tests {
         // Packet loss: PLC still yields a full frame.
         let concealed = codec.decode(None, &mut out).unwrap();
         assert_eq!(concealed, FRAME_SAMPLES, "PLC produces a frame on loss");
+    }
+
+    #[test]
+    fn rms_distinguishes_silence_from_speech_level() {
+        assert_eq!(rms_i16(&[]), 0.0);
+        assert!(rms_i16(&[0i16; FRAME_SAMPLES]) < 1.0, "silence ≈ 0");
+        // A constant-|amplitude| frame has RMS == that amplitude.
+        let loud = [10_000i16; FRAME_SAMPLES];
+        assert!((rms_i16(&loud) - 10_000.0).abs() < 1.0);
+        // The VAD threshold sits above a quiet floor, below speech level.
+        assert!(rms_i16(&[200i16; FRAME_SAMPLES]) < VAD_RMS_THRESHOLD);
+        assert!(rms_i16(&loud) >= VAD_RMS_THRESHOLD);
     }
 
     #[test]

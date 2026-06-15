@@ -162,6 +162,9 @@ pub struct ClientCore {
     /// Live mic/output gating (mute/deafen) shared with the bridge's audio
     /// engine; set here from the `voice_state` command, read on the audio thread.
     voice_control: Arc<crate::audio::VoiceControl>,
+    /// The voice channel we're in (set on join, cleared on leave), so the
+    /// background speaking-publisher knows where to send `VoiceState`.
+    active_voice: Arc<StdMutex<Option<u64>>>,
 }
 
 impl ClientCore {
@@ -179,6 +182,29 @@ impl ClientCore {
         // Wire nonces only need per-session uniqueness; seed off the clock so
         // restarts never collide with a server still draining old nonces.
         let seed = (dice_common::time::now_ms() << 20) | 1;
+        let (voice_control, mut speaking_rx) = crate::audio::VoiceControl::new();
+        let active_voice: Arc<StdMutex<Option<u64>>> = Arc::default();
+        // Background: the audio engine's VAD pushes speaking transitions into the
+        // watch; fan each one out as VoiceState to the channel we're in (drives
+        // every client's per-user speaking orb).
+        {
+            let api = api.clone();
+            let active = Arc::clone(&active_voice);
+            let control = Arc::clone(&voice_control);
+            rt.spawn(async move {
+                while speaking_rx.changed().await.is_ok() {
+                    let speaking = *speaking_rx.borrow_and_update();
+                    let channel = *active.lock().expect("active voice lock");
+                    if let Some(ch) = channel
+                        && let Err(error) = api
+                            .voice_state(ch, control.muted(), control.deafened(), speaking)
+                            .await
+                    {
+                        tracing::debug!(%error, "voice speaking publish failed");
+                    }
+                }
+            });
+        }
         Ok(Self {
             cfg,
             api,
@@ -194,7 +220,8 @@ impl ClientCore {
             ready_rx,
             typing: TypingThrottle::default(),
             nonce_seq: AtomicU64::new(seed),
-            voice_control: Arc::new(crate::audio::VoiceControl::default()),
+            voice_control,
+            active_voice,
         })
     }
 
@@ -963,11 +990,13 @@ impl ClientCore {
         // it before the join so a rejoin can't inherit a previous mute/deafen.
         self.voice_control.set(muted, deafened);
         let roster = self.api.voice_join(channel, muted, deafened).await?;
+        *self.active_voice.lock().expect("active voice lock") = Some(channel);
         Ok(VoiceRosterDto::from(&roster))
     }
 
     pub async fn voice_leave(&self, channel_id: &str) -> Result<(), CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        *self.active_voice.lock().expect("active voice lock") = None;
         self.api.voice_leave(channel).await?;
         Ok(())
     }
