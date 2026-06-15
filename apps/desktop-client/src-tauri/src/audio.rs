@@ -210,11 +210,22 @@ fn run_engine(
     let out_stream = build_playback(&output, &out_cfg, Arc::clone(&playback))?;
     in_stream.play()?;
     out_stream.play()?;
-    tracing::info!(ssrc, "voice engine running");
+    tracing::info!(
+        ssrc,
+        quic_voice_path = sender.is_connected(),
+        in_rate = in_cfg.sample_rate().0,
+        out_rate = out_cfg.sample_rate().0,
+        in_format = ?in_cfg.sample_format(),
+        out_format = ?out_cfg.sample_format(),
+        "voice engine running"
+    );
 
     let mut encoder = OpusCodec::new()?;
     let mut seq: u16 = 0;
     let mut timestamp: u32 = 0;
+    // Warn ONCE if we're capturing audio but have no QUIC datagram path (a WSS
+    // session is silent — voice rides QUIC only). Makes "no audio" diagnosable.
+    let mut warned_no_path = false;
     let mut frame = vec![0i16; FRAME_SAMPLES];
     let mut remotes: HashMap<u32, RemoteStream> = HashMap::new();
     // Keep ~2 frames (40 ms) queued for the output device.
@@ -240,7 +251,16 @@ fn run_engine(
                     marker: seq == 0,
                     payload: Bytes::from(payload),
                 };
-                sender.send(vf.encode());
+                if sender.is_connected() {
+                    sender.send(vf.encode());
+                } else if !warned_no_path {
+                    warned_no_path = true;
+                    tracing::warn!(
+                        "voice: capturing audio but no QUIC datagram path — the session is \
+                         on WSS (voice rides QUIC datagrams only), so nothing is transmitted; \
+                         confirm the status bar shows QUIC"
+                    );
+                }
                 seq = seq.wrapping_add(1);
                 timestamp = timestamp.wrapping_add(FRAME_SAMPLES as u32);
             }

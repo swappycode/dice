@@ -473,6 +473,13 @@ impl Bridge {
             Payload::VoiceJoin(vj) => {
                 // Voice membership lives in the frontend store, not the cache.
                 if let Some(member) = &vj.member {
+                    tracing::debug!(
+                        user = member.user_id,
+                        ssrc = member.ssrc,
+                        is_self = self.is_self(member.user_id),
+                        engine_running = self.voice.is_some(),
+                        "voice join dispatch"
+                    );
                     // Our OWN join starts the audio engine (capture + playback).
                     if self.is_self(member.user_id)
                         && self.voice.is_none()

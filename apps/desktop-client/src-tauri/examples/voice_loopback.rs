@@ -88,8 +88,8 @@ where
         move |data: &[T], _: &cpal::InputCallbackInfo| {
             let mut b = buf.lock().unwrap();
             for frame in data.chunks(channels) {
-                let mono = frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>()
-                    / channels as f32;
+                let mono =
+                    frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>() / channels as f32;
                 b.push_back(mono);
             }
             while b.len() > max_backlog {
