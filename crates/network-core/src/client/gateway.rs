@@ -243,6 +243,16 @@ impl VoiceSender {
             let _ = conn.send_datagram(packet);
         }
     }
+
+    /// Whether a QUIC datagram path is currently available, i.e. [`send`] can
+    /// actually transmit. `false` means the session is on WSS (voice rides QUIC
+    /// datagrams only) or not yet connected — every `send` is then silently
+    /// dropped. The audio engine logs this so a silent call is diagnosable.
+    ///
+    /// [`send`]: Self::send
+    pub fn is_connected(&self) -> bool {
+        self.conn.lock().expect("voice slot").is_some()
+    }
 }
 
 /// Caller-side handle: command sink, event source, state watch.
