@@ -149,7 +149,9 @@ pub enum ClientEvent {
     /// connection — the host must clear the session and route to login. The
     /// driver parks in `Failed` afterwards (a fresh login spawns a new one).
     AuthExpired { reason: String },
-    /// Sequenced dispatches (`seq > 0`) plus ephemeral `TypingStart`.
+    /// Sequenced dispatches (`seq > 0`) plus the ephemeral (`seq = 0`)
+    /// dispatches: `TypingStart` and voice control (`VoiceJoin`/`Leave`/`State`).
+    /// See [`is_app_dispatch`].
     Dispatch(Box<Frame>),
     /// `SendMessageAck` correlated to [`Command::SendMessage`] by nonce.
     Ack { nonce: u64, message: v1::Message },
@@ -875,9 +877,12 @@ impl Driver {
                 let flow = self.close_code_flow(close.code as u16);
                 return FrameOutcome::Disconnect(flow);
             }
-            // Dispatches: everything sequenced plus ephemeral typing.
-            Some(Payload::TypingStart(_)) => ClientEvent::Dispatch(Box::new(frame)),
-            _ if frame.seq > 0 => ClientEvent::Dispatch(Box::new(frame)),
+            // Dispatches: every sequenced frame, plus the ephemeral (seq=0)
+            // dispatches — typing AND voice control — which carry no seq and so
+            // would otherwise fall through the `seq > 0` arm and be dropped.
+            _ if is_app_dispatch(&frame.payload, frame.seq) => {
+                ClientEvent::Dispatch(Box::new(frame))
+            }
             // Stray control frames mid-pump (Hello/Ready/...): ignore.
             _ => return FrameOutcome::Continue,
         };
@@ -1175,6 +1180,25 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether an inbound frame must surface to the app as a [`ClientEvent::Dispatch`].
+///
+/// True for every **sequenced** frame (`seq > 0`) — the normal dispatch class —
+/// AND for the **ephemeral** dispatches that ride with `seq = 0` and so carry no
+/// sequence: typing and the voice-control frames (Join/Leave/State). Voice
+/// signaling is published ephemeral, so without naming it here it never reaches
+/// the bridge — the roster never updates and the audio engine (started off the
+/// client's OWN VoiceJoin) never starts. Pure, so the rule is unit-tested.
+fn is_app_dispatch(payload: &Option<Payload>, seq: u64) -> bool {
+    seq > 0
+        || matches!(
+            payload,
+            Some(Payload::TypingStart(_))
+                | Some(Payload::VoiceJoin(_))
+                | Some(Payload::VoiceLeave(_))
+                | Some(Payload::VoiceState(_))
+        )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1241,6 +1265,37 @@ mod tests {
         assert!(!pending.complete(99), "never pending");
         assert_eq!(pending.drain(), vec![7]);
         assert!(pending.drain().is_empty());
+    }
+
+    #[test]
+    fn ephemeral_voice_control_frames_surface_as_dispatches() {
+        // The ephemeral (seq = 0) dispatches — typing + voice control — must
+        // surface despite carrying no seq. Regressing this is exactly what made
+        // voice signaling vanish (stale roster + the audio engine never started,
+        // since it starts off the client's OWN VoiceJoin).
+        for payload in [
+            Payload::TypingStart(v1::TypingStart::default()),
+            Payload::VoiceJoin(v1::VoiceJoin::default()),
+            Payload::VoiceLeave(v1::VoiceLeave::default()),
+            Payload::VoiceState(v1::VoiceState::default()),
+        ] {
+            assert!(
+                is_app_dispatch(&Some(payload), 0),
+                "ephemeral dispatch dropped"
+            );
+        }
+        // A sequenced frame is a dispatch on seq alone.
+        assert!(is_app_dispatch(
+            &Some(Payload::MessageCreate(v1::MessageCreate::default())),
+            4,
+        ));
+        // A seq = 0 frame that is NOT an ephemeral dispatch is ignored (stray
+        // Hello/Ready control frames mid-pump).
+        assert!(!is_app_dispatch(&None, 0));
+        assert!(!is_app_dispatch(
+            &Some(Payload::MessageCreate(v1::MessageCreate::default())),
+            0,
+        ));
     }
 
     #[test]
