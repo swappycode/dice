@@ -125,6 +125,9 @@ fn mix_clip(acc: i32) -> i16 {
 pub struct VoiceControl {
     muted: AtomicBool,
     deafened: AtomicBool,
+    /// Push-to-talk mode: when on, the mic only transmits while `ptt_held`.
+    ptt_enabled: AtomicBool,
+    ptt_held: AtomicBool,
     speaking: tokio::sync::watch::Sender<bool>,
 }
 
@@ -136,6 +139,8 @@ impl VoiceControl {
         let control = Arc::new(Self {
             muted: AtomicBool::new(false),
             deafened: AtomicBool::new(false),
+            ptt_enabled: AtomicBool::new(false),
+            ptt_held: AtomicBool::new(false),
             speaking,
         });
         (control, rx)
@@ -150,6 +155,18 @@ impl VoiceControl {
     }
     pub fn deafened(&self) -> bool {
         self.deafened.load(Ordering::Relaxed)
+    }
+    pub fn set_ptt_enabled(&self, enabled: bool) {
+        self.ptt_enabled.store(enabled, Ordering::Relaxed);
+    }
+    pub fn set_ptt_held(&self, held: bool) {
+        self.ptt_held.store(held, Ordering::Relaxed);
+    }
+    /// Whether the mic should transmit right now: not muted, and either open-mic
+    /// or (push-to-talk on AND its key currently held).
+    pub fn transmitting(&self) -> bool {
+        !self.muted.load(Ordering::Relaxed)
+            && (!self.ptt_enabled.load(Ordering::Relaxed) || self.ptt_held.load(Ordering::Relaxed))
     }
     /// Publish a VAD speaking transition (call only on change).
     pub fn set_speaking(&self, speaking: bool) {
@@ -298,18 +315,21 @@ fn run_engine(
     let target_backlog = FRAME_SAMPLES * 2;
 
     while !stop.load(Ordering::Relaxed) {
-        let muted = control.muted();
+        // `transmitting` folds in mute AND push-to-talk (open mic, or PTT held).
+        let transmitting = control.transmitting();
         let deafened = control.deafened();
 
-        // Muted is never "speaking"; clear the orb the instant the mic is cut.
-        if muted && speaking {
+        // Not transmitting is never "speaking"; clear the orb the instant the
+        // mic is cut (mute, or releasing the PTT key).
+        if !transmitting && speaking {
             speaking = false;
             hangover = 0;
             control.set_speaking(false);
         }
 
-        // 1. Capture → encode → send every full 20 ms frame. When muted we still
-        //    drain the capture buffer (so it can't back up) but transmit nothing.
+        // 1. Capture → encode → send every full 20 ms frame. When not
+        //    transmitting we still drain the capture buffer (so it can't back
+        //    up) but send nothing.
         loop {
             let chunk = match capture.lock() {
                 Ok(mut cap) if cap.len() >= FRAME_SAMPLES => {
@@ -317,7 +337,7 @@ fn run_engine(
                 }
                 _ => break,
             };
-            if muted {
+            if !transmitting {
                 continue;
             }
             for (dst, &s) in frame.iter_mut().zip(chunk.iter()) {

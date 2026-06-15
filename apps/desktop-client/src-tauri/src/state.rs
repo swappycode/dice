@@ -1018,6 +1018,21 @@ impl ClientCore {
         Ok(())
     }
 
+    /// Turn push-to-talk on/off (the actual key is bound at the Tauri layer).
+    /// Disabling clears any held state so the mic can't stay stuck open.
+    pub fn set_ptt_enabled(&self, enabled: bool) {
+        self.voice_control.set_ptt_enabled(enabled);
+        if !enabled {
+            self.voice_control.set_ptt_held(false);
+        }
+    }
+
+    /// The PTT key was pressed (`true`) / released (`false`) — called from the
+    /// global-shortcut handler, gating the mic in the audio engine.
+    pub fn set_ptt_held(&self, held: bool) {
+        self.voice_control.set_ptt_held(held);
+    }
+
     pub async fn voice_roster(&self, channel_id: &str) -> Result<VoiceRosterDto, CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
         let roster = self.api.voice_roster(channel).await?;

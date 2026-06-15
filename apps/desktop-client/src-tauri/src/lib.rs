@@ -21,6 +21,7 @@ pub mod commands;
 pub mod dto;
 pub mod emit;
 pub mod keystore;
+pub mod ptt;
 pub mod session;
 pub mod state;
 
@@ -57,6 +58,13 @@ pub fn run() {
     // OS toast notifications (item 14): the host shows them via the plugin's
     // Rust API from the `notify` command.
     builder = builder.plugin(tauri_plugin_notification::init());
+    // Global push-to-talk: the handler mirrors the (single) bound shortcut's
+    // press/release into the audio gate; the `set_ptt` command binds the key.
+    builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(ptt::on_shortcut)
+            .build(),
+    );
     // Single-instance only for the DEFAULT profile: a second normal launch
     // focuses the existing window, but a named `--profile` is explicitly
     // allowed its own window (local two-user testing).
@@ -165,6 +173,7 @@ pub fn run() {
             commands::create_channel,
             commands::connection_state,
             commands::notify,
+            commands::set_ptt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Dice desktop host");

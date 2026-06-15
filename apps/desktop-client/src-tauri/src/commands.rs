@@ -352,3 +352,10 @@ pub fn notify(app: tauri::AppHandle, title: String, body: String) {
         tracing::warn!(%error, "OS notification failed");
     }
 }
+
+/// Enable/disable global push-to-talk and (re)bind its `key`. The UI persists
+/// the preference and pushes it here on startup + on change.
+#[tauri::command]
+pub fn set_ptt(app: tauri::AppHandle, core: Core<'_>, enabled: bool, key: String) -> CmdResult<()> {
+    crate::ptt::apply(&app, &core, enabled, &key)
+}
