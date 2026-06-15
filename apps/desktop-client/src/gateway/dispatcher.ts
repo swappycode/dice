@@ -118,7 +118,7 @@ function dispatch(ev: DiceEvent): void {
       applyVoiceJoin(ev.member, ev.user);
       break;
     case "voiceLeave":
-      applyVoiceLeave(ev.channelId, ev.userId);
+      applyVoiceLeave(ev.channelId, ev.userId, ev.userId === currentUser()?.id);
       break;
     case "voiceState":
       applyVoiceState(ev.member);

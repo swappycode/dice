@@ -80,16 +80,17 @@ export function applyVoiceJoin(member: VoiceMember, user?: User): void {
   upsertMember(member.channelId, member);
 }
 
-/** Apply a live `voiceLeave`. */
-export function applyVoiceLeave(channelId: string, userId: string): void {
+/** Apply a live `voiceLeave`. `isSelf` is true when the leaving user is this
+ *  client, so a server-driven removal (kick, or joining voice on another device)
+ *  clears our active channel even though we didn't press leave here. */
+export function applyVoiceLeave(channelId: string, userId: string, isSelf = false): void {
   setVoice(
     produce((s) => {
       const list = s.rosters[channelId];
       if (list) s.rosters[channelId] = list.filter((m) => m.userId !== userId);
-      if (s.active === channelId && !s.rosters[channelId]?.some((m) => m.userId === userId)) {
-        // If WE left this channel, clear active. (We only track our own join;
-        // a server-driven removal of us also lands here.)
-      }
+      // Only OUR own departure from the channel we're in clears `active` — a
+      // remote peer leaving the same channel must not.
+      if (isSelf && s.active === channelId) s.active = null;
     }),
   );
 }
