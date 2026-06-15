@@ -77,6 +77,9 @@ pub struct Bridge {
     /// The running voice session, if the user is in a voice channel. Started on
     /// the self `VoiceJoin` dispatch, dropped on the self `VoiceLeave`.
     voice: Option<crate::audio::VoiceEngine>,
+    /// Live mic/output gating (mute/deafen), shared with `ClientCore` (which
+    /// sets it from the `voice_state` command) so toggling needs no restart.
+    voice_control: Arc<crate::audio::VoiceControl>,
 }
 
 impl Bridge {
@@ -90,6 +93,7 @@ impl Bridge {
         current_user: Arc<StdMutex<Option<v1::User>>>,
         ready_counter: Arc<watch::Sender<u64>>,
         rt: tokio::runtime::Handle,
+        voice_control: Arc<crate::audio::VoiceControl>,
     ) -> Self {
         Self {
             cache,
@@ -105,6 +109,7 @@ impl Bridge {
             flush_scheduled: Arc::new(AtomicBool::new(false)),
             voice_sender: None,
             voice: None,
+            voice_control,
         }
     }
 
@@ -486,7 +491,11 @@ impl Bridge {
                         && let Some(sender) = self.voice_sender.clone()
                     {
                         tracing::info!(ssrc = member.ssrc, "starting voice audio");
-                        self.voice = Some(crate::audio::VoiceEngine::start(member.ssrc, sender));
+                        self.voice = Some(crate::audio::VoiceEngine::start(
+                            member.ssrc,
+                            sender,
+                            Arc::clone(&self.voice_control),
+                        ));
                     }
                     emit_dice(
                         &self.emitter,

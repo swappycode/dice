@@ -106,6 +106,32 @@ fn mix_clip(acc: i32) -> i16 {
     acc.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
+// ------------------------------------------------------------ voice control
+
+/// Shared, lock-free mic/output gating the audio thread reads each tick. Owned
+/// by `ClientCore` (set from the `voice_state` command) and read by the running
+/// [`VoiceEngine`] — so muting/deafening takes effect without restarting it.
+/// `muted` stops capture from being transmitted; `deafened` stops remote audio
+/// from being played (and drops inbound so the jitter buffers can't grow).
+#[derive(Default)]
+pub struct VoiceControl {
+    muted: AtomicBool,
+    deafened: AtomicBool,
+}
+
+impl VoiceControl {
+    pub fn set(&self, muted: bool, deafened: bool) {
+        self.muted.store(muted, Ordering::Relaxed);
+        self.deafened.store(deafened, Ordering::Relaxed);
+    }
+    pub fn muted(&self) -> bool {
+        self.muted.load(Ordering::Relaxed)
+    }
+    pub fn deafened(&self) -> bool {
+        self.deafened.load(Ordering::Relaxed)
+    }
+}
+
 // -------------------------------------------------------------- voice engine
 
 /// One remote speaker's playout state: a jitter buffer + its own Opus decoder
@@ -139,15 +165,16 @@ pub struct VoiceEngine {
 
 impl VoiceEngine {
     /// Start capture + playback. `ssrc` stamps this client's outgoing frames;
-    /// `sender` ships them on the active QUIC connection.
-    pub fn start(ssrc: u32, sender: VoiceSender) -> Self {
+    /// `sender` ships them on the active QUIC connection; `control` gates the
+    /// mic (mute) and output (deafen) live.
+    pub fn start(ssrc: u32, sender: VoiceSender, control: Arc<VoiceControl>) -> Self {
         let (inbox_tx, inbox_rx) = mpsc::channel::<Bytes>();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
         let thread = std::thread::Builder::new()
             .name("dice-voice".to_owned())
             .spawn(move || {
-                if let Err(error) = run_engine(ssrc, &sender, &inbox_rx, &stop_thread) {
+                if let Err(error) = run_engine(ssrc, &sender, &inbox_rx, &stop_thread, &control) {
                     tracing::error!(%error, "voice engine stopped");
                 }
             })
@@ -184,6 +211,7 @@ fn run_engine(
     sender: &VoiceSender,
     inbox: &mpsc::Receiver<Bytes>,
     stop: &AtomicBool,
+    control: &VoiceControl,
 ) -> anyhow::Result<()> {
     let host = cpal::default_host();
     let input = host
@@ -232,7 +260,11 @@ fn run_engine(
     let target_backlog = FRAME_SAMPLES * 2;
 
     while !stop.load(Ordering::Relaxed) {
-        // 1. Capture → encode → send every full 20 ms frame.
+        let muted = control.muted();
+        let deafened = control.deafened();
+
+        // 1. Capture → encode → send every full 20 ms frame. When muted we still
+        //    drain the capture buffer (so it can't back up) but transmit nothing.
         loop {
             let chunk = match capture.lock() {
                 Ok(mut cap) if cap.len() >= FRAME_SAMPLES => {
@@ -240,6 +272,9 @@ fn run_engine(
                 }
                 _ => break,
             };
+            if muted {
+                continue;
+            }
             for (dst, &s) in frame.iter_mut().zip(chunk.iter()) {
                 *dst = f32_to_i16(s);
             }
@@ -266,8 +301,12 @@ fn run_engine(
             }
         }
 
-        // 2. Inbound datagrams → per-ssrc jitter buffers.
+        // 2. Inbound datagrams → per-ssrc jitter buffers. Deafened: drop them
+        //    on the floor so the buffers can't grow while we're not playing out.
         while let Ok(bytes) = inbox.try_recv() {
+            if deafened {
+                continue;
+            }
             if let Ok(vf) = VoiceFrame::decode(bytes) {
                 match remotes.entry(vf.ssrc) {
                     std::collections::hash_map::Entry::Occupied(mut e) => {
@@ -286,7 +325,7 @@ fn run_engine(
         //    decode (PLC on a gap), mix, and queue. The backlog gate paces this
         //    to the real-time output rate.
         let backlog = playback.lock().map(|p| p.len()).unwrap_or(target_backlog);
-        if backlog < target_backlog {
+        if !deafened && backlog < target_backlog {
             let mut mixed = [0i32; FRAME_SAMPLES];
             let mut produced = false;
             for rs in remotes.values_mut() {

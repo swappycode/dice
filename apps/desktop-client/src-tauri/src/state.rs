@@ -159,6 +159,9 @@ pub struct ClientCore {
     ready_rx: watch::Receiver<u64>,
     typing: TypingThrottle,
     nonce_seq: AtomicU64,
+    /// Live mic/output gating (mute/deafen) shared with the bridge's audio
+    /// engine; set here from the `voice_state` command, read on the audio thread.
+    voice_control: Arc<crate::audio::VoiceControl>,
 }
 
 impl ClientCore {
@@ -191,6 +194,7 @@ impl ClientCore {
             ready_rx,
             typing: TypingThrottle::default(),
             nonce_seq: AtomicU64::new(seed),
+            voice_control: Arc::new(crate::audio::VoiceControl::default()),
         })
     }
 
@@ -257,6 +261,7 @@ impl ClientCore {
             Arc::clone(&self.current_user),
             Arc::clone(&self.ready_tx),
             self.rt.clone(),
+            Arc::clone(&self.voice_control),
         );
         let task = self.rt.spawn(bridge.run(handle, cmd_rx));
         *slot = Some(GatewayCtl {
@@ -954,6 +959,9 @@ impl ClientCore {
         deafened: bool,
     ) -> Result<VoiceRosterDto, CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        // The engine starts off this state (the self VoiceJoin dispatch), so set
+        // it before the join so a rejoin can't inherit a previous mute/deafen.
+        self.voice_control.set(muted, deafened);
         let roster = self.api.voice_join(channel, muted, deafened).await?;
         Ok(VoiceRosterDto::from(&roster))
     }
@@ -972,6 +980,9 @@ impl ClientCore {
         speaking: bool,
     ) -> Result<(), CoreError> {
         let channel = parse_id(channel_id).ok_or_else(|| CoreError::BadId(channel_id.into()))?;
+        // Gate the local audio thread immediately (no engine restart), then fan
+        // the state out to the roster so peers see the muted/deaf tags.
+        self.voice_control.set(muted, deafened);
         self.api
             .voice_state(channel, muted, deafened, speaking)
             .await?;
