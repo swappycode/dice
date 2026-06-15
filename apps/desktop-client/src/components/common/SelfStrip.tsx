@@ -12,6 +12,7 @@ import {
 } from "../../stores/voice";
 import { currentUser, setSession } from "../../stores/session";
 import { SecurityDialog } from "../dialogs/SecurityDialog";
+import { VoiceSettingsDialog } from "../dialogs/VoiceSettingsDialog";
 import { Avatar } from "./Avatar";
 import { PresenceOrb } from "./PresenceOrb";
 import styles from "./SelfStrip.module.css";
@@ -27,6 +28,7 @@ const PRESENCE_CYCLE: PresenceStatus[] = ["online", "idle", "dnd"];
 export const SelfStrip: Component = () => {
   let avatarInput: HTMLInputElement | undefined;
   const [securityOpen, setSecurityOpen] = createSignal(false);
+  const [voiceOpen, setVoiceOpen] = createSignal(false);
 
   function cyclePresence(): void {
     const me = currentUser();
@@ -103,6 +105,15 @@ export const SelfStrip: Component = () => {
           <button
             type="button"
             class={styles.security}
+            title="Voice settings (push-to-talk)"
+            aria-label="Voice settings"
+            onClick={() => setVoiceOpen(true)}
+          >
+            🎚️
+          </button>
+          <button
+            type="button"
+            class={styles.security}
             title="Security & two-factor"
             aria-label="Security and two-factor authentication"
             onClick={() => setSecurityOpen(true)}
@@ -114,6 +125,9 @@ export const SelfStrip: Component = () => {
           </button>
           <Show when={securityOpen()}>
             <SecurityDialog onClose={() => setSecurityOpen(false)} />
+          </Show>
+          <Show when={voiceOpen()}>
+            <VoiceSettingsDialog onClose={() => setVoiceOpen(false)} />
           </Show>
         </footer>
       )}

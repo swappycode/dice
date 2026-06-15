@@ -140,6 +140,7 @@ export function createTauriIpc(): DiceIpc {
     },
     markRead: (channelId) => call<void>("mark_read", { channelId }),
     notify: (title, body) => call<void>("notify", { title, body }),
+    setPtt: (enabled, key) => call<void>("set_ptt", { enabled, key }),
     onEvent: (cb) => {
       let unlisten: UnlistenFn | null = null;
       let cancelled = false;

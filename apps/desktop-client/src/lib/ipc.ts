@@ -128,6 +128,10 @@ export interface DiceIpc {
   /** Show an OS toast (new-message notification). No-op in the browser mock. */
   notify(title: string, body: string): Promise<void>;
 
+  /** Enable/disable global push-to-talk and bind its key (host registers the
+      OS-wide shortcut). No-op in the browser mock. */
+  setPtt(enabled: boolean, key: string): Promise<void>;
+
   /** Subscribe to the gateway event stream. Returns an unsubscribe fn. */
   onEvent(cb: (ev: DiceEvent) => void): () => void;
 }

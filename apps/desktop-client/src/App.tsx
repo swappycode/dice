@@ -6,6 +6,7 @@ import { ipc } from "./lib/ipc";
 import { installPerfModeEffect } from "./lib/perfMode";
 import { installThemeEffect } from "./lib/theme";
 import { session, setSession } from "./stores/session";
+import { syncVoiceSettings } from "./stores/voiceSettings";
 
 const App: Component = () => {
   installThemeEffect();
@@ -14,6 +15,8 @@ const App: Component = () => {
   const [booting, setBooting] = createSignal(true);
 
   onMount(async () => {
+    // Re-bind global push-to-talk if it was enabled last session.
+    syncVoiceSettings();
     try {
       const s = await ipc.getSession();
       if (s) {

@@ -706,6 +706,10 @@ export function createMockIpc(): DiceIpc {
       /* no OS toast in the browser mock */
     },
 
+    async setPtt(_enabled, _key) {
+      /* no global shortcuts in the browser mock */
+    },
+
     onEvent(cb) {
       subscribers.add(cb);
       startAmbient();
