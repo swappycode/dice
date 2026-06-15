@@ -7,6 +7,47 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-16 — M3 (10/n): Voice — Step 5 + M3 CLOSE-OUT
+
+**Branch:** `main`. One commit (`9399d6c`, audio.rs) + this worklog. Gate green: host `clippy --lib
+--bins -D warnings` + fmt + audio unit tests (incl. new resampler test). **PTT + device picker (M3
+8–9/n) verified by the user** before this.
+
+**M3 is COMPLETE.** Everything shipped: login-card cohesion ✅, Vantablack theme ✅, in-app theme
+builder ✅, Friends/social ✅, and **Voice end-to-end** ✅ — signaling + SFU + QUIC-datagram transport
++ cpal/Opus engine, then (this run) the live-bug fix (client dropped seq=0 ephemeral voice dispatches,
+`3a64ec5`) and the full control surface: **mute/deafen, VAD speaking orbs, global push-to-talk,
+device picker** (all user-verified). Voice audio + roster were **user-verified working**.
+
+**Step 5 shipped (this entry):**
+- **Non-48 kHz resampling** (`9399d6c`) — linear `PushResampler` (capture `in_rate`→48 kHz) +
+  `PullResampler` (playback 48 kHz→`out_rate`); bypassed at 48 kHz (verified path untouched); rate
+  helpers unit-tested. Removes the old warn-and-proceed "wrong pitch" limitation.
+- **`DICE_VOICE_LOSS` test aid** (`9399d6c`) — drops N% of inbound voice frames (xorshift, no dep) so
+  the headline "graceful at 5 % loss" gate is testable; jitter buffer + Opus PLC conceal the gaps.
+- **Headline-gate procedure** → local `docs/testing-m3.md` (gitignored): how to measure < 5 % CPU with
+  3+ users + verify graceful 5 % loss via `DICE_VOICE_LOSS`. **User-measured** (can't measure here).
+
+**Documented carried limitations (deferred, with reasons):**
+- **AEC / NS** (WebRTC APM, C++/abseil) — headphones for now; the seam exists.
+- **Resampling quality** — linear, not polyphase (fine for voice; upgradeable).
+- **Gateway-crash voice-roster TTL** — normal teardown calls `voice.disconnect`; a gateway *crash* can
+  orphan members until restart. The `Cache` trait has no SCAN / hash-field TTL, so a per-member
+  heartbeat TTL is a storage redesign — deferred (was a documented phase-1 limitation already).
+- **Engine-start Fix 3** — engine starts on the self `VoiceJoin` dispatch (now reliable + verified);
+  also starting from the local `voice_join` ack is belt-and-suspenders — deferred.
+
+**Carried follow-ups (optional, from M2, still open):** Auth+Chat over split-mode RPC + `services/*/
+src/bin/*.rs` split bins; orphaned-media GC; "unread divider line" UI; email-verify as an enforced
+login gate; TOTP-secret encryption-at-rest; per-`--profile` WebView2 data-dir.
+
+**NEXT MILESTONE (M4) — to be defined with the user.** Candidates: the carried follow-ups above;
+voice hardening (AEC via a Linux/WebRTC path, polyphase resampling, roster-TTL redesign); or new
+feature area. Next free Frame dispatch # = **121**. Infra: `just infra-up` + `just run-full`; client:
+`just client-build` + `just client-as <name>`; logs at `%APPDATA%\com.dice.app\profiles\<name>\dice.log`.
+
+---
+
 ## 2026-06-16 — M3 (9/n): Voice — input/output device picker (Step 4 complete)
 
 **Branch:** `main`. Two commits (`151a671` host / `45cd2d7` UI), pushed. Gate green: host `clippy
