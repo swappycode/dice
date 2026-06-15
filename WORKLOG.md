@@ -7,6 +7,45 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-16 — M3 (7/n): Voice — self-controls (mute/deafen) + VAD speaking orbs
+
+**Branch:** `main`. Four commits (`1a412ce` host mute/deafen / `8c98384` UI mute/deafen / `043135d` host
+VAD / `4af00d7` UI speaking orb), pushed. Gate green: host `clippy --lib --bins -D warnings` + fmt +
+audio unit tests (incl. new `rms_distinguishes_silence_from_speech_level`); frontend `tsc` + vite (CSS
+55.18 KB). **Voice audio + live roster were VERIFIED working by the user** on the 6.6/n build before this.
+
+Built on the now-working voice path. Two coherent features (the next rebuild verifies both):
+- **Mute / deafen (functional).** New `audio::VoiceControl` (mute/deafen atomics + a speaking `watch`)
+  is created by `ClientCore` (`VoiceControl::new()`), shared via `Arc` through `Bridge::new` into
+  `VoiceEngine::start`, and read by the audio thread each tick — so toggling needs **no engine restart**.
+  `muted` → captured frames aren't transmitted (capture still drained so it can't back up); `deafened` →
+  playout skipped + inbound datagrams dropped (jitter buffers can't grow). `ClientCore::voice_state` sets
+  it (and `voice_join` resets it so a rejoin can't inherit stale state). UI: mic + headphone toggles in
+  `SelfStrip` (shown only while in a voice channel; a red `--orb-dnd` slash marks engaged); the voice
+  store tracks own mute/deafen, optimistically tags our roster member, and fans out via `ipc.voiceState`;
+  deafen implies mute; resets on join/leave/logout.
+- **VAD speaking orbs.** The engine computes per-frame RMS (`rms_i16`) with a ~300 ms hangover
+  (`VAD_RMS_THRESHOLD=900`, `VAD_HANGOVER_FRAMES=15` — **tunable, refine on real mics**), pushes speaking
+  transitions into the `VoiceControl` watch; a `ClientCore` task fans each out as `VoiceState` to the
+  active channel (`active_voice` tracked on join/leave). Muting forces speaking off; the engine clears it
+  on stop. **No frontend logic change** — the existing `m.speaking` orb path lights up; added a green
+  `--orb-online` dot before a speaking member's name (static, no loop).
+
+**Plumbing note (for the next session):** the audio thread (`!Send`, std thread) talks to the async world
+only through `Arc<VoiceControl>` (atomics) + a `tokio::sync::watch<bool>` (speaking; `watch::Sender::send`
+is sync-callable off-runtime). Engine→server voice updates go engine → `VoiceControl` watch → `ClientCore`
+task → REST `voice_state`. The engine never touches the bridge/ApiClient directly.
+
+**NEXT (M3 voice remainder):** verify this batch (rebuild done), then **PTT** (push-to-talk — a hotkey
+that gates `VoiceControl.muted`; needs a Tauri global-shortcut or focused-key handler) + **device-picker**
+(enumerate cpal in/out devices, select into the engine). Then the deferred **robustness Fix 3** (start the
+engine from the local `voice_join` command too, not only the self broadcast dispatch). Then **Step 5**:
+non-48 kHz resampling, heartbeat-refreshed voice-roster TTL, the headline <5% CPU / 5%-loss measurement
+(user-measured), AEC seam (WebRTC APM — still deferred; headphones), and M3 close-out docs. Next free
+Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-15 — M3 (6.6/n): Voice — ROOT CAUSE FOUND + fixed (client dropped voice dispatches)
 
 **Branch:** `main`. One commit (`3a64ec5`), pushed. Gate green: `cargo fmt`, `cargo clippy
