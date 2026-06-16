@@ -129,9 +129,13 @@ pub struct VoiceControl {
     ptt_enabled: AtomicBool,
     ptt_held: AtomicBool,
     /// Chosen input/output device NAMES (`None` = system default). Read by the
-    /// engine when it starts, so a change applies on the next voice join.
+    /// engine when it (re)starts; a change bumps `device_gen` so the bridge can
+    /// restart the engine in place.
     input_device: Mutex<Option<String>>,
     output_device: Mutex<Option<String>>,
+    /// Bumped on every `set_devices`; the bridge watches it to restart the
+    /// running engine so a device change applies live (no rejoin / re-login).
+    device_gen: tokio::sync::watch::Sender<u64>,
     speaking: tokio::sync::watch::Sender<bool>,
 }
 
@@ -140,6 +144,7 @@ impl VoiceControl {
     /// publish speaking transitions as `VoiceState`.
     pub fn new() -> (Arc<Self>, tokio::sync::watch::Receiver<bool>) {
         let (speaking, rx) = tokio::sync::watch::channel(false);
+        let (device_gen, _) = tokio::sync::watch::channel(0u64);
         let control = Arc::new(Self {
             muted: AtomicBool::new(false),
             deafened: AtomicBool::new(false),
@@ -147,16 +152,23 @@ impl VoiceControl {
             ptt_held: AtomicBool::new(false),
             input_device: Mutex::new(None),
             output_device: Mutex::new(None),
+            device_gen,
             speaking,
         });
         (control, rx)
     }
 
-    /// Choose input/output devices by name (`None` = system default). Applies on
-    /// the next voice join (cpal streams are bound at engine start).
+    /// Choose input/output devices by name (`None` = system default). Bumps the
+    /// device generation so the bridge restarts a running engine onto them.
     pub fn set_devices(&self, input: Option<String>, output: Option<String>) {
         *self.input_device.lock().expect("device lock") = input;
         *self.output_device.lock().expect("device lock") = output;
+        self.device_gen.send_modify(|g| *g = g.wrapping_add(1));
+    }
+
+    /// A receiver that fires whenever the device selection changes.
+    pub fn subscribe_device_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.device_gen.subscribe()
     }
     fn input_device(&self) -> Option<String> {
         self.input_device.lock().expect("device lock").clone()

@@ -1033,8 +1033,9 @@ impl ClientCore {
         self.voice_control.set_ptt_held(held);
     }
 
-    /// Choose capture/playback devices by name (`None` = system default). Takes
-    /// effect on the next voice join (cpal streams are bound at engine start).
+    /// Choose capture/playback devices by name (`None` = system default).
+    /// Applies live: if we're in voice the bridge restarts the engine onto the
+    /// new device(s); otherwise the engine reads them on the next join.
     pub fn set_audio_devices(&self, input: Option<String>, output: Option<String>) {
         self.voice_control.set_devices(input, output);
     }

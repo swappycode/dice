@@ -366,8 +366,8 @@ pub async fn list_audio_devices(core: Core<'_>) -> CmdResult<crate::audio::Audio
     Ok(core.list_audio_devices().await)
 }
 
-/// Choose capture/playback devices by name (`null` = system default). Applies on
-/// the next voice join.
+/// Choose capture/playback devices by name (`null` = system default). Applies
+/// live (the bridge restarts a running engine onto the new device).
 #[tauri::command]
 pub fn set_audio_devices(
     core: Core<'_>,

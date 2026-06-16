@@ -77,6 +77,9 @@ pub struct Bridge {
     /// The running voice session, if the user is in a voice channel. Started on
     /// the self `VoiceJoin` dispatch, dropped on the self `VoiceLeave`.
     voice: Option<crate::audio::VoiceEngine>,
+    /// The current voice session's ssrc (set with `voice`), so a live device
+    /// change can restart the engine in place without a fresh `VoiceJoin`.
+    voice_ssrc: Option<u32>,
     /// Live mic/output gating (mute/deafen), shared with `ClientCore` (which
     /// sets it from the `voice_state` command) so toggling needs no restart.
     voice_control: Arc<crate::audio::VoiceControl>,
@@ -109,6 +112,7 @@ impl Bridge {
             flush_scheduled: Arc::new(AtomicBool::new(false)),
             voice_sender: None,
             voice: None,
+            voice_ssrc: None,
             voice_control,
         }
     }
@@ -119,15 +123,20 @@ impl Bridge {
     pub async fn run(mut self, mut handle: GatewayHandle, mut cmds: mpsc::Receiver<Command>) {
         // Voice audio sends datagrams independently of the control channel.
         self.voice_sender = Some(handle.voice_sender());
+        // Restart the running audio engine in place when the device selection
+        // changes (live device switching — no rejoin / re-login).
+        let mut device_rx = self.voice_control.subscribe_device_changes();
         enum Next {
             Event(Option<ClientEvent>),
             Cmd(Option<Command>),
+            DeviceChanged,
         }
         loop {
             let next = tokio::select! {
                 biased;
                 event = handle.events().recv() => Next::Event(event),
                 cmd = cmds.recv() => Next::Cmd(cmd),
+                _ = device_rx.changed() => Next::DeviceChanged,
             };
             match next {
                 Next::Event(Some(event)) => {
@@ -148,8 +157,29 @@ impl Bridge {
                         return;
                     }
                 }
+                Next::DeviceChanged => self.on_device_change(),
             }
         }
+    }
+
+    /// A device selection changed: if we're in a voice channel, restart the
+    /// audio engine in place onto the new device(s) — no rejoin, no membership
+    /// change (peers see nothing). Not in voice ⇒ the engine reads the new
+    /// device when it next starts.
+    fn on_device_change(&mut self) {
+        let (Some(ssrc), Some(sender)) = (self.voice_ssrc, self.voice_sender.clone()) else {
+            return;
+        };
+        if self.voice.is_none() {
+            return;
+        }
+        tracing::info!(ssrc, "voice device changed — restarting engine in place");
+        self.voice = None; // drop first: stops the thread + closes the old streams
+        self.voice = Some(crate::audio::VoiceEngine::start(
+            ssrc,
+            sender,
+            Arc::clone(&self.voice_control),
+        ));
     }
 
     async fn on_event(&mut self, event: ClientEvent) -> Pump {
@@ -496,6 +526,7 @@ impl Bridge {
                             sender,
                             Arc::clone(&self.voice_control),
                         ));
+                        self.voice_ssrc = Some(member.ssrc);
                     }
                     emit_dice(
                         &self.emitter,
@@ -510,6 +541,7 @@ impl Bridge {
                 // Our OWN leave stops the audio engine (drop = stop thread).
                 if self.is_self(vl.user_id) {
                     self.voice = None;
+                    self.voice_ssrc = None;
                 }
                 emit_dice(
                     &self.emitter,
