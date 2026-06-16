@@ -50,6 +50,24 @@ dev:
 run-full:
     $env:DICE_PROFILE = "full"; cargo run -p dice-monolith
 
+# Split-mode "microservices" demo: the gateway (monolith with DICE_SPLIT=1)
+# routes auth/chat/presence over NATS RPC to three standalone service bins,
+# each in its own window. Same code as `run-full`, just decomposed. Run
+# `just infra-up` first (needs the full infra: Postgres + Redis + NATS).
+#
+# The gateway boots FIRST: it generates the dev TLS/JWT assets and runs the DB
+# migrations, then serves. After a short pause the three services start (they
+# load the SAME JWT keys + an already-migrated DB). Each process gets a DISTINCT
+# DICE_NODE_ID so snowflake ids never collide. Ctrl-C / close each window to stop.
+split-up:
+    cargo build -p dice-monolith -p auth-service -p chat-service -p presence-service
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_PROFILE='full'; `$env:DICE_SPLIT='1'; `$env:DICE_NODE_ID='0'; cargo run -p dice-monolith"
+    Start-Sleep -Seconds 5
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='1'; cargo run -p auth-service"
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='2'; cargo run -p chat-service"
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='3'; cargo run -p presence-service"
+    Write-Host "split fleet launched (4 windows): gateway + auth/chat/presence. Point the client at https://localhost:8443; Ctrl-C each window to stop."
+
 # Desktop client dev loop (own workspace). One instance; HMR; predev frees :1420.
 client:
     $env:DICE_DEV_CA = "$PWD/dev/certs/dev-ca.pem"; $env:DICE_API_URL = "https://localhost:8443"; $env:DICE_GATEWAY_QUIC = "localhost:8444"; $env:DICE_GATEWAY_WSS = "wss://localhost:8443/gateway/v1"; cd apps/desktop-client; npm run tauri dev
