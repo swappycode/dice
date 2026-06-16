@@ -103,7 +103,7 @@ export const VoiceSettingsDialog: Component<{ onClose: () => void }> = (props) =
             </select>
           </label>
           <p class={styles.hint}>
-            Device changes apply the next time you join voice. PTT works globally (even when Dice
+            Device changes apply immediately (even mid-call). PTT works globally (even when Dice
             isn't focused). Use headphones — there's no echo cancellation yet.
           </p>
         </div>
