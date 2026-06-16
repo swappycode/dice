@@ -44,8 +44,9 @@ round-trip is already proven by the integration tests using the identical client
 **NEXT (M4 candidates, user to steer).** With the monolith↔microservices demo done, the remaining
 M4-scaling items are the BIG ones: multi-node gateway cross-node resume (the replay buffer is
 single-node by construction — `api-gateway/src/resume.rs`), lazy member lists (RequestGuildMembers),
-transactional outbox (gap mitigated today by resume + REST backfill), per-IP rate limiting,
-observability. Plus carried M2/M3 follow-ups. Next free Frame dispatch # = **121**.
+transactional outbox (gap mitigated today by resume + REST backfill), and observability. Plus
+carried M2/M3 follow-ups. (Per-IP rate limiting is already done — M2 auth hardening threads the
+peer IP via `PeerAddr` and auth-service keys limits on `{scope}:{ip}`.) Next free Frame dispatch # = **121**.
 
 ---
 
