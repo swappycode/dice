@@ -7,6 +7,46 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-17 — M4 (2/n): Scaling — Auth + Chat over split-mode NATS RPC
+
+**M4 theme = Scaling (user-chosen: "microservices split").** Branch `main`. Two commits (`a07407a`
+auth / `afd0983` chat), pushed. Gate green: `clippy -p {auth,chat}-service --all-targets -D warnings`,
+`fmt`, and **live NATS round-trip tests pass** (`cargo test -p auth-service --test auth_rpc`,
+`-p chat-service --test chat_rpc`; both skip cleanly if NATS is down). Note: the headline 100k-conn
+benchmark needs real hardware (Windows dev box lacks quinn UDP GSO), so M4 builds the scaling
+*architecture* that's verifiable here.
+
+**What + why.** The gateway calls services through `Arc<dyn Auth/Chat/Presence>`. Presence already had a
+split-mode NATS RPC seam (M2: `PresenceNatsClient` + `serve` + a live test) so the same code runs as a
+monolith (direct call) OR as independent processes (RPC). This step completes that seam for the two
+remaining services, so the WHOLE app can decompose into separately-scalable services:
+- **`services/auth-service/src/rpc.rs`** — `serve` + `AuthNatsClient` for all 12 `Auth` methods. Requests
+  reuse the dice.v1 auth bodies where they suffice + 5 internal `AuthReq` messages carrying the extra
+  `ip` / bearer-user fields; the `LoginOutcome` oneof and the typed-error mapping (incl. the
+  `InvalidArgument` detail + the `RateLimited` retry-after, both in the fault `message`) round-trip.
+- **`services/chat-service/src/rpc.rs`** — `serve` + `ChatNatsClient` for all 19 `Chat` methods. Single
+  returns reuse dice.v1 messages; `sync_user_state`/`get_messages` get list wrappers; `HistoryCursor` +
+  `ChannelKind` pass as scalars; `PermissionDenied` carries the missing-permission **bits** in the fault
+  message (reconstructed with `Permissions::from_bits_truncate`).
+- Added the per-method request/response messages to `proto/dice/internal/v1/rpc.proto` (imports
+  `dice/v1/common.proto` for the chat wrappers).
+
+**Pattern (for the next service / reviewer):** subjects `dice.rpc.{service}.{method}`, queue group =
+service (N replicas load-balance for free); the 1-byte ok/err envelope is generic in
+`dice_event_bus::rpc`; only payloads + error mapping live per-service. The error contract is a `u32`
+code + a `message` string that carries any data that doesn't fit the code (detail strings, retry-after,
+permission bits).
+
+**NEXT (M4 3/n) — make split-mode actually deployable.** The RPC *code* + tests exist for all three
+services, but the service `main.rs` files are still STUBS and the gateway only constructs the direct
+(monolith) services. Remaining: (a) real service bins that connect NATS + build the concrete service
+(PgPool/cache/bus) + run `serve`; (b) a gateway/deployment mode (env, e.g. `DICE_SPLIT=1` or per-service
+`DICE_{AUTH,CHAT,PRESENCE}_RPC`) that swaps in the `*NatsClient`s behind `GatewayDeps`; (c) a `just`
+recipe to run the split fleet locally. Then the demo: monolith OR microservices from the same code.
+Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-17 — M4 (1/n): live voice device switching
 
 **M4 STARTED.** Theme otherwise TBD with the user; first task = the live-device-switching item the
