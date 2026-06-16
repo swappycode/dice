@@ -4,6 +4,7 @@
 //! REST layer and by the monolith. Implementations must not change signatures.
 
 pub mod mailer;
+pub mod rpc;
 mod service;
 pub mod validate;
 

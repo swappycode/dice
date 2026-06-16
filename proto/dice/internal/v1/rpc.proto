@@ -46,3 +46,40 @@ message PresenceSnapshotReq {
 message PresenceSnapshotResp {
   repeated dice.v1.PresenceUpdate updates = 1;
 }
+
+// ---- auth (dice.rpc.auth.*) ----
+// Only the requests that carry fields the public HTTP body lacks (the caller's
+// IP, or the bearer-resolved user id) need a dedicated message. The others reuse
+// the dice.v1 auth bodies directly (RefreshRequest, LogoutRequest,
+// CompleteTotpRequest, VerifyEmailRequest, PasswordResetConfirm), and every
+// success path replies with a dice.v1 message (AuthSuccess / LoginResponse /
+// TotpEnrollResponse / TotpConfirmResponse). `ip` empty ⇒ None.
+
+message AuthRegisterReq {
+  string email = 1;
+  string username = 2;
+  string password = 3;
+  string ip = 4;
+}
+
+message AuthLoginReq {
+  string email = 1;
+  string password = 2;
+  string ip = 3;
+}
+
+// totp_enroll / resend_verification: a bearer-resolved user id.
+message AuthUserReq {
+  fixed64 user = 1;
+}
+
+// totp_confirm / totp_disable: user + a TOTP/recovery code.
+message AuthUserCodeReq {
+  fixed64 user = 1;
+  string code = 2;
+}
+
+message AuthPasswordResetReq {
+  string email = 1;
+  string ip = 2;
+}
