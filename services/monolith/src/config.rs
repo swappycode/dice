@@ -22,6 +22,7 @@
 //! | `DICE_JWT_PRIVATE_PEM` | `dev/keys/jwt_ed25519.pem`    | Ed25519 PKCS#8 (auto-generated when missing) |
 //! | `DICE_JWT_PUBLIC_PEM`  | `dev/keys/jwt_ed25519.pub.pem`| Ed25519 SPKI (auto-generated when missing) |
 //! | `DICE_MEDIA_DIR`       | `data/media`                  | local-fs object store for attachments (created on first upload) |
+//! | `DICE_SPLIT`           | unset                         | `1` ⇒ route auth/chat/presence over NATS RPC to standalone bins (requires `full`); media+voice stay in-process |
 //! | `RUST_LOG`             | `info,dice=debug`             | tracing filter (read by `dice-logging`) |
 //! | `DICE_LOG_JSON`        | unset                         | `1` ⇒ NDJSON logs (read by `dice-logging`) |
 
@@ -56,6 +57,10 @@ pub struct MonolithConfig {
     pub jwt_public_pem: PathBuf,
     /// Local-fs object store root for media-service (attachments).
     pub media_dir: PathBuf,
+    /// Split mode (`DICE_SPLIT=1`): route auth/chat/presence to standalone
+    /// service processes over NATS RPC instead of mounting them in-process.
+    /// Requires the NATS bus (full profile); media + voice stay in-process.
+    pub split: bool,
 }
 
 impl MonolithConfig {
@@ -83,6 +88,7 @@ impl MonolithConfig {
             jwt_private_pem: path_or("DICE_JWT_PRIVATE_PEM", "dev/keys/jwt_ed25519.pem"),
             jwt_public_pem: path_or("DICE_JWT_PUBLIC_PEM", "dev/keys/jwt_ed25519.pub.pem"),
             media_dir: path_or("DICE_MEDIA_DIR", "data/media"),
+            split: parse_flag("DICE_SPLIT"),
         })
     }
 
@@ -122,6 +128,18 @@ fn parse_addr(key: &'static str, default: &str) -> Result<SocketAddr, ConfigErro
 
 fn path_or(key: &'static str, default: &str) -> PathBuf {
     PathBuf::from(env_opt(key).unwrap_or_else(|| default.to_owned()))
+}
+
+/// Truthy-env flag: set + non-empty + not an explicit off value enables it.
+/// Tolerant on purpose so `DICE_SPLIT=1` / `true` / `yes` / `on` all work.
+fn parse_flag(key: &'static str) -> bool {
+    match env_opt(key) {
+        Some(v) => !matches!(
+            v.to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        None => false,
+    }
 }
 
 /// `DICE_BUS` override wins; otherwise the profile decides
@@ -221,6 +239,26 @@ mod tests {
                 url: "redis://z:3".into()
             }
         );
+    }
+
+    #[test]
+    fn split_flag_parsing() {
+        // Pure helper: assert against representative truthy/falsy strings via
+        // the same match `parse_flag` uses (env-free so tests don't mutate the
+        // process environment, which is unsafe in edition 2024).
+        let truthy = |v: &str| {
+            !matches!(
+                v.to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        };
+        assert!(truthy("1"));
+        assert!(truthy("true"));
+        assert!(truthy("YES"));
+        assert!(truthy("on"));
+        assert!(!truthy("0"));
+        assert!(!truthy("false"));
+        assert!(!truthy("off"));
     }
 
     #[test]

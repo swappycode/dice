@@ -69,8 +69,8 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
     let ids = Arc::new(SnowflakeGenerator::new(cfg.node_id).context("DICE_NODE_ID")?);
     let rate = RateLimiter::new(cache.clone());
 
-    // --- services -> gateway deps (direct trait calls; no RPC in M1) ---
-    let deps = GatewayDeps {
+    // --- services -> gateway deps (direct trait calls by default) ---
+    let mut deps = GatewayDeps {
         auth: Arc::new(AuthService::new(
             pool.clone(),
             cache.clone(),
@@ -102,6 +102,26 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
         unread: dice_cache::UnreadStore::new(cache.clone()),
         rate,
     };
+
+    // --- split mode (DICE_SPLIT=1): route auth/chat/presence to standalone
+    // service bins over NATS RPC. The `Arc<dyn Trait>` seam is unchanged — only
+    // the concrete impl behind it swaps from a direct call to a `*NatsClient`.
+    // media + voice always stay in-process. The direct services built above are
+    // cheap struct constructions (no I/O), so replacing three of them is fine. ---
+    if cfg.split {
+        let dice_event_bus::BusConfig::Nats { url } = &cfg.bus else {
+            anyhow::bail!(
+                "DICE_SPLIT=1 requires the NATS bus; run with DICE_PROFILE=full (or DICE_BUS=nats)"
+            );
+        };
+        let rpc = dice_event_bus::rpc::RpcClient::connect(url)
+            .await
+            .context("connect split-mode RPC client")?;
+        deps.auth = Arc::new(auth_service::rpc::AuthNatsClient::new(rpc.clone()));
+        deps.chat = Arc::new(chat_service::rpc::ChatNatsClient::new(rpc.clone()));
+        deps.presence = Arc::new(presence_service::rpc::PresenceNatsClient::new(rpc));
+        tracing::info!(nats = %url, "split mode: auth/chat/presence routed over NATS RPC");
+    }
 
     // --- observability: /metrics on the admin port; non-fatal on failure ---
     if let Err(error) = dice_metrics::init_prometheus(cfg.admin_addr) {
@@ -177,10 +197,16 @@ fn banner(
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "(pre-provisioned cert; no dev CA)".to_owned());
+    let mode = if cfg.split {
+        "split (auth/chat/presence over NATS RPC; media+voice in-process)"
+    } else {
+        "monolith (all services in-process)"
+    };
     println!(
         "\n  dice-monolith up\n\
          ----------------------------------------------------------\n\
          profile   : {}\n\
+         mode      : {mode}\n\
          rest+wss  : https://{rest}  (wss path /gateway/v1)\n\
          quic      : {quic}  (ALPN dice/1)\n\
          admin     : http://{}/metrics\n\
