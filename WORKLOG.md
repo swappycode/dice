@@ -7,6 +7,48 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-17 — M4 (3/n): Scaling — split-mode is now DEPLOYABLE
+
+**M4 theme = Scaling ("microservices split").** Branch `main`. Three commits (`bb90a54` service
+bins / `21a1dd0` monolith DICE_SPLIT / `63bd49e` just+env), pushed. Gate green: `just check`
+(fmt + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace` + aws-lc gate),
+infra up. The split RPC *code* + round-trip tests landed in (2/n); this step makes the fleet
+actually **run** decomposed — so the app demonstrably runs as a monolith OR as microservices from
+one codebase.
+
+**What + why.** Three gaps closed:
+- **Real service bins** (`services/{auth,chat,presence}-service/src/main.rs`, were stubs) — each
+  connects the same infra the monolith wires per service (Postgres + NATS bus + Redis cache where
+  needed + a snowflake generator), constructs the concrete service, and runs `rpc::serve` on
+  `dice.rpc.{service}.*` until Ctrl-C. **auth-service** also loads the Ed25519 JWT pair **read-only**
+  (the gateway owns key generation/persistence; the bin reads the SAME files so its minted tokens
+  verify at the gateway) and keeps the default `LogMailer`. chat needs only PG+NATS; auth/presence
+  add Redis. Added `DEFAULT_NATS_URL` (event-bus) / `DEFAULT_REDIS_URL` (cache) consts in the
+  config-owning crates so the bins default like the monolith; new deps anyhow + dice-logging.
+- **Gateway split switch** (`DICE_SPLIT=1`) — the SAME `dice-monolith` bin builds the direct services
+  (cheap, no I/O) then swaps auth/chat/presence behind their unchanged `Arc<dyn Trait>` seams for the
+  `*NatsClient` RPC stubs. media + voice always stay in-process (no RPC seam). Requires the NATS bus
+  (full profile) — bails with a clear message otherwise. The startup banner reports the mode.
+- **`just split-up`** — pre-builds the bins, starts the gateway first (it generates dev keys + runs
+  migrations), pauses, then starts the three service bins each in its own window with a **distinct
+  `DICE_NODE_ID`** (0/1/2/3) so snowflake ids never collide. `.env.example` documents both.
+
+**Verified (live, infra up).** ① the three RPC round-trip tests pass against real NATS
+(`{auth,chat,presence}_rpc`, the exact `*NatsClient`→`serve` paths the gateway swaps in); ②
+**auth-service bin** boots against Postgres+Redis+NATS, loads JWT, logs "serving split-mode RPC";
+③ **gateway** boots with `DICE_SPLIT=1`, connects its RPC client, logs the split-routing line, and
+serves REST/WSS (banner: `mode: split (… media+voice in-process)`). The only step left to a human is
+the client-driven end-to-end demo (a REST register body is protobuf, awkward to hand-craft); the
+round-trip is already proven by the integration tests using the identical client stub.
+
+**NEXT (M4 candidates, user to steer).** With the monolith↔microservices demo done, the remaining
+M4-scaling items are the BIG ones: multi-node gateway cross-node resume (the replay buffer is
+single-node by construction — `api-gateway/src/resume.rs`), lazy member lists (RequestGuildMembers),
+transactional outbox (gap mitigated today by resume + REST backfill), per-IP rate limiting,
+observability. Plus carried M2/M3 follow-ups. Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-17 — M4 (2/n): Scaling — Auth + Chat over split-mode NATS RPC
 
 **M4 theme = Scaling (user-chosen: "microservices split").** Branch `main`. Two commits (`a07407a`
