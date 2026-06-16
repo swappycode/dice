@@ -7,6 +7,37 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-17 — M4 (1/n): live voice device switching
+
+**M4 STARTED.** Theme otherwise TBD with the user; first task = the live-device-switching item the
+user flagged at the M3 close. Branch `main`. Two commits (`3712c0f` host / `e14258c` UI hint), pushed.
+Gate green: host `clippy --lib --bins -D warnings` + fmt; frontend `tsc` + vite (CSS 56.54 KB).
+
+**Problem (from M3):** changing the input/output device in Voice settings only applied on the next
+voice-engine start, so the user had to re-login for it to take effect (the cpal streams bind at engine
+start).
+
+**Fix — apply live, even mid-call.** `audio::VoiceControl` gains a **device-generation `watch`**
+(`device_gen`, bumped inside `set_devices`); `subscribe_device_changes()` hands out a receiver. The
+**bridge** subscribes in `run()` and, on a change, calls `on_device_change()`: if a voice session is
+running it **restarts the engine in place** — drop (stops the thread + closes the old cpal streams)
+then recreate `VoiceEngine::start(ssrc, sender, control)` with the **stored ssrc** (the bridge now
+tracks `voice_ssrc` alongside `voice`, set on the self `VoiceJoin`, cleared on the self `VoiceLeave`).
+Brief audio gap; **no membership change** (no VoiceLeave/Join, peers see nothing). Not in voice ⇒ the
+engine reads the new device on the next join (unchanged). Updated the `set_audio_devices` docs + the
+Voice-settings hint ("device changes apply immediately").
+
+**Plumbing note:** the device change flows UI `setAudioDevices` → `ClientCore::set_audio_devices` →
+`VoiceControl::set_devices` (bumps `device_gen`) → bridge `device_rx.changed()` → engine restart. Same
+shared-`Arc<VoiceControl>` seam as mute/deafen/PTT; the only addition is the watch the bridge selects on.
+
+**NEXT:** user verifies live device switching (rebuilt). Then define M4's broader theme with the user
+(ROADMAP slots M4 = Scaling: multi-node gateway/resume, guild sharding, lazy member lists; or the
+carried M2/M3 follow-ups, or voice hardening — AEC, polyphase resampling, gateway-crash roster-TTL).
+Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-16 — M3 (10/n): Voice — Step 5 + M3 CLOSE-OUT
 
 **Branch:** `main`. One commit (`9399d6c`, audio.rs) + this worklog. Gate green: host `clippy --lib
