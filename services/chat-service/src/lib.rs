@@ -10,6 +10,7 @@ use dice_common::{ChannelId, GuildId, MediaId, MessageId, UserId};
 use dice_permissions::MissingPermissions;
 use dice_protocol::v1;
 
+pub mod rpc;
 mod service;
 
 pub use service::ChatService;

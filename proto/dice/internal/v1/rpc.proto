@@ -7,6 +7,7 @@ syntax = "proto3";
 package dice.internal.v1;
 
 import "dice/v1/presence.proto";
+import "dice/v1/common.proto";
 
 message PresenceConnectReq {
   fixed64 user = 1;
@@ -82,4 +83,100 @@ message AuthUserCodeReq {
 message AuthPasswordResetReq {
   string email = 1;
   string ip = 2;
+}
+
+// ---- chat (dice.rpc.chat.*) ----
+// Every request carries the actor (the gateway resolves it from the bearer
+// token / socket session before the RPC). Single-object responses reuse the
+// dice.v1 message directly (Message / Guild / Channel / User / Friend /
+// FriendList); only the two list returns need a wrapper. `reply_to` / `media` /
+// `cursor_id` == 0 mean "none/latest".
+
+message ChatSyncReq { fixed64 user = 1; }
+message ChatSyncResp {
+  repeated dice.v1.Guild guilds = 1;
+  repeated dice.v1.Channel dm_channels = 2;
+  repeated dice.v1.User users = 3;
+}
+
+message ChatSendMessageReq {
+  fixed64 actor = 1;
+  fixed64 channel = 2;
+  string content = 3;
+  fixed64 reply_to = 4;            // 0 = not a reply
+  repeated fixed64 attachments = 5;
+  fixed64 nonce = 6;
+}
+
+message ChatGetMessagesReq {
+  fixed64 actor = 1;
+  fixed64 channel = 2;
+  uint32 cursor_kind = 3;          // 0 = latest, 1 = before, 2 = after
+  fixed64 cursor_id = 4;
+  uint32 limit = 5;
+}
+message ChatMessagesResp { repeated dice.v1.Message messages = 1; }
+
+message ChatEditMessageReq {
+  fixed64 actor = 1;
+  fixed64 channel = 2;
+  fixed64 message = 3;
+  string content = 4;
+}
+
+// delete_message
+message ChatMessageRefReq {
+  fixed64 actor = 1;
+  fixed64 channel = 2;
+  fixed64 message = 3;
+}
+
+// add_reaction / remove_reaction
+message ChatReactionReq {
+  fixed64 actor = 1;
+  fixed64 channel = 2;
+  fixed64 message = 3;
+  string emoji = 4;
+}
+
+message ChatCreateGuildReq {
+  fixed64 actor = 1;
+  string name = 2;
+}
+message ChatJoinGuildReq {
+  fixed64 actor = 1;
+  string code = 2;
+}
+message ChatCreateChannelReq {
+  fixed64 actor = 1;
+  fixed64 guild = 2;
+  string name = 3;
+  dice.v1.ChannelKind kind = 4;
+}
+message ChatOpenDmReq {
+  fixed64 actor = 1;
+  fixed64 other = 2;
+}
+
+// typing / mark_read
+message ChatChannelRefReq {
+  fixed64 actor = 1;
+  fixed64 channel = 2;
+}
+
+message ChatSetAvatarReq {
+  fixed64 actor = 1;
+  fixed64 media = 2;               // 0 = clear
+}
+
+// list_friends
+message ChatActorReq { fixed64 actor = 1; }
+message ChatAddFriendReq {
+  fixed64 actor = 1;
+  string username = 2;
+}
+// accept_friend / decline_friend / remove_friend
+message ChatFriendRefReq {
+  fixed64 actor = 1;
+  fixed64 other = 2;
 }
