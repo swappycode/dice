@@ -45,6 +45,11 @@ pub const DEFAULT_LOCAL_CAPACITY: usize = 4096;
 /// Name of the capture-only JetStream stream ensured at connect time.
 pub const JETSTREAM_STREAM: &str = "DICE_EVT";
 
+/// Default NATS URL (`DICE_NATS_URL`) — matches `.env.example` and the dev
+/// docker compose. Used by the split-mode service bins and the RPC client when
+/// the env var is unset.
+pub const DEFAULT_NATS_URL: &str = "nats://localhost:4222";
+
 /// Runtime backend selection (`DICE_BUS=local|nats` is parsed by callers).
 #[derive(Debug, Clone)]
 pub enum BusConfig {

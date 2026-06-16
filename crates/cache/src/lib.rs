@@ -43,6 +43,10 @@ pub enum CacheError {
     Redis(#[from] redis::RedisError),
 }
 
+/// Default Redis URL (`DICE_REDIS_URL`) — matches `.env.example` and the dev
+/// docker compose. Used by the split-mode service bins when the env var is unset.
+pub const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
+
 /// Runtime backend selection (`DICE_CACHE=memory|redis` at the service layer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheConfig {

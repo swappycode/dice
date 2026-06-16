@@ -12,7 +12,9 @@ dice-permissions = { workspace = true }
 dice-database = { workspace = true }
 dice-event-bus = { workspace = true }
 dice-cache = { workspace = true }
+dice-logging = { workspace = true }
 async-trait = { workspace = true }
+anyhow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 sqlx = { workspace = true }
