@@ -7,6 +7,49 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-17 — M4 (5/n): Scaling — lazy member lists (RequestGuildMembers)
+
+**M4 theme = Scaling.** Branch `main`. Per-unit commits (`bd6f4b8` proto / `e01188c`
+chat-service / `c80af6e` gateway / `54336bf` network-core + host-bridge / `f16a88f`
+client-host command / `fa4bb02` client-ui / `51b43a9` >100 paging test), pushed.
+Gates green: `just check` (server) + host clippy/fmt + frontend `npm run check`/`build`.
+
+**What + why.** `Ready` inlines only ≤100 members/guild (the M1 cap); for larger guilds
+the rest were unreachable. This adds the designed-but-unbuilt on-demand paging flow,
+end to end:
+- **Wire** (`bd6f4b8`): `RequestGuildMembers` (frame **37**, request) + `GuildMembersChunk`
+  (frame **51**, a nonce-echoed REPLY — Control class, deliberately NOT a #100+ dispatch,
+  so it is never replayed on resume) + `CAP_LAZY_MEMBERS` (Identify capabilities bit 1).
+- **chat-service** (`e01188c`): `Chat::request_members(actor, guild, after, limit)` keyset-
+  pages `guild_members` by `user_id` (membership-gated; a +1-row probe sets `has_more`;
+  loads the matching user records). Full split-mode RPC parity (`ChatRequestMembersReq/Resp`
+  + serve arm + `ChatNatsClient`).
+- **gateway** (`c80af6e`): a `dispatch.rs` arm — rate-limited via the per-session bucket, one
+  chunk per request, errors mapped through `chat_error_frame`.
+- **client** (`54336bf` / `f16a88f` / `fa4bb02`): network-core `Command::RequestGuildMembers`
+  (nonce-tracked) + the chunk surfaces as `ClientEvent::GuildMembers`; the Tauri host forwards
+  it as `DiceEvent::GuildMembers` and exposes a `request_guild_members` command; the SolidJS
+  `MemberSidebar` requests the roster when a guild at the cap is opened, and the `guildMembers`
+  dispatch merges each page into the directory (dedup by userId) and pages on with `after` =
+  the last user_id until `has_more` is false.
+
+**Verified (live, infra up).** `chat_rpc` round-trip (wire mapping); `client_e2e`
+`request_guild_members_returns_the_roster` drives the full client→gateway→chat path and gets
+the nonce-matched chunk; `live.rs` `request_members_pages_large_rosters` seeds a 150-member
+guild and asserts page 1 = 100 + has_more, page 2 = 50 + done, strict ascending keyset (no
+overlap), non-member rejected.
+
+**Deferred (documented).** Trimming `Ready.users[]` for CAP_LAZY_MEMBERS clients — today
+`sync_user_state` still puts ALL members in the dictionary (service.rs:131), so the Ready
+bandwidth win is partial until that dict is capped to the inlined set. The one remaining
+lazy-members optimization.
+
+**NEXT (M4 remaining).** Observability ✅ + lazy member lists ✅. Remaining BIG M4 items:
+multi-node gateway cross-node resume, transactional outbox. Next free Frame **dispatch** #
+= **121** (the chunk is reply #51, not a dispatch).
+
+---
+
 ## 2026-06-17 — M4 (4/n): Scaling — observability (metrics, Grafana, tracing)
 
 **M4 theme = Scaling.** Branch `main`. Pushed as a run of per-unit commits
