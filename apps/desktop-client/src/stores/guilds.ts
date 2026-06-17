@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { createStore, reconcile, produce } from "solid-js/store";
-import type { Bootstrap, Channel, Guild, User } from "../lib/types";
+import type { Bootstrap, Channel, Guild, Member, User } from "../lib/types";
 
 interface Directory {
   guilds: Guild[];
@@ -64,6 +64,24 @@ export function addGuild(guild: Guild, channels: Channel[]): void {
     produce((d) => {
       if (!d.guilds.some((g) => g.id === guild.id)) d.guilds.push(guild);
       d.channelsByGuild[guild.id] = [...channels].sort(byPosition);
+    }),
+  );
+}
+
+/** Merge a lazy-loaded member page into its guild (dedup by userId), plus the
+ *  user records that ride along to keep the dictionary warm. */
+export function applyMemberChunk(guildId: string, members: Member[], users: User[]): void {
+  setDirectory(
+    produce((d) => {
+      for (const u of users) {
+        d.usersById[u.id] = d.usersById[u.id] ? { ...d.usersById[u.id], ...u } : u;
+      }
+      const g = d.guilds.find((x) => x.id === guildId);
+      if (!g) return;
+      const seen = new Set(g.members.map((m) => m.userId));
+      for (const m of members) {
+        if (!seen.has(m.userId)) g.members.push(m);
+      }
     }),
   );
 }

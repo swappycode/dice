@@ -13,6 +13,7 @@ import {
   addDm,
   addGuild,
   applyBootstrap,
+  applyMemberChunk,
   applyUserUpdate,
   displayName,
   resetDirectory,
@@ -105,6 +106,15 @@ function dispatch(ev: DiceEvent): void {
     case "guildCreate":
       addGuild(ev.guild, ev.channels);
       break;
+    case "guildMembers": {
+      applyMemberChunk(ev.guildId, ev.members, ev.users);
+      // Page the rest by user_id until the server reports no more.
+      const last = ev.members[ev.members.length - 1];
+      if (ev.hasMore && last) {
+        void ipc.requestGuildMembers(ev.guildId, last.userId, 100);
+      }
+      break;
+    }
     case "channelCreate":
       addChannel(ev.channel);
       break;

@@ -1,4 +1,4 @@
-import { createMemo, For, Show, type Component } from "solid-js";
+import { createEffect, createMemo, For, Show, type Component } from "solid-js";
 import { ipc } from "../../lib/ipc";
 import {
   addDm,
@@ -25,6 +25,18 @@ export const MemberSidebar: Component = () => {
       if (pa !== pb) return pa - pb;
       return displayName(a.userId).localeCompare(displayName(b.userId));
     });
+  });
+
+  // Lazy member loading: Ready inlines only ~100 members, so for a guild at
+  // that cap fetch the rest on open (idempotent per guild; further pages arrive
+  // via the guildMembers dispatch, which re-requests until exhausted).
+  const requested = new Set<string>();
+  createEffect(() => {
+    const g = selectedGuild();
+    if (g && g.members.length >= 100 && !requested.has(g.id)) {
+      requested.add(g.id);
+      void ipc.requestGuildMembers(g.id, "", 100);
+    }
   });
 
   async function openDm(userId: string): Promise<void> {

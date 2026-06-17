@@ -691,6 +691,10 @@ export function createMockIpc(): DiceIpc {
       setTimeout(() => emit({ type: "channelCreate", channel: { ...channel } }), 60);
       return { ...channel };
     },
+    async requestGuildMembers(_guildId, _after, _limit) {
+      // Mock guilds inline their full (small) roster — nothing to page.
+      await delay(40);
+    },
 
     async fetchUnread() {
       // The mock has no server-side counts; badges accrue live from the

@@ -158,6 +158,13 @@ export type DiceEvent =
   | { type: "userUpdate"; user: User }
   | { type: "readMarkerUpdate"; channelId: string; lastReadMessageId: string }
   | { type: "guildCreate"; guild: Guild; channels: Channel[] }
+  | {
+      type: "guildMembers";
+      guildId: string;
+      members: Member[];
+      users: User[];
+      hasMore: boolean;
+    }
   | { type: "channelCreate"; channel: Channel }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }
   | { type: "friendUpdate"; friend: Friend; removed: boolean }

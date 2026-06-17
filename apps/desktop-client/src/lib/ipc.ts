@@ -94,6 +94,9 @@ export interface DiceIpc {
   openDm(recipientId: string): Promise<Channel>;
   /** Create a guild channel (`kind` = "voice" | "guild_text"); needs MANAGE_CHANNELS. */
   createChannel(guildId: string, name: string, kind: ChannelKind): Promise<Channel>;
+  /** Lazy member loading: request one page of a guild's members after `after`
+      (empty = from the start). The page arrives as a `guildMembers` event. */
+  requestGuildMembers(guildId: string, after: string, limit: number): Promise<void>;
 
   /** The caller's friends + pending requests (both directions). */
   listFriends(): Promise<Friend[]>;
