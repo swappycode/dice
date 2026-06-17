@@ -126,8 +126,8 @@ mod tests {
         let versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
         assert_eq!(
             versions.len(),
-            13,
-            "expected 13 embedded migrations (M1 4 + M2 replies/reactions/attachments/avatars/read-markers/totp/email-verify-reset + M3 friendships/voice-channels), got {versions:?}"
+            14,
+            "expected 14 embedded migrations (M1 4 + M2 replies/reactions/attachments/avatars/read-markers/totp/email-verify-reset + M3 friendships/voice-channels + M4 event-outbox), got {versions:?}"
         );
         assert!(
             versions.windows(2).all(|w| w[0] < w[1]),
@@ -153,7 +153,8 @@ mod tests {
                 "totp",
                 "email verify reset",
                 "friendships",
-                "voice channels"
+                "voice channels",
+                "event outbox"
             ]
         );
     }
@@ -187,6 +188,7 @@ mod tests {
             "media",
             "message_attachments",
             "read_markers",
+            "event_outbox",
         ]
         .iter()
         .map(|s| (*s).to_owned())
@@ -201,6 +203,6 @@ mod tests {
         .await
         .expect("query information_schema");
 
-        assert_eq!(present, 12, "all 12 tables must exist after migrate()");
+        assert_eq!(present, 13, "all 13 tables must exist after migrate()");
     }
 }
