@@ -113,6 +113,13 @@ tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 metrics            = "0.24"
 metrics-exporter-prometheus = { version = "0.17", default-features = false, features = ["http-listener"] }
+# OTLP tracing export (HTTP/protobuf via reqwest — NOT tonic/grpc — to keep the
+# ring-only TLS policy; gated by `just gate-aws-lc`). SPIKE: verify aws-lc-sys
+# stays absent before relying on these.
+opentelemetry         = "0.27"
+opentelemetry_sdk     = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp    = { version = "0.27", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+tracing-opentelemetry = "0.28"
 
 # ---- misc ----
 thiserror   = "2"

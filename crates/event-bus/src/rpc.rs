@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 use async_nats::Client;
 use futures_util::StreamExt as _;
+use tracing::Instrument as _;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 /// Root of every RPC subject.
 pub const SUBJECT_ROOT: &str = "dice.rpc";
@@ -98,12 +100,35 @@ impl RpcClient {
         req: Vec<u8>,
     ) -> Result<Vec<u8>, RpcError> {
         let subject = format!("{SUBJECT_ROOT}.{service}.{method}");
-        let msg = self
-            .client
-            .request(subject, req.into())
-            .await
+        let span = tracing::info_span!(
+            "rpc.client",
+            rpc.service = service,
+            rpc.method = method,
+            otel.kind = "client"
+        );
+        async {
+            // Inject the active trace context as NATS headers. With no OTel
+            // propagator installed (span export off) the carrier stays empty and
+            // we send a header-less request — zero overhead on the hot path.
+            let mut carrier = std::collections::HashMap::new();
+            let cx = tracing::Span::current().context();
+            opentelemetry::global::get_text_map_propagator(|p| p.inject_context(&cx, &mut carrier));
+            let msg = if carrier.is_empty() {
+                self.client.request(subject, req.into()).await
+            } else {
+                let mut headers = async_nats::HeaderMap::new();
+                for (k, v) in carrier {
+                    headers.insert(k.as_str(), v.as_str());
+                }
+                self.client
+                    .request_with_headers(subject, headers, req.into())
+                    .await
+            }
             .map_err(|e| RpcError::Transport(e.to_string()))?;
-        decode_reply(&msg.payload)
+            decode_reply(&msg.payload)
+        }
+        .instrument(span)
+        .await
     }
 }
 
@@ -131,13 +156,33 @@ where
         };
         let method = msg.subject.as_str()[prefix_len..].to_owned();
         let req = msg.payload.to_vec();
+        // Continue the caller's trace across the NATS boundary: extract the
+        // inbound W3C context (if any) to parent the handler span.
+        let parent_cx = msg.headers.as_ref().map(|h| {
+            let mut carrier = std::collections::HashMap::new();
+            for key in ["traceparent", "tracestate"] {
+                if let Some(value) = h.get(key) {
+                    carrier.insert(key.to_owned(), value.as_str().to_owned());
+                }
+            }
+            opentelemetry::global::get_text_map_propagator(|p| p.extract(&carrier))
+        });
         let client = client.clone();
         let handler = Arc::clone(&handler);
         let service_label = service.to_owned();
         tokio::spawn(async move {
             let method_label = method.clone();
+            let span = tracing::info_span!(
+                "rpc.server",
+                rpc.service = %service_label,
+                rpc.method = %method_label,
+                otel.kind = "server"
+            );
+            if let Some(cx) = parent_cx {
+                span.set_parent(cx);
+            }
             let started = std::time::Instant::now();
-            let result = handler(method, req).await;
+            let result = handler(method, req).instrument(span).await;
             dice_metrics::histogram!(
                 "dice_rpc_request_seconds",
                 "service" => service_label,
