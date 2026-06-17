@@ -60,6 +60,32 @@ pub async fn connect(cfg: &DbConfig) -> Result<PgPool, sqlx::Error> {
         .await
 }
 
+/// How often [`spawn_pool_metrics`] samples pool utilisation.
+pub const POOL_METRICS_PERIOD: Duration = Duration::from_secs(10);
+
+/// Spawn a background task that samples pool utilisation into gauges every
+/// [`POOL_METRICS_PERIOD`]:
+///
+/// - `dice_db_pool_connections` — physical connections currently open.
+/// - `dice_db_pool_idle_connections` — of those, currently idle.
+///
+/// A per-acquire `dice_db_pool_acquire_seconds` histogram (the §5.7 name)
+/// would need an `Executor` wrapper — sqlx exposes no per-acquire hook and
+/// most queries borrow `&pool` directly — so it is deferred; these gauges give
+/// the pool-saturation signal meanwhile. The `gauge!` macro is a no-op until a
+/// process installs the Prometheus recorder, so this is cheap to start
+/// unconditionally; the task ends when the runtime stops.
+pub fn spawn_pool_metrics(pool: PgPool) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(POOL_METRICS_PERIOD);
+        loop {
+            tick.tick().await;
+            dice_metrics::gauge!("dice_db_pool_connections").set(f64::from(pool.size()));
+            dice_metrics::gauge!("dice_db_pool_idle_connections").set(pool.num_idle() as f64);
+        }
+    });
+}
+
 /// The embedded migrator: the full M1 schema, compiled into the binary.
 /// Exposed for tests and for the monolith's self-migrate-on-boot path.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

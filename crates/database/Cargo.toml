@@ -8,6 +8,7 @@ description = "Postgres pool bootstrap + embedded migrations (single linear hist
 
 [dependencies]
 dice-common = { workspace = true }
+dice-metrics = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

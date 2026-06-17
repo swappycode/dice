@@ -127,6 +127,8 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
     if let Err(error) = dice_metrics::init_prometheus(cfg.admin_addr) {
         tracing::warn!(%error, addr = %cfg.admin_addr, "Prometheus exporter unavailable; continuing without /metrics");
     }
+    // Background DB pool-utilisation sampler (no-op until the exporter above).
+    dice_database::spawn_pool_metrics(pool.clone());
 
     // --- gateway (REST + WSS on one TLS port, QUIC on UDP) ---
     let shutdown = Shutdown::new();
