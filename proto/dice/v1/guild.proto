@@ -37,3 +37,22 @@ message CreateChannelRequest {
   ChannelKind kind = 3;   // UNSPECIFIED defaults to GUILD_TEXT (back-compat)
 }
 message OpenDmRequest { fixed64 recipient_id = 1; }   // idempotent via dm_key
+
+// -- lazy member loading (M4) --
+// Client->server request (frame 37, nonce set): page a guild's members beyond
+// the ~100 that Ready inlines. Keyset by user_id; `after` = the last user_id
+// received (0 = from the start). Only useful when the client advertised
+// CAP_LAZY_MEMBERS at Identify.
+message RequestGuildMembers {
+  fixed64 guild_id = 1;
+  fixed64 after = 2;
+  uint32 limit = 3;   // requested page size; server clamps to <= 100
+}
+// Server->client reply (frame 51, nonce echoed): one page, ascending by
+// user_id, plus the matching user records (keeps the client dictionary warm).
+message GuildMembersChunk {
+  fixed64 guild_id = 1;
+  repeated Member members = 2;
+  repeated User users = 3;
+  bool has_more = 4;   // more remain — request again with after = last user_id
+}

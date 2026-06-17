@@ -31,6 +31,12 @@ pub const CLOSE_CODE_BASE: u32 = 4000;
 /// gateway leaves it clear and voice audio is unavailable for that session.
 pub const CAP_VOICE_DATAGRAMS: u64 = 1 << 0;
 
+/// `Identify.capabilities` bit 1: the client understands lazy member loading —
+/// it fetches large guild member lists on demand via `RequestGuildMembers` and
+/// merges `GuildMembersChunk` replies. Ready still inlines the first ~100; the
+/// bit lets the gateway trim the `users` dictionary to that set for big guilds.
+pub const CAP_LAZY_MEMBERS: u64 = 1 << 1;
+
 /// Delivery class of a frame. See docs/protocol.md §6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameClass {
@@ -113,7 +119,9 @@ fn payload_field_number(p: &v1::frame::Payload) -> u32 {
         DeleteMessage(_) => 34,
         AddReaction(_) => 35,
         RemoveReaction(_) => 36,
+        RequestGuildMembers(_) => 37,
         SendMessageAck(_) => 50,
+        GuildMembersChunk(_) => 51,
         MessageCreate(_) => 100,
         MessageUpdate(_) => 101,
         MessageDelete(_) => 102,

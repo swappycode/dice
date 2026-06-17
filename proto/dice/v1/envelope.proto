@@ -46,8 +46,10 @@ message Frame {
     DeleteMessageRequest delete_message = 34;
     AddReactionRequest add_reaction = 35;
     RemoveReactionRequest remove_reaction = 36;
+    RequestGuildMembers request_guild_members = 37;
     // -- server -> client replies (50-69) --
     SendMessageAck send_message_ack = 50;
+    GuildMembersChunk guild_members_chunk = 51;
     // -- sequenced dispatch events (100+) --
     MessageCreate message_create = 100;
     MessageUpdate message_update = 101;   // reserved in M1
