@@ -86,6 +86,29 @@ export function applyMemberChunk(guildId: string, members: Member[], users: User
   );
 }
 
+/** Merge resolved user records (on-demand user-fetch reply) into the directory. */
+export function applyUsers(users: User[]): void {
+  if (users.length === 0) return;
+  setDirectory(
+    produce((d) => {
+      for (const u of users) {
+        d.usersById[u.id] = d.usersById[u.id] ? { ...d.usersById[u.id], ...u } : u;
+      }
+    }),
+  );
+}
+
+/** Of `ids`, the ones not yet in the directory — to resolve on demand via
+ *  `ipc.requestUsers` (e.g. message authors beyond the inlined Ready set for
+ *  CAP_LAZY_MEMBERS clients). Skips empty / "0" ids; dedups. */
+export function unknownUserIds(ids: Iterable<string>): string[] {
+  const missing = new Set<string>();
+  for (const id of ids) {
+    if (id && id !== "0" && !directory.usersById[id]) missing.add(id);
+  }
+  return [...missing];
+}
+
 export function addChannel(channel: Channel): void {
   if (!channel.guildId) return;
   const gid = channel.guildId;

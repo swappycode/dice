@@ -5,6 +5,7 @@ import {
   dmPartnerId,
   selectedChannel,
   selectedGuild,
+  unknownUserIds,
 } from "../../stores/guilds";
 import { applyFetchedPage, isFetched } from "../../stores/messages";
 import { presenceOf } from "../../stores/presence";
@@ -21,7 +22,11 @@ export const ChatView: Component = () => {
     const id = ch.id;
     void ipc
       .fetchMessages(id, undefined, 100)
-      .then((page) => applyFetchedPage(id, page))
+      .then((page) => {
+        applyFetchedPage(id, page);
+        const unknown = unknownUserIds(page.map((m) => m.authorId));
+        if (unknown.length) void ipc.requestUsers(unknown);
+      })
       .catch(() => applyFetchedPage(id, []));
   });
 

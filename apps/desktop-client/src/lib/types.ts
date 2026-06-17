@@ -165,6 +165,7 @@ export type DiceEvent =
       users: User[];
       hasMore: boolean;
     }
+  | { type: "users"; users: User[] }
   | { type: "channelCreate"; channel: Channel }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }
   | { type: "friendUpdate"; friend: Friend; removed: boolean }

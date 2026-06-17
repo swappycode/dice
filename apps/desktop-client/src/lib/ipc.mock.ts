@@ -695,6 +695,10 @@ export function createMockIpc(): DiceIpc {
       // Mock guilds inline their full (small) roster — nothing to page.
       await delay(40);
     },
+    async requestUsers(_userIds) {
+      // Mock Ready inlines every user — nothing to resolve on demand.
+      await delay(40);
+    },
 
     async fetchUnread() {
       // The mock has no server-side counts; badges accrue live from the

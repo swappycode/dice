@@ -9,7 +9,7 @@ import {
 import { ipc } from "../../lib/ipc";
 import type { Attachment, Message } from "../../lib/types";
 import { crossesDay, dayLabel, formatTime } from "../../lib/time";
-import { displayName, selectedChannelId } from "../../stores/guilds";
+import { displayName, selectedChannelId, unknownUserIds } from "../../stores/guilds";
 import {
   messageById,
   messagesFor,
@@ -139,6 +139,8 @@ export const MessageList: Component = () => {
     try {
       const page = await ipc.fetchMessages(id, before, 50);
       const added = prependOlder(id, page);
+      const unknown = unknownUserIds(page.map((m) => m.authorId));
+      if (unknown.length) void ipc.requestUsers(unknown);
       if (added === 0) setExhausted((e) => ({ ...e, [id]: true }));
       // keep the viewport anchored on the rows the user was reading
       requestAnimationFrame(() => {

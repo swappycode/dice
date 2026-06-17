@@ -124,6 +124,7 @@ export function createTauriIpc(): DiceIpc {
       call<Channel>("create_channel", { guildId, name, kind }),
     requestGuildMembers: (guildId, after, limit) =>
       call<void>("request_guild_members", { guildId, after, limit }),
+    requestUsers: (userIds) => call<void>("request_users", { userIds }),
     listFriends: () => call<Friend[]>("list_friends"),
     addFriend: (username) => call<Friend>("add_friend", { username }),
     acceptFriend: (userId) => call<Friend>("accept_friend", { userId }),

@@ -97,6 +97,9 @@ export interface DiceIpc {
   /** Lazy member loading: request one page of a guild's members after `after`
       (empty = from the start). The page arrives as a `guildMembers` event. */
   requestGuildMembers(guildId: string, after: string, limit: number): Promise<void>;
+  /** Resolve user records by id (fill in unknown message authors). The records
+      arrive as a `users` event. No-op for an empty list. */
+  requestUsers(userIds: string[]): Promise<void>;
 
   /** The caller's friends + pending requests (both directions). */
   listFriends(): Promise<Friend[]>;

@@ -14,10 +14,12 @@ import {
   addGuild,
   applyBootstrap,
   applyMemberChunk,
+  applyUsers,
   applyUserUpdate,
   displayName,
   resetDirectory,
   selectedChannelId,
+  unknownUserIds,
 } from "../stores/guilds";
 import {
   applyMessageCreate,
@@ -59,6 +61,9 @@ function dispatch(ev: DiceEvent): void {
   switch (ev.type) {
     case "messageCreate": {
       applyMessageCreate(ev.message, ev.nonce);
+      // Resolve the author on demand if the trim left them out of the directory.
+      const unknownAuthor = unknownUserIds([ev.message.authorId]);
+      if (unknownAuthor.length) void ipc.requestUsers(unknownAuthor);
       clearTyping(ev.message.channelId, ev.message.authorId);
       // The author never notifies themselves.
       if (ev.message.authorId !== currentUser()?.id) {
@@ -115,6 +120,9 @@ function dispatch(ev: DiceEvent): void {
       }
       break;
     }
+    case "users":
+      applyUsers(ev.users);
+      break;
     case "channelCreate":
       addChannel(ev.channel);
       break;
