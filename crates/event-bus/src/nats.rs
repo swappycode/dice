@@ -88,6 +88,7 @@ impl Stream for NatsStream {
                     // Corrupt/foreign publisher: count, skip, keep the stream alive.
                     Err(_) => {
                         DECODE_FAILURES.fetch_add(1, Ordering::Relaxed);
+                        dice_metrics::counter!("dice_bus_decode_failures_total").increment(1);
                     }
                 },
                 None => return Poll::Ready(None),

@@ -89,6 +89,7 @@ impl Stream for LocalStream {
                 // Fell behind the ring buffer: count and continue (at-most-once).
                 Err(RecvError::Lagged(n)) => {
                     DROPPED_EVENTS.fetch_add(n, Ordering::Relaxed);
+                    dice_metrics::counter!("dice_bus_dropped_events_total").increment(n);
                 }
                 Err(RecvError::Closed) => return Poll::Ready(None),
             }

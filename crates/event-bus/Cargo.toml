@@ -9,6 +9,7 @@ license.workspace = true
 async-nats    = { workspace = true }
 async-trait   = { workspace = true }
 dice-common   = { workspace = true }
+dice-metrics  = { workspace = true }
 dice-protocol = { workspace = true }
 futures-util  = { workspace = true }
 thiserror     = { workspace = true }
