@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT u.id, u.username, u.display_name, u.flags, u.avatar_media_id FROM users u JOIN guild_members target ON target.user_id = u.id JOIN guild_members viewer ON viewer.guild_id = target.guild_id WHERE u.id = ANY($1::bigint[]) AND viewer.user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "flags",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_media_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "d16619809e8c4b07651973dc85124b1fa6324b1bd3e5edaf1616bf94f723c799"
+}

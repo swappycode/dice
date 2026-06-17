@@ -304,6 +304,42 @@ impl Chat for ChatService {
         })
     }
 
+    async fn get_users(
+        &self,
+        actor: UserId,
+        user_ids: Vec<UserId>,
+    ) -> Result<Vec<v1::User>, ChatError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Clamp to 100 ids per request.
+        let ids: Vec<i64> = user_ids.iter().take(100).map(|u| u.as_i64()).collect();
+        // Visibility gate: only users that share at least one guild with the
+        // actor. DISTINCT collapses the one-row-per-shared-guild duplicates.
+        let users = sqlx::query!(
+            "SELECT DISTINCT u.id, u.username, u.display_name, u.flags, u.avatar_media_id \
+             FROM users u \
+             JOIN guild_members target ON target.user_id = u.id \
+             JOIN guild_members viewer ON viewer.guild_id = target.guild_id \
+             WHERE u.id = ANY($1::bigint[]) AND viewer.user_id = $2",
+            &ids[..],
+            actor.as_i64()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|r| v1::User {
+            id: r.id as u64,
+            username: r.username,
+            display_name: r.display_name.unwrap_or_default(),
+            flags: r.flags as u32,
+            avatar_id: r.avatar_media_id.map_or(0, |v| v as u64),
+        })
+        .collect();
+        Ok(users)
+    }
+
     async fn send_message(
         &self,
         actor: UserId,

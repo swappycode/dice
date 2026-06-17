@@ -111,6 +111,17 @@ pub trait Chat: Send + Sync {
         limit: u8,
     ) -> Result<MemberPage, ChatError>;
 
+    /// Resolve user records by id for on-demand author/user resolution
+    /// (CAP_LAZY_MEMBERS): fills in message authors the client does not yet
+    /// hold (members beyond the ~100 Ready inlines). Returns only users that
+    /// share at least one guild with `actor` (visibility gate); unknown /
+    /// not-shared ids are omitted. `user_ids` is clamped to 100.
+    async fn get_users(
+        &self,
+        actor: UserId,
+        user_ids: Vec<UserId>,
+    ) -> Result<Vec<v1::User>, ChatError>;
+
     /// Edits a message's content. AUTHOR-ONLY (mods cannot edit others, even
     /// with MANAGE_MESSAGES — matches Discord). Sets `edited_at` and publishes
     /// `MessageUpdate` to the channel subject.

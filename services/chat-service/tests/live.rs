@@ -1179,6 +1179,40 @@ async fn message_content_length_is_validated() {
 }
 
 #[tokio::test]
+async fn get_users_returns_only_shared_guild_members() {
+    let ctx = Ctx::new(3).await;
+    let (actor, mate, stranger) = (ctx.users[0], ctx.users[1], ctx.users[2]);
+    let guild = ctx
+        .svc
+        .create_guild(actor, "share-test".into())
+        .await
+        .unwrap();
+    ctx.svc.join_guild(mate, &guild.invite_code).await.unwrap();
+    // `stranger` shares no guild with the actor.
+
+    let got = ctx
+        .svc
+        .get_users(actor, vec![mate, stranger, actor])
+        .await
+        .unwrap();
+    let ids: HashSet<u64> = got.iter().map(|u| u.id).collect();
+    assert!(ids.contains(&mate.raw()), "a shared-guild member resolves");
+    assert!(
+        ids.contains(&actor.raw()),
+        "the actor resolves self via the shared guild"
+    );
+    assert!(
+        !ids.contains(&stranger.raw()),
+        "a user sharing no guild is NOT resolved (visibility gate)"
+    );
+
+    // Empty request is a no-op.
+    assert!(ctx.svc.get_users(actor, vec![]).await.unwrap().is_empty());
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn sync_user_state_builds_the_full_ready_snapshot() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);

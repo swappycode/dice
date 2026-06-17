@@ -106,6 +106,21 @@ impl Chat for MockChat {
         })
     }
 
+    async fn get_users(
+        &self,
+        _actor: UserId,
+        user_ids: Vec<UserId>,
+    ) -> Result<Vec<v1::User>, ChatError> {
+        // Echo the requested ids as user records so the test confirms they crossed.
+        Ok(user_ids
+            .into_iter()
+            .map(|u| v1::User {
+                id: u.raw(),
+                ..Default::default()
+            })
+            .collect())
+    }
+
     async fn edit_message(
         &self,
         _a: UserId,
@@ -284,6 +299,17 @@ async fn chat_round_trips_over_nats() {
         .unwrap();
     assert_eq!(msgs.len(), 3);
     assert_eq!(msgs[0].id, 55, "cursor id crossed the wire");
+
+    // get_users round-trips the requested ids (the mock echoes them as records).
+    let users = client
+        .get_users(actor, vec![UserId::from_raw(11), UserId::from_raw(22)])
+        .await
+        .unwrap();
+    let user_ids: std::collections::HashSet<u64> = users.iter().map(|u| u.id).collect();
+    assert!(
+        user_ids.contains(&11) && user_ids.contains(&22),
+        "user ids crossed the wire"
+    );
 
     // ChannelKind enum passthrough.
     let chan = client

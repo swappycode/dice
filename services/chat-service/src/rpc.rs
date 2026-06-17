@@ -189,6 +189,18 @@ pub async fn serve(client: RpcClient, chat: Arc<dyn Chat>) -> Result<(), RpcErro
                         }
                         .encode_to_vec())
                     }
+                    "get_users" => {
+                        let r =
+                            rpc::ChatGetUsersReq::decode(body.as_slice()).map_err(decode_fault)?;
+                        let users = chat
+                            .get_users(
+                                UserId::from_raw(r.actor),
+                                r.user_ids.into_iter().map(UserId::from_raw).collect(),
+                            )
+                            .await
+                            .map_err(to_fault)?;
+                        Ok(rpc::ChatGetUsersResp { users }.encode_to_vec())
+                    }
                     "edit_message" => {
                         let r = rpc::ChatEditMessageReq::decode(body.as_slice())
                             .map_err(decode_fault)?;
@@ -452,6 +464,24 @@ impl Chat for ChatNatsClient {
             users: r.users,
             has_more: r.has_more,
         })
+    }
+
+    async fn get_users(
+        &self,
+        actor: UserId,
+        user_ids: Vec<UserId>,
+    ) -> Result<Vec<v1::User>, ChatError> {
+        let req = rpc::ChatGetUsersReq {
+            actor: actor.raw(),
+            user_ids: user_ids.iter().map(|u| u.raw()).collect(),
+        };
+        let bytes = self
+            .rpc
+            .call(SERVICE, "get_users", req.encode_to_vec())
+            .await
+            .map_err(to_err)?;
+        let r = rpc::ChatGetUsersResp::decode(bytes.as_slice()).map_err(internal)?;
+        Ok(r.users)
     }
 
     async fn edit_message(
