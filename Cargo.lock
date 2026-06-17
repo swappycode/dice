@@ -39,6 +39,7 @@ dependencies = [
  "dice-common",
  "dice-database",
  "dice-event-bus",
+ "dice-metrics",
  "dice-network-core",
  "dice-protocol",
  "futures-util",
@@ -358,6 +359,7 @@ dependencies = [
  "dice-database",
  "dice-event-bus",
  "dice-logging",
+ "dice-metrics",
  "dice-permissions",
  "dice-protocol",
  "rand 0.9.4",
@@ -610,9 +612,11 @@ name = "dice-database"
 version = "0.1.0"
 dependencies = [
  "dice-common",
+ "dice-metrics",
  "sqlx",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -622,6 +626,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "dice-common",
+ "dice-metrics",
  "dice-protocol",
  "futures-util",
  "thiserror",
