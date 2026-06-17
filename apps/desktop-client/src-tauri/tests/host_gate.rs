@@ -112,6 +112,7 @@ async fn spawn_env(tag: &str) -> Env {
     let ids = Arc::new(SnowflakeGenerator::new(node_id()).unwrap());
 
     let deps = GatewayDeps {
+        cache: cache.clone(),
         auth: Arc::new(AuthService::new(
             pool.clone(),
             cache.clone(),

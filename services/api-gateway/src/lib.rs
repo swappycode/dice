@@ -70,6 +70,8 @@ pub struct GatewayDeps {
     /// Per-user unread counts (maintained by notification-service; read by
     /// `GET /v1/unread`, cleared by `POST /v1/channels/{id}/read`).
     pub unread: dice_cache::UnreadStore,
+    /// Shared cache backend, for the cross-node session directory (resume phase 0).
+    pub cache: std::sync::Arc<dyn dice_cache::Cache>,
 }
 
 /// Shared per-process gateway state (internal).
@@ -81,6 +83,11 @@ pub(crate) struct Gateway {
     /// Voice datagram fan-out registry (the SFU's I/O half).
     pub(crate) voice_dg: std::sync::Arc<voice_dg::VoiceDatagrams>,
     pub(crate) resume: Box<dyn resume::ResumeRegistry>,
+    /// Cross-node session→owner directory + this gateway's node id (resume
+    /// phase 0, ADR-0007): a reconnect that lands on another node can be told
+    /// which node still owns the detached session.
+    pub(crate) directory: dice_cache::SessionDirectory,
+    pub(crate) node_id: u16,
     /// Process-wide shutdown token; sessions broadcast `Close{GOING_AWAY}`
     /// on cancellation.
     pub(crate) ct: CancellationToken,
@@ -142,6 +149,8 @@ pub async fn start(
         ),
         voice_dg: voice_dg::VoiceDatagrams::new(deps.voice.clone()),
         resume: Box::new(resume::LocalResumeRegistry::new()),
+        directory: dice_cache::SessionDirectory::new(deps.cache.clone()),
+        node_id: deps.ids.node_id(),
         heartbeat_interval: Duration::from_millis(u64::from(cfg.heartbeat_interval_ms)),
         resume_window: Duration::from_millis(u64::from(cfg.resume_window_ms)),
         deps,

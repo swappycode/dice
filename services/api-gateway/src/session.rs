@@ -324,16 +324,36 @@ pub(crate) async fn drive_connection(gw: Arc<Gateway>, mut transport: Box<dyn Fr
                         return;
                     }
                     Some(Payload::Resume(resume)) => {
+                        let session_id = resume.gateway_session_id;
                         match gw.resume.offer(resume, transport).await {
                             // Ownership transferred to the detached task.
-                            None => return,
+                            None => {
+                                dice_metrics::counter!("dice_gateway_resume_total", "outcome" => "resumed").increment(1);
+                                return;
+                            }
                             Some(returned) => {
                                 transport = returned;
-                                let invalid = error_frame(
-                                    0,
-                                    ErrorCode::InvalidSession,
-                                    "cannot resume; send a fresh Identify",
-                                );
+                                // Local miss: consult the cross-node directory. If
+                                // another node still owns the detached session, say
+                                // so (phase 0 — the sticky LB routes the reconnect;
+                                // an actionable redirect frame is ADR-0007 phase 0b).
+                                let message = match gw.directory.owner(session_id).await {
+                                    Ok(Some(owner)) if owner != gw.node_id => {
+                                        dice_metrics::counter!("dice_gateway_resume_total", "outcome" => "cross_node").increment(1);
+                                        tracing::info!(
+                                            session_id,
+                                            owner_node = owner,
+                                            this_node = gw.node_id,
+                                            "resume for a session owned by another node; reconnect via sticky LB"
+                                        );
+                                        "session lives on another node; reconnect via the sticky load balancer"
+                                    }
+                                    _ => {
+                                        dice_metrics::counter!("dice_gateway_resume_total", "outcome" => "gone").increment(1);
+                                        "cannot resume; send a fresh Identify"
+                                    }
+                                };
+                                let invalid = error_frame(0, ErrorCode::InvalidSession, message);
                                 if transport.send(&invalid).await.is_err() {
                                     return;
                                 }
@@ -548,6 +568,16 @@ fn offer_valid(st: &SessionState, offer: &ResumeOffer) -> bool {
 async fn detached_wait(gw: &Gateway, st: &mut SessionState) -> Option<Box<dyn FramedTransport>> {
     let (offer_tx, mut offers) = mpsc::channel::<ResumeOffer>(4);
     gw.resume.insert(st.session_id, offer_tx);
+    // Publish ownership so a reconnect that lands on another node can be routed
+    // back here (cross-node resume phase 0). Best-effort: a directory miss just
+    // degrades to the local INVALID_SESSION path.
+    if let Err(error) = gw
+        .directory
+        .record(st.session_id, gw.node_id, gw.resume_window)
+        .await
+    {
+        tracing::debug!(%error, session_id = st.session_id, "resume directory record failed");
+    }
     let expires = Instant::now() + gw.resume_window;
 
     let taken = loop {
@@ -596,6 +626,9 @@ async fn detached_wait(gw: &Gateway, st: &mut SessionState) -> Option<Box<dyn Fr
         }
     };
     gw.resume.remove(st.session_id);
+    if let Err(error) = gw.directory.clear(st.session_id).await {
+        tracing::debug!(%error, session_id = st.session_id, "resume directory clear failed");
+    }
     taken
 }
 

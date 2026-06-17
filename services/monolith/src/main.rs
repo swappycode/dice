@@ -73,6 +73,7 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
 
     // --- services -> gateway deps (direct trait calls by default) ---
     let mut deps = GatewayDeps {
+        cache: cache.clone(),
         auth: Arc::new(AuthService::new(
             pool.clone(),
             cache.clone(),
