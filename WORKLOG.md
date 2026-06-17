@@ -7,6 +7,38 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-18 - M4 - PLAN for next session (2026-06-19): the 100k-conn benchmark
+
+The last open M4 item is the headline **100k concurrent-connection** gate, deferred
+all milestone because this Windows dev box lacks quinn UDP GSO. **The user now has
+GSO-capable Linux hardware and will run the load tests; the assistant builds the
+harness + gateway tuning and iterates on the reported numbers.**
+
+**Collaboration loop.** Assistant codes → user runs it on the Linux box → user reports
+the `dice_*` metrics + gateway process RSS/CPU → assistant tunes and iterates.
+
+**Assistant will build:**
+- A **load generator** (`loadgen`, a new bin/xtask): opens N concurrent QUIC (and a
+  WSS variant) connections, drives Hello→Identify with pre-minted test JWTs, holds
+  each with Heartbeats (optional message/typing rate), and reports client-side
+  established / errors / throughput. Ramp-controlled (e.g. `--conns 100000 --rate`).
+- **Gateway tuning toward 100k**: quinn UDP GSO on Linux, UDP socket buffer sizes,
+  max concurrent connections/streams, accept-loop concurrency, and per-connection
+  memory (the session task + replay ring footprint). Measure server RSS at scale.
+- A **`just bench`/loadgen recipe + runbook** (OS tuning the user applies: `ulimit -n`,
+  ephemeral-port range, `net.core.rmem/wmem`).
+
+**User provides / runs:** the Linux box; raises fd/port limits; runs `just run-full`
+(or a tuned config) + `loadgen`; reports `dice_gateway_connections{transport}` (target
+~100k sustained), gateway RSS/CPU, frame p99, and any `dice_gateway_closes_total{code}`
+(slow-consumer / errors under load).
+
+**Note:** the observability set (M4 4/n: `dice_*` metrics + Prometheus/Grafana) is
+already in place to read these live. The headline `<100 MB` budget is the CLIENT goal;
+the benchmark's server-side per-connection memory is a distinct scaling metric.
+
+---
+
 ## 2026-06-18 - M4 (9/n): Scaling - on-demand user fetch + Ready.users[] trim
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. `just check` green
