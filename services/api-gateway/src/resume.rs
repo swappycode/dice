@@ -11,6 +11,7 @@
 
 use std::collections::VecDeque;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use dashmap::DashMap;
 use dice_network_core::server::FramedTransport;
@@ -31,10 +32,26 @@ struct Buffered {
     frame: Frame,
 }
 
+/// The per-session replay store — ADR-0001's reserved seam. [`LocalReplayBuffer`]
+/// is the only impl today; a Redis-backed or hand-off buffer for cross-node
+/// resume can drop in here without touching the session task (see ADR-0007).
+pub(crate) trait ReplayBuffer: Send + Sync {
+    /// Insert a sequenced frame (seq already assigned, strictly increasing).
+    fn push(&mut self, frame: Frame);
+    /// Cumulative ack (Heartbeat.last_seq / Resume.last_seq): drop everything
+    /// the client already has.
+    fn ack(&mut self, last_seq: u64);
+    /// Can a client that has everything up to `last_seq` be fully healed?
+    fn covers(&self, last_seq: u64) -> bool;
+    /// Buffered frames in seq order (all have seq > the last acked). The `Send`
+    /// bound keeps the session future `Send` while it replays across awaits.
+    fn iter(&self) -> Box<dyn Iterator<Item = &Frame> + Send + '_>;
+}
+
 /// Bounded ring of sequenced (class A) dispatch frames, with their assigned
 /// per-session seq. Drop-from-front on overflow; a resume that needs dropped
-/// frames fails (`covers` returns false).
-pub(crate) struct ReplayBuffer {
+/// frames fails (`covers` returns false). The in-memory, single-node default.
+pub(crate) struct LocalReplayBuffer {
     frames: VecDeque<Buffered>,
     total_bytes: usize,
     /// Highest seq no longer in the buffer (acked by the client or evicted).
@@ -42,7 +59,7 @@ pub(crate) struct ReplayBuffer {
     trimmed_to: u64,
 }
 
-impl ReplayBuffer {
+impl LocalReplayBuffer {
     pub(crate) fn new() -> Self {
         Self {
             frames: VecDeque::new(),
@@ -51,8 +68,21 @@ impl ReplayBuffer {
         }
     }
 
-    /// Insert a sequenced frame (seq already assigned, strictly increasing).
-    pub(crate) fn push(&mut self, frame: Frame) {
+    fn evict_front(&mut self) {
+        if let Some(dropped) = self.frames.pop_front() {
+            self.total_bytes -= dropped.bytes;
+            self.trimmed_to = self.trimmed_to.max(dropped.seq);
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.frames.len()
+    }
+}
+
+impl ReplayBuffer for LocalReplayBuffer {
+    fn push(&mut self, frame: Frame) {
         let bytes = frame.encoded_len();
         self.total_bytes += bytes;
         self.frames.push_back(Buffered {
@@ -68,16 +98,7 @@ impl ReplayBuffer {
         }
     }
 
-    fn evict_front(&mut self) {
-        if let Some(dropped) = self.frames.pop_front() {
-            self.total_bytes -= dropped.bytes;
-            self.trimmed_to = self.trimmed_to.max(dropped.seq);
-        }
-    }
-
-    /// Cumulative ack (Heartbeat.last_seq / Resume.last_seq): drop everything
-    /// the client already has.
-    pub(crate) fn ack(&mut self, last_seq: u64) {
+    fn ack(&mut self, last_seq: u64) {
         while self
             .frames
             .front()
@@ -88,20 +109,12 @@ impl ReplayBuffer {
         self.trimmed_to = self.trimmed_to.max(last_seq);
     }
 
-    /// Can a client that has everything up to `last_seq` be fully healed from
-    /// this buffer?
-    pub(crate) fn covers(&self, last_seq: u64) -> bool {
+    fn covers(&self, last_seq: u64) -> bool {
         last_seq >= self.trimmed_to
     }
 
-    /// Buffered frames in seq order (all have seq > the last acked).
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Frame> {
-        self.frames.iter().map(|b| &b.frame)
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.frames.len()
+    fn iter(&self) -> Box<dyn Iterator<Item = &Frame> + Send + '_> {
+        Box::new(self.frames.iter().map(|b| &b.frame))
     }
 }
 
@@ -125,31 +138,49 @@ pub(crate) enum ResumeReply {
     Rejected(Box<dyn FramedTransport>),
 }
 
-/// `gateway_session_id` → offer channel into the detached session task.
-pub(crate) struct ResumeRegistry {
+/// Brokers `Resume` to detached session tasks — ADR-0001's reserved seam.
+/// [`LocalResumeRegistry`] is the only impl today; cross-node resume needs a
+/// shared session->node map + a hand-off offer (see ADR-0007).
+#[async_trait]
+pub(crate) trait ResumeRegistry: Send + Sync {
+    fn insert(&self, session_id: u64, tx: mpsc::Sender<ResumeOffer>);
+    fn remove(&self, session_id: u64);
+    /// Offer `transport` to the detached session, if any. Returns the
+    /// transport back when the resume was rejected or the session is unknown
+    /// (caller sends `Error{INVALID_SESSION}` and keeps the connection open);
+    /// `None` when ownership transferred.
+    async fn offer(
+        &self,
+        resume: dice_protocol::v1::Resume,
+        transport: Box<dyn FramedTransport>,
+    ) -> Option<Box<dyn FramedTransport>>;
+}
+
+/// `gateway_session_id` → offer channel into the detached session task. The
+/// process-local default registry.
+pub(crate) struct LocalResumeRegistry {
     map: DashMap<u64, mpsc::Sender<ResumeOffer>>,
 }
 
-impl ResumeRegistry {
+impl LocalResumeRegistry {
     pub(crate) fn new() -> Self {
         Self {
             map: DashMap::new(),
         }
     }
+}
 
-    pub(crate) fn insert(&self, session_id: u64, tx: mpsc::Sender<ResumeOffer>) {
+#[async_trait]
+impl ResumeRegistry for LocalResumeRegistry {
+    fn insert(&self, session_id: u64, tx: mpsc::Sender<ResumeOffer>) {
         self.map.insert(session_id, tx);
     }
 
-    pub(crate) fn remove(&self, session_id: u64) {
+    fn remove(&self, session_id: u64) {
         self.map.remove(&session_id);
     }
 
-    /// Offer `transport` to the detached session, if any. Returns the
-    /// transport back when the resume was rejected or the session is unknown
-    /// (caller sends `Error{INVALID_SESSION}` and keeps the connection open);
-    /// `None` when ownership transferred.
-    pub(crate) async fn offer(
+    async fn offer(
         &self,
         resume: dice_protocol::v1::Resume,
         transport: Box<dyn FramedTransport>,
@@ -210,7 +241,7 @@ mod tests {
 
     #[test]
     fn push_ack_replay_round_trip() {
-        let mut buf = ReplayBuffer::new();
+        let mut buf = LocalReplayBuffer::new();
         for seq in 1..=10 {
             buf.push(msg_frame(seq, "hi"));
         }
@@ -224,7 +255,7 @@ mod tests {
 
     #[test]
     fn frame_count_bound_evicts_from_front() {
-        let mut buf = ReplayBuffer::new();
+        let mut buf = LocalReplayBuffer::new();
         for seq in 1..=(MAX_BUFFERED_FRAMES as u64 + 20) {
             buf.push(msg_frame(seq, "x"));
         }
@@ -236,7 +267,7 @@ mod tests {
 
     #[test]
     fn byte_bound_evicts_from_front() {
-        let mut buf = ReplayBuffer::new();
+        let mut buf = LocalReplayBuffer::new();
         let big = "y".repeat(100 * 1024); // ~100 KiB per frame
         for seq in 1..=4 {
             buf.push(msg_frame(seq, &big));
@@ -248,7 +279,7 @@ mod tests {
 
     #[test]
     fn oversized_single_frame_is_kept_alone() {
-        let mut buf = ReplayBuffer::new();
+        let mut buf = LocalReplayBuffer::new();
         buf.push(msg_frame(1, &"z".repeat(MAX_BUFFERED_BYTES)));
         assert_eq!(buf.len(), 1, "newest frame always survives");
         buf.push(msg_frame(2, "small"));
@@ -257,7 +288,7 @@ mod tests {
 
     #[test]
     fn ack_beyond_buffer_trims_everything() {
-        let mut buf = ReplayBuffer::new();
+        let mut buf = LocalReplayBuffer::new();
         buf.push(msg_frame(1, "a"));
         buf.push(msg_frame(2, "b"));
         buf.ack(99);

@@ -15,7 +15,7 @@ use tokio::time::Instant;
 
 use crate::Gateway;
 use crate::dispatch::TokenBucket;
-use crate::resume::{RESUME_TOKEN_LEN, ReplayBuffer};
+use crate::resume::{LocalReplayBuffer, RESUME_TOKEN_LEN};
 use crate::session::{
     KillSwitch, OUTBOUND_QUEUE, SessionSender, SessionState, close_with, run_ready,
 };
@@ -172,7 +172,7 @@ pub(crate) async fn identify(
         outbound,
         kill,
         next_seq: 1,
-        replay: ReplayBuffer::new(),
+        replay: Box::new(LocalReplayBuffer::new()),
         last_heartbeat: Instant::now(),
         bucket: TokenBucket::default(),
     };

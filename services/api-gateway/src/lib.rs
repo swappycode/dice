@@ -80,7 +80,7 @@ pub(crate) struct Gateway {
     pub(crate) router: router::Router,
     /// Voice datagram fan-out registry (the SFU's I/O half).
     pub(crate) voice_dg: std::sync::Arc<voice_dg::VoiceDatagrams>,
-    pub(crate) resume: resume::ResumeRegistry,
+    pub(crate) resume: Box<dyn resume::ResumeRegistry>,
     /// Process-wide shutdown token; sessions broadcast `Close{GOING_AWAY}`
     /// on cancellation.
     pub(crate) ct: CancellationToken,
@@ -141,7 +141,7 @@ pub async fn start(
             tracker.clone(),
         ),
         voice_dg: voice_dg::VoiceDatagrams::new(deps.voice.clone()),
-        resume: resume::ResumeRegistry::new(),
+        resume: Box::new(resume::LocalResumeRegistry::new()),
         heartbeat_interval: Duration::from_millis(u64::from(cfg.heartbeat_interval_ms)),
         resume_window: Duration::from_millis(u64::from(cfg.resume_window_ms)),
         deps,

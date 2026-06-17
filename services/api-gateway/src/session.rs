@@ -145,7 +145,7 @@ pub(crate) struct SessionState {
     pub(crate) kill: KillSwitch,
     /// Next seq to assign (starts at 1; protocol §6).
     pub(crate) next_seq: u64,
-    pub(crate) replay: ReplayBuffer,
+    pub(crate) replay: Box<dyn ReplayBuffer>,
     pub(crate) last_heartbeat: Instant,
     pub(crate) bucket: TokenBucket,
 }
@@ -616,6 +616,7 @@ async fn resume_replay(st: &mut SessionState, transport: &mut dyn FramedTranspor
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::resume::LocalReplayBuffer;
     use dice_protocol::v1::frame::Payload;
 
     fn state() -> SessionState {
@@ -628,7 +629,7 @@ mod tests {
             outbound: rx,
             kill: KillSwitch::new(),
             next_seq: 1,
-            replay: ReplayBuffer::new(),
+            replay: Box::new(LocalReplayBuffer::new()),
             last_heartbeat: Instant::now(),
             bucket: TokenBucket::default(),
         }
