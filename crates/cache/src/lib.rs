@@ -213,6 +213,59 @@ impl UnreadStore {
     }
 }
 
+/// Maps a detached gateway session to the node that owns its in-memory replay
+/// buffer, so a reconnect that lands on another node can be routed back to the
+/// owner within the resume window (cross-node resume phase 0, ADR-0007).
+///
+/// Backed by any [`Cache`]: with the shared Redis backend it is a genuine
+/// cross-node directory; with the in-memory backend it is per-process (harmless
+/// — single-node deployments never need it). The owner is a `u16` node id; an
+/// operator's LB (or a future client-side redirect) maps it to a reachable node.
+#[derive(Clone)]
+pub struct SessionDirectory {
+    cache: Arc<dyn Cache>,
+}
+
+impl SessionDirectory {
+    pub fn new(cache: Arc<dyn Cache>) -> Self {
+        Self { cache }
+    }
+
+    /// Record `node_id` as the owner of `session_id`, expiring after `ttl` (set
+    /// to the resume window so the entry lives exactly as long as the session is
+    /// resumable).
+    pub async fn record(
+        &self,
+        session_id: u64,
+        node_id: u16,
+        ttl: Duration,
+    ) -> Result<(), CacheError> {
+        self.cache
+            .set(
+                &keys::session_owner(session_id),
+                Bytes::copy_from_slice(&node_id.to_le_bytes()),
+                Some(ttl),
+            )
+            .await
+    }
+
+    /// The node currently owning `session_id`, if any.
+    pub async fn owner(&self, session_id: u64) -> Result<Option<u16>, CacheError> {
+        Ok(self
+            .cache
+            .get(&keys::session_owner(session_id))
+            .await?
+            .and_then(|b| <[u8; 2]>::try_from(b.as_ref()).ok())
+            .map(u16::from_le_bytes))
+    }
+
+    /// Drop the ownership record — the session resumed on its node, was torn
+    /// down, or the window expired. Idempotent.
+    pub async fn clear(&self, session_id: u64) -> Result<(), CacheError> {
+        self.cache.delete(&keys::session_owner(session_id)).await
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -314,5 +367,47 @@ mod tests {
             .unwrap();
         assert!(!d.allowed);
         assert_eq!(d.remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn session_directory_records_and_clears_owner() {
+        let cache = connect(CacheConfig::Memory).await.unwrap();
+        let dir = SessionDirectory::new(cache);
+        let session = 9_000_000_001u64;
+        assert_eq!(dir.owner(session).await.unwrap(), None, "fresh = no owner");
+        dir.record(session, 7, Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(dir.owner(session).await.unwrap(), Some(7));
+        dir.clear(session).await.unwrap();
+        assert_eq!(dir.owner(session).await.unwrap(), None, "cleared");
+    }
+
+    /// Needs live Redis (`just infra-up`). Two directories over SEPARATE Redis
+    /// connections to the same server stand in for two gateway nodes: node A
+    /// records ownership, node B reads it back — the cross-node lookup path.
+    #[tokio::test]
+    #[ignore = "needs live Redis: run `just infra-up` first"]
+    async fn session_directory_is_cross_node_over_shared_redis() {
+        let url = std::env::var("DICE_REDIS_URL").unwrap_or_else(|_| DEFAULT_REDIS_URL.to_owned());
+        let node_a = SessionDirectory::new(
+            connect(CacheConfig::Redis { url: url.clone() })
+                .await
+                .unwrap(),
+        );
+        let node_b = SessionDirectory::new(connect(CacheConfig::Redis { url }).await.unwrap());
+        let session = 9_123_456_789u64;
+        node_b.clear(session).await.unwrap(); // clean slate
+        node_a
+            .record(session, 3, Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(
+            node_b.owner(session).await.unwrap(),
+            Some(3),
+            "node B sees the owner node A recorded"
+        );
+        node_a.clear(session).await.unwrap();
+        assert_eq!(node_b.owner(session).await.unwrap(), None);
     }
 }

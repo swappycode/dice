@@ -34,6 +34,15 @@ pub fn rate_limit(scope: &str, principal: &str) -> String {
     format!("rl:{scope}:{principal}")
 }
 
+/// `resume:owner:{session_id}` → little-endian `u16` node id of the gateway that
+/// owns a detached session's replay buffer, so a reconnect on another node can
+/// be routed back to the owner within the resume window (cross-node resume
+/// phase 0, see [`crate::SessionDirectory`]). TTL is the resume window, supplied
+/// at write time.
+pub fn session_owner(session_id: u64) -> String {
+    format!("resume:owner:{session_id}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

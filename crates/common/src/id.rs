@@ -127,6 +127,12 @@ impl SnowflakeGenerator {
         })
     }
 
+    /// The node id this generator stamps into every snowflake. The gateway uses
+    /// it as its own identity in the cross-node session directory (ADR-0007).
+    pub fn node_id(&self) -> u16 {
+        self.node as u16
+    }
+
     pub fn generate(&self) -> Snowflake {
         loop {
             let now = crate::time::now_dice_ms() & TS_MASK;
