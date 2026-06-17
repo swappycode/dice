@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dice_common::id::{SessionId, UserId};
-use dice_network_core::server::{FramedTransport, TransportError};
+use dice_network_core::server::{FramedTransport, TransportError, TransportKind};
 use dice_protocol::framing::FrameError;
 use dice_protocol::v1::frame::Payload;
 use dice_protocol::v1::{self, ErrorCode, Frame};
@@ -203,8 +203,46 @@ fn close_payload(code: ErrorCode, reason: &str) -> Frame {
 
 /// Best-effort `Close{code}` frame + transport close (4000 + code).
 pub(crate) async fn close_with(transport: &mut dyn FramedTransport, code: ErrorCode, reason: &str) {
+    dice_metrics::counter!("dice_gateway_closes_total", "code" => code.close_code().to_string())
+        .increment(1);
     let _ = transport.send(&close_payload(code, reason)).await;
     transport.close(code.close_code(), reason).await;
+}
+
+/// Stable metric label for a transport.
+fn transport_label(kind: TransportKind) -> &'static str {
+    match kind {
+        TransportKind::Quic => "quic",
+        TransportKind::Wss => "wss",
+    }
+}
+
+/// Stable metric label for a frame class.
+fn frame_class_label(class: FrameClass) -> &'static str {
+    match class {
+        FrameClass::Sequenced => "sequenced",
+        FrameClass::Unsequenced => "unsequenced",
+        FrameClass::Control => "control",
+    }
+}
+
+/// RAII guard for `dice_gateway_connections{transport}`: a live transport is
+/// counted for exactly the span this guard is held — one Ready connection.
+/// Detached/resuming time (no transport) is deliberately not counted.
+struct ConnGauge(&'static str);
+
+impl ConnGauge {
+    fn new(kind: TransportKind) -> Self {
+        let label = transport_label(kind);
+        dice_metrics::gauge!("dice_gateway_connections", "transport" => label).increment(1.0);
+        Self(label)
+    }
+}
+
+impl Drop for ConnGauge {
+    fn drop(&mut self) {
+        dice_metrics::gauge!("dice_gateway_connections", "transport" => self.0).decrement(1.0);
+    }
 }
 
 // ------------------------------------------------------- connection entry
@@ -368,6 +406,9 @@ pub(crate) async fn run_ready(
         // Register this connection for voice datagram fan-out (QUIC only); the
         // guard unregisters it + stops its read pump when the connection ends.
         let _voice_attach = gw.voice_dg.attach(st.user, transport.quic_connection());
+        // Count this live transport for dice_gateway_connections{transport};
+        // dropped on detach below and on every exit from the loop.
+        let _conn = ConnGauge::new(transport.kind());
         match ready_loop(&gw, &mut st, &mut *transport).await {
             LoopEnd::Shutdown => return,
             LoopEnd::CleanClose | LoopEnd::Fatal => {
@@ -376,6 +417,7 @@ pub(crate) async fn run_ready(
             }
             LoopEnd::Detach => {
                 drop(_voice_attach); // unregister the dead connection promptly
+                drop(_conn); // stop counting this transport while detached
                 drop(transport);
                 match detached_wait(&gw, &mut st).await {
                     Some(fresh) => {
@@ -453,6 +495,12 @@ async fn ready_loop(
                 if transport.send(&frame).await.is_err() {
                     return LoopEnd::Detach; // sequenced frames stay buffered
                 }
+                dice_metrics::counter!(
+                    "dice_gateway_frames_total",
+                    "dir" => "out",
+                    "class" => frame_class_label(frame.class())
+                )
+                .increment(1);
             }
             Wake::Out(None) => {
                 // All router senders dropped: only possible after unregister,
@@ -461,6 +509,12 @@ async fn ready_loop(
                 return LoopEnd::Fatal;
             }
             Wake::In(Ok(Some(frame))) => {
+                dice_metrics::counter!(
+                    "dice_gateway_frames_total",
+                    "dir" => "in",
+                    "class" => frame_class_label(frame.class())
+                )
+                .increment(1);
                 if let Some(end) = dispatch::handle(gw, st, transport, frame).await {
                     return end;
                 }
