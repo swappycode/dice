@@ -79,7 +79,7 @@ two real `client-as` windows for real users.)
 | `services/` | Backend services (auth, chat, presence, api-gateway) as libs + thin bins, plus the `dice-monolith` all-in-one bin |
 | `apps/desktop-client/` | Tauri 2 host (`src-tauri/`) + SolidJS frontend (`src/`) — its own cargo workspace |
 | `proto/` | Protobuf schemas (`dice.v1` client-facing, `dice.internal.v1` bus) |
-| `infrastructure/docker/` | docker-compose for Postgres, Redis, NATS JetStream |
+| `infrastructure/docker/` | docker-compose for Postgres, Redis, NATS JetStream + the opt-in Prometheus/Grafana stack |
 | `docs/` | Getting started, normative protocol spec, ADRs, design docs, roadmap |
 
 ## Documentation
@@ -97,6 +97,23 @@ just check        # the full gate: fmt + clippy -D warnings + tests + the aws-lc
 
 CI-grade rules: ring is the only TLS crypto provider (the gate fails if `aws-lc-sys` enters the
 tree), and the committed `.sqlx/` cache keeps `cargo check` fully offline.
+
+## Observability
+
+Every backend process exposes Prometheus metrics on its admin port (`DICE_ADMIN_ADDR`, default
+`:9600`): gateway connections by transport, frames in/out by class, closes by code, chat messages,
+event-bus drops, and DB-pool gauges — plus, in split mode, **per-method RPC latency**
+(`dice_rpc_request_seconds{service,method}`) on each service bin (`:9601`/`:9602`/`:9603`).
+
+```powershell
+just infra-up && just run-full   # or `just split-up` for the per-service RPC panels
+just metrics-up                  # Prometheus (:9090) + Grafana (:3000)
+```
+
+Open Grafana at `http://localhost:3000` (anonymous) — the **Dice — Gateway & Services** dashboard
+is provisioned (connections, frame & message rates, RPC p50/p99 per service, close codes, pool
+saturation). Stop with `just metrics-down`. Host ports are overridable via `DICE_PROMETHEUS_PORT` /
+`DICE_GRAFANA_PORT` if 9090/3000 are taken.
 
 ## License
 
