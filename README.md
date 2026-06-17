@@ -115,6 +115,12 @@ is provisioned (connections, frame & message rates, RPC p50/p99 per service, clo
 saturation). Stop with `just metrics-down`. Host ports are overridable via `DICE_PROMETHEUS_PORT` /
 `DICE_GRAFANA_PORT` if 9090/3000 are taken.
 
+**Distributed tracing.** With `DICE_OTLP_ENDPOINT` set (which `just split-up` does), services also
+export OpenTelemetry spans to **Tempo** (bundled in the same stack). A request's trace context
+rides the split-mode NATS-RPC boundary as a W3C `traceparent`, so Grafana's **Explore → Tempo** view
+shows one end-to-end trace per request — a gateway `rpc.client` span linked to the target service's
+`rpc.server` span (auth / chat / presence). Off by default; no exporter, no overhead, when unset.
+
 ## License
 
 Dual-licensed under **MIT** or **Apache-2.0**, at your option. See [LICENSE-MIT](LICENSE-MIT) and

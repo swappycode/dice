@@ -7,12 +7,13 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
-## 2026-06-17 — M4 (4/n): Scaling — observability (metrics + Grafana)
+## 2026-06-17 — M4 (4/n): Scaling — observability (metrics, Grafana, tracing)
 
 **M4 theme = Scaling.** Branch `main`. Pushed as a run of per-unit commits
 (`5f57513` smoke / `666a5e5` bus / `f3523f4` gateway / `c414a82` chat /
 `364a0b4` db / `f6cf9f5` rpc / `aeb1d16` bins / `5499b1b` Grafana stack +
-lockfile/readme), `just check` green (fmt + clippy --workspace --all-targets
+lockfile/readme; `24c9838` tracing instrumentation / `e289a54` Tempo wiring),
+`just check` green (fmt + clippy --workspace --all-targets
 -D warnings + cargo test --workspace + aws-lc gate). **Item chosen with the
 user** from a 5-agent assessment of the four BIG M4 candidates — observability
 scored highest: a designed-but-hollow seam, the easiest to verify on one box,
@@ -45,6 +46,15 @@ ships the dashboards:
   a Prometheus datasource + a "Dice — Gateway & Services" dashboard (connections,
   frame/message rates, RPC p50/p99 per service, close codes, pool, bus drops).
   Host ports overridable via `DICE_{PROMETHEUS,GRAFANA}_PORT`.
+- **Cross-service tracing.** `dice-logging` gains an opt-in OTLP/HTTP span
+  exporter (HTTP over the workspace's ring `reqwest` — no aws-lc; gate stays
+  clean) + the W3C `TraceContextPropagator`, active when `DICE_OTLP_ENDPOINT` is
+  set (off otherwise — zero cost). `event_bus::rpc` injects the active trace
+  context into NATS headers on `call` and extracts it to parent the handler span
+  on `serve`, so a request's trace crosses the split-mode RPC boundary. Tempo
+  joins the stack (`just metrics-up`) with a Grafana Tempo datasource; `just
+  split-up` sets `DICE_OTLP_ENDPOINT` + `DICE_SERVICE_NAME` per process and the
+  bins/monolith flush via `dice_logging::shutdown()` on exit.
 
 **Verified live (infra up).** Monolith `:9600` after a smoke run — the
 connections gauge balances back to 0 on disconnect, frames in/out by class,
@@ -57,11 +67,12 @@ split-fleet demo M4(3/n) left to a human is now an automated `#[ignore]` test,
 per-IP registration limiter correctly returns 429 + retry-after **through** the
 gateway→auth RPC seam.
 
-**NEXT (M4 remaining).** Observability core is done. The OPTIONAL stretch is
-cross-service tracing spans (W3C `traceparent` through the NATS-RPC headers + an
-OTLP exporter — must dodge the aws-lc trap). The other BIG M4 items stay
-user-steerable: multi-node cross-node resume, lazy member lists, transactional
-outbox. Next free Frame dispatch # = **121**.
+**NEXT (M4 remaining).** Observability is DONE — `dice_*` metrics + the Grafana
+dashboard + cross-service tracing (a split-fleet smoke produced 9/9 cross-service
+gateway→service traces in Tempo). The remaining BIG M4 items stay user-steerable:
+multi-node cross-node resume, lazy member lists, transactional outbox. (Deferred
+within observability: the `dice_db_pool_acquire_seconds` histogram.) Next free
+Frame dispatch # = **121**.
 
 ---
 
