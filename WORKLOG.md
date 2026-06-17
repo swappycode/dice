@@ -7,6 +7,64 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-17 — M4 (4/n): Scaling — observability (metrics + Grafana)
+
+**M4 theme = Scaling.** Branch `main`. Pushed as a run of per-unit commits
+(`5f57513` smoke / `666a5e5` bus / `f3523f4` gateway / `c414a82` chat /
+`364a0b4` db / `f6cf9f5` rpc / `aeb1d16` bins / `5499b1b` Grafana stack +
+lockfile/readme), `just check` green (fmt + clippy --workspace --all-targets
+-D warnings + cargo test --workspace + aws-lc gate). **Item chosen with the
+user** from a 5-agent assessment of the four BIG M4 candidates — observability
+scored highest: a designed-but-hollow seam, the easiest to verify on one box,
+the best demo, and fully server-side (the <100 MB client budget is untouched).
+
+**What + why.** The `dice-metrics` facade, the `:9600` admin port, and the
+design's `dice_*` metric set + naming existed since M1 but had **zero call
+sites** — `/metrics` served an empty registry. This milestone fills the seam and
+ships the dashboards:
+- **Core metric set.** `dice_gateway_connections{transport}` (a `ConnGauge` RAII
+  guard around each `ready_loop`, so detached/resuming time isn't counted),
+  `dice_gateway_frames_total{dir,class}` (the in/out arms of `ready_loop`),
+  `dice_gateway_closes_total{code}` (in `close_with`, the one coded-close
+  chokepoint), `dice_chat_messages_total` (post-commit in `send_message`),
+  `dice_bus_dropped_events_total` + `dice_bus_decode_failures_total` (bridged
+  from the existing atomics), and DB-pool gauges via
+  `dice_database::spawn_pool_metrics`. The `dice_db_pool_acquire_seconds`
+  histogram is **deferred** (sqlx has no per-acquire hook; most queries borrow
+  `&pool`, so a faithful histogram needs an Executor wrapper — the gauges give
+  the saturation signal meanwhile). Every emit is a no-op until `init_prometheus`,
+  so dev-lite + the test suite are unaffected.
+- **Split-mode RPC latency.** `dice_rpc_request_seconds{service,method}` recorded
+  around the handler in `event_bus::rpc::serve`; the auth/chat/presence bins call
+  `dice_database::init_metrics_from_env` to expose `/metrics` when `DICE_ADMIN_ADDR`
+  is set. `just split-up` now gives each bin a distinct admin port
+  (9600/9601/9602/9603), bound `0.0.0.0` so the dockerised Prometheus can scrape
+  it via `host.docker.internal`.
+- **Prometheus + Grafana.** `just metrics-up` runs both from
+  `infrastructure/docker/observability.yml`; Grafana (anonymous) auto-provisions
+  a Prometheus datasource + a "Dice — Gateway & Services" dashboard (connections,
+  frame/message rates, RPC p50/p99 per service, close codes, pool, bus drops).
+  Host ports overridable via `DICE_{PROMETHEUS,GRAFANA}_PORT`.
+
+**Verified live (infra up).** Monolith `:9600` after a smoke run — the
+connections gauge balances back to 0 on disconnect, frames in/out by class,
+`chat_messages_total`=1. Split fleet `:9601/9602/9603` — per-method RPC p99
+(auth register ~168 ms, chat send_message ~24 ms, presence snapshot ~2 ms) +
+pool gauges; all four Prometheus targets scrape **up**; Grafana provisioned the
+datasource + dashboard and its PromQL returns real data. Bonus: the client-driven
+split-fleet demo M4(3/n) left to a human is now an automated `#[ignore]` test,
+`crates/network-core/tests/split_smoke.rs` — which also surfaced that the M2
+per-IP registration limiter correctly returns 429 + retry-after **through** the
+gateway→auth RPC seam.
+
+**NEXT (M4 remaining).** Observability core is done. The OPTIONAL stretch is
+cross-service tracing spans (W3C `traceparent` through the NATS-RPC headers + an
+OTLP exporter — must dodge the aws-lc trap). The other BIG M4 items stay
+user-steerable: multi-node cross-node resume, lazy member lists, transactional
+outbox. Next free Frame dispatch # = **121**.
+
+---
+
 ## 2026-06-17 — M4 (3/n): Scaling — split-mode is now DEPLOYABLE
 
 **M4 theme = Scaling ("microservices split").** Branch `main`. Three commits (`bb90a54` service
