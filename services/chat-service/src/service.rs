@@ -2,10 +2,16 @@
 //! [`Chat`] trait.
 //!
 //! Shape of every mutating call: validate → authorize from live rows → ONE
-//! transaction → commit → publish ready-to-dispatch [`BusEvent`]s. M1 accepts
-//! the commit→publish gap (no transactional outbox): a failed post-commit
-//! publish is logged and swallowed — live clients heal via gateway resume and
-//! REST history backfill (docs/design/backend-services.md §12).
+//! transaction → commit → publish ready-to-dispatch [`BusEvent`]s.
+//!
+//! The message path (create/edit/delete) is backed by a TRANSACTIONAL OUTBOX
+//! (M4): the [`BusEvent`] is recorded in `event_outbox` inside the write
+//! transaction, then published inline (best effort) and stamped published on
+//! success; the [`relay`](crate::relay) reconciles anything the inline publish
+//! missed (process crash, bus down) — at-least-once, idempotent by `event_id`.
+//! The other fan-outs still accept the commit→publish gap: a failed post-commit
+//! publish is logged and swallowed, and clients heal via gateway resume + REST
+//! history backfill (docs/design/backend-services.md §12, ADR-0006).
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -15,6 +21,7 @@ use dice_common::{ChannelId, GuildId, MediaId, MessageId, SnowflakeGenerator, Us
 use dice_event_bus::{BusEvent, EventBus, Subject};
 use dice_permissions::{DEFAULT_EVERYONE, Permissions, compute};
 use dice_protocol::internal::v1::bus_event::Payload as BusPayload;
+use dice_protocol::prost::Message as _;
 use dice_protocol::v1;
 use dice_protocol::v1::frame::Payload as FramePayload;
 use rand::Rng;
@@ -360,9 +367,6 @@ impl Chat for ChatService {
         .execute(&mut *tx)
         .await
         .map_err(internal)?;
-        tx.commit().await.map_err(internal)?;
-        dice_metrics::counter!("dice_chat_messages_total").increment(1);
-
         let message = v1::Message {
             id: id.0,
             channel_id: channel.raw(),
@@ -377,7 +381,13 @@ impl Chat for ChatService {
             message: Some(message.clone()),
             nonce,
         });
-        self.publish_to_channel(&access, channel, payload).await;
+        // Record the dispatch in the outbox WITHIN the write tx, so a committed
+        // message can never lose its event (closes the commit→publish gap).
+        let (subject, event) = self.channel_event(&access, channel, payload);
+        self.outbox_insert(&mut tx, subject, &event).await?;
+        tx.commit().await.map_err(internal)?;
+        dice_metrics::counter!("dice_chat_messages_total").increment(1);
+        self.publish_outboxed(subject, event).await;
         Ok(message)
     }
 
@@ -496,12 +506,13 @@ impl Chat for ChatService {
                 "only the author can edit a message".to_owned(),
             ));
         }
+        let mut tx = self.pool.begin().await.map_err(internal)?;
         let edited_at = sqlx::query_scalar!(
             "UPDATE messages SET content = $1, edited_at = now() WHERE id = $2 RETURNING edited_at",
             content.as_str(),
             message.as_i64()
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(internal)?;
 
@@ -521,7 +532,10 @@ impl Chat for ChatService {
         let payload = FramePayload::MessageUpdate(v1::MessageUpdate {
             message: Some(message.clone()),
         });
-        self.publish_to_channel(&access, channel, payload).await;
+        let (subject, event) = self.channel_event(&access, channel, payload);
+        self.outbox_insert(&mut tx, subject, &event).await?;
+        tx.commit().await.map_err(internal)?;
+        self.publish_outboxed(subject, event).await;
         Ok(message)
     }
 
@@ -552,8 +566,9 @@ impl Chat for ChatService {
                 }
             }
         }
+        let mut tx = self.pool.begin().await.map_err(internal)?;
         sqlx::query!("DELETE FROM messages WHERE id = $1", message.as_i64())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(internal)?;
 
@@ -561,7 +576,10 @@ impl Chat for ChatService {
             channel_id: channel.raw(),
             message_id: message.raw(),
         });
-        self.publish_to_channel(&access, channel, payload).await;
+        let (subject, event) = self.channel_event(&access, channel, payload);
+        self.outbox_insert(&mut tx, subject, &event).await?;
+        tx.commit().await.map_err(internal)?;
+        self.publish_outboxed(subject, event).await;
         Ok(())
     }
 
@@ -1516,22 +1534,85 @@ impl ChatService {
         }
     }
 
-    /// Route a non-ephemeral message dispatch (create/update/delete) to the
-    /// channel's subject — guild members or DM recipients, identical fan-out.
+    /// Route a non-ephemeral message dispatch to the channel's subject — guild
+    /// members or DM recipients, identical fan-out. Best-effort (no outbox):
+    /// used by the reaction broadcast, which heals via resume + REST backfill
+    /// like the rest of the non-message fan-outs.
     async fn publish_to_channel(
         &self,
         access: &ChannelAccess,
         channel: ChannelId,
         payload: FramePayload,
     ) {
+        let (subject, event) = self.channel_event(access, channel, payload);
+        self.publish(subject, event).await;
+    }
+
+    /// The (subject, event) a channel message dispatch fans out to — the
+    /// channel's guild members or DM recipients. Shared by the best-effort
+    /// [`publish_to_channel`](Self::publish_to_channel) and the outbox-backed
+    /// message path (create/edit/delete).
+    fn channel_event(
+        &self,
+        access: &ChannelAccess,
+        channel: ChannelId,
+        payload: FramePayload,
+    ) -> (Subject, BusEvent) {
         match access {
-            ChannelAccess::Guild { guild_id, .. } => {
-                let event = self.make_event(guild_id.raw(), Vec::new(), false, payload);
-                self.publish(Subject::GuildMsg(*guild_id), event).await;
+            ChannelAccess::Guild { guild_id, .. } => (
+                Subject::GuildMsg(*guild_id),
+                self.make_event(guild_id.raw(), Vec::new(), false, payload),
+            ),
+            ChannelAccess::Dm { recipient_ids } => (
+                Subject::DmMsg(channel),
+                self.make_event(0, recipient_ids.clone(), false, payload),
+            ),
+        }
+    }
+
+    /// Record a ready-to-dispatch event in the transactional outbox, in the SAME
+    /// transaction as the write it accompanies — so a committed write can never
+    /// lose its event. The [`relay`](crate::relay) republishes any row whose
+    /// inline publish never stamped `published_at` (process crash, bus down).
+    async fn outbox_insert(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        subject: Subject,
+        event: &BusEvent,
+    ) -> Result<(), ChatError> {
+        sqlx::query!(
+            "INSERT INTO event_outbox (event_id, subject, payload) VALUES ($1, $2, $3)",
+            event.event_id as i64,
+            subject.to_string(),
+            event.encode_to_vec(),
+        )
+        .execute(conn)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// Best-effort inline publish of an outbox-backed event: on success, stamp
+    /// the outbox row `published_at` so the relay never re-sends it; on failure,
+    /// leave it for the relay to reconcile (at-least-once; clients dedup by
+    /// message id).
+    async fn publish_outboxed(&self, subject: Subject, event: BusEvent) {
+        let event_id = event.event_id;
+        match self.bus.publish(subject, event).await {
+            Ok(()) => {
+                if let Err(error) = sqlx::query!(
+                    "UPDATE event_outbox SET published_at = now() \
+                     WHERE event_id = $1 AND published_at IS NULL",
+                    event_id as i64
+                )
+                .execute(&self.pool)
+                .await
+                {
+                    tracing::warn!(%error, event_id, "outbox mark-published failed; relay will reconcile");
+                }
             }
-            ChannelAccess::Dm { recipient_ids } => {
-                let event = self.make_event(0, recipient_ids.clone(), false, payload);
-                self.publish(Subject::DmMsg(channel), event).await;
+            Err(error) => {
+                tracing::error!(%error, %subject, "inline publish failed; relay will reconcile from outbox");
             }
         }
     }

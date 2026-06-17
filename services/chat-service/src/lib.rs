@@ -2,14 +2,16 @@
 //!
 //! The [`Chat`] trait below is the BINDING contract consumed by api-gateway
 //! (REST + socket dispatch) and the monolith. Implementations must not change
-//! signatures. All mutating calls publish their dispatch events to the bus
-//! AFTER the DB transaction commits (M1 accepts the commit→publish gap;
-//! clients heal via resume + REST backfill).
+//! signatures. The message path (create/edit/delete) records its dispatch in a
+//! transactional outbox inside the write tx and reconciles via [`relay`] — so a
+//! committed message can't lose its event; the other fan-outs publish
+//! post-commit and heal via resume + REST backfill (ADR-0006).
 
 use dice_common::{ChannelId, GuildId, MediaId, MessageId, UserId};
 use dice_permissions::MissingPermissions;
 use dice_protocol::v1;
 
+pub mod relay;
 pub mod rpc;
 mod service;
 
