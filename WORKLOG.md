@@ -7,6 +7,41 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-18 - M4 (7/n): Scaling - resume seam extracted (ADR-0001 traits)
+
+**M4 theme = Scaling.** Branch `main`. Two commits (refactor + docs), pushed.
+Gates green: `just check`.
+
+**What + why.** Pays down ADR-0001's aspirational "buffer behind a trait" seam so
+the remaining BIG M4 item (multi-node cross-node resume) has a real seam to build
+on. Behavior-neutral - resume stays node-local; a cross-node Resume still fails
+cleanly as INVALID_SESSION.
+- **resume.rs**: `ReplayBuffer` and `ResumeRegistry` are now traits (`: Send + Sync`;
+  the registry's async `offer` via `#[async_trait]` so it stays dyn-safe). The
+  in-memory single-node types are `LocalReplayBuffer` / `LocalResumeRegistry`.
+  `SessionState.replay` is a `Box<dyn ReplayBuffer>` and `Gateway.resume` a
+  `Box<dyn ResumeRegistry>` - an alternative buffer/registry drops in without
+  touching the session task, dispatcher, or handshake. `iter()` returns a `Send`
+  boxed iterator so the session future stays `Send` while it replays across awaits.
+- **ADR-0007**: records the cross-node plan. The hard part is the per-node SEQ model
+  (seq is assigned per-session by a single-writer task; a naive Redis ring breaks
+  monotonicity), NOT buffer storage. Order: phase-0 sticky-LB affinity (reconnect to
+  the owning node within the window; ~80% of the story, no seq coordination) ->
+  durable session identity -> hand-off or shared replay. Each gated behind the ADR.
+
+**Verified.** `just check` green (fmt + clippy --workspace --all-targets -D warnings
++ cargo test --workspace + aws-lc gate); the gateway resume/session unit tests and
+the client_e2e resume tests pass unchanged.
+
+**NEXT (M4 remaining).** Both BIG items addressed to their single-box-verifiable
+extent: transactional outbox DONE (6/n); resume seam extracted + cross-node plan
+ADR'd (7/n). Full cross-node resume (sticky-LB phase-0 + the per-node-seq work) is
+the next milestone slice, gated behind ADR-0007. Deferred micro-opt: the
+Ready.users[] dict trim (needs author records in history first). Next free Frame
+dispatch # = 121.
+
+---
+
 ## 2026-06-18 - M4 (6/n): Scaling - transactional outbox (chat message path)
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. Gates green:
