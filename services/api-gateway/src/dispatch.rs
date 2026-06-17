@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use chat_service::ChatError;
-use dice_common::id::{ChannelId, GuildId, MediaId, MessageId};
+use dice_common::id::{ChannelId, GuildId, MediaId, MessageId, UserId};
 use dice_network_core::server::FramedTransport;
 use dice_protocol::v1::frame::Payload;
 use dice_protocol::v1::{self, ErrorCode, Frame};
@@ -356,6 +356,27 @@ pub(crate) async fn handle(
                         has_more: page.has_more,
                     }),
                 ),
+                Err(error) => chat_error_frame(nonce, &error),
+            };
+            send_or_detach(transport, &reply).await
+        }
+
+        // On-demand user resolution (CAP_LAZY_MEMBERS): resolve message authors
+        // the client does not yet hold. Rate-limited; one nonce-echoed UsersChunk.
+        Some(Payload::RequestUsers(req)) => {
+            if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
+                return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
+            }
+            let ids: Vec<UserId> = req
+                .user_ids
+                .iter()
+                .take(100)
+                .map(|id| UserId::from_raw(*id))
+                .collect();
+            let reply = match gw.deps.chat.get_users(st.user, ids).await {
+                Ok(users) => {
+                    Frame::with_nonce(nonce, Payload::UsersChunk(v1::UsersChunk { users }))
+                }
                 Err(error) => chat_error_frame(nonce, &error),
             };
             send_or_detach(transport, &reply).await

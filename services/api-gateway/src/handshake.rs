@@ -51,7 +51,7 @@ pub(crate) async fn identify(
     };
 
     // 2. Snapshot the user's world for Ready.
-    let sync = match gw.deps.chat.sync_user_state(user).await {
+    let mut sync = match gw.deps.chat.sync_user_state(user).await {
         Ok(sync) => sync,
         Err(error) => {
             tracing::error!(%error, %user, "sync_user_state failed");
@@ -59,6 +59,15 @@ pub(crate) async fn identify(
             return;
         }
     };
+
+    // For CAP_LAZY_MEMBERS clients, trim the Ready user dictionary to the inlined
+    // set — self + the (≤100) inlined guild members + DM recipients. Authors
+    // beyond that are resolved on demand via RequestUsers, so this is the Ready
+    // bandwidth win lazy member loading was designed for. The presence snapshot
+    // below then covers only the trimmed set (exactly what the client displays).
+    if identify.capabilities & dice_protocol::CAP_LAZY_MEMBERS != 0 {
+        retain_inlined_users(&mut sync, user.raw());
+    }
     // 3. Mint the gateway session identity.
     let session_id = gw.deps.ids.generate().0;
     let mut resume_token = [0u8; RESUME_TOKEN_LEN];
@@ -204,4 +213,71 @@ pub(crate) async fn identify(
         "session ready"
     );
     run_ready(gw, st, transport).await;
+}
+
+/// Trim the Ready user dictionary to the inlined set for CAP_LAZY_MEMBERS
+/// clients: self + inlined guild members + DM recipients. Authors beyond that
+/// are resolved on demand via `RequestUsers`. DM recipients are kept on purpose
+/// — a DM partner you share no guild with cannot be re-fetched via the
+/// shared-guild-gated `get_users`.
+fn retain_inlined_users(sync: &mut chat_service::UserSyncState, self_id: u64) {
+    let mut keep: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    keep.insert(self_id);
+    for guild in &sync.guilds {
+        keep.extend(guild.members.iter().map(|m| m.user_id));
+    }
+    for channel in &sync.dm_channels {
+        keep.extend(channel.recipient_ids.iter().copied());
+    }
+    sync.users.retain(|u| keep.contains(&u.id));
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::retain_inlined_users;
+    use chat_service::UserSyncState;
+    use dice_protocol::v1;
+
+    #[test]
+    fn trim_keeps_self_inlined_members_and_dm_recipients() {
+        let mut sync = UserSyncState {
+            guilds: vec![v1::Guild {
+                members: vec![v1::Member {
+                    user_id: 2,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            dm_channels: vec![v1::Channel {
+                recipient_ids: vec![3],
+                ..Default::default()
+            }],
+            users: vec![
+                v1::User {
+                    id: 1,
+                    ..Default::default()
+                }, // self
+                v1::User {
+                    id: 2,
+                    ..Default::default()
+                }, // inlined guild member
+                v1::User {
+                    id: 3,
+                    ..Default::default()
+                }, // DM recipient
+                v1::User {
+                    id: 99,
+                    ..Default::default()
+                }, // non-inlined member → trimmed
+            ],
+        };
+        retain_inlined_users(&mut sync, 1);
+        let kept: Vec<u64> = sync.users.iter().map(|u| u.id).collect();
+        assert_eq!(
+            kept,
+            vec![1, 2, 3],
+            "the non-inlined member (99) is trimmed"
+        );
+    }
 }
