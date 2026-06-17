@@ -749,6 +749,68 @@ async fn mark_read_persists_marker_and_broadcasts_to_self() {
 }
 
 #[tokio::test]
+async fn request_members_pages_large_rosters() {
+    let mut ctx = Ctx::new(1).await;
+    let owner = ctx.users[0];
+    let guild = ctx.svc.create_guild(owner, "big".into()).await.unwrap();
+    let gid = GuildId::from_raw(guild.id);
+
+    // Seed 149 extra members (owner makes 150). Direct inserts are far cheaper
+    // than 149 joins; track the ids so finish() cleans them up. Runtime query
+    // (not query!) keeps it out of the offline .sqlx cache.
+    for _ in 0..149 {
+        let u = new_user(&ctx.pool).await;
+        sqlx::query(
+            "INSERT INTO guild_members (guild_id, user_id, permissions, joined_at) \
+             VALUES ($1, $2, 0, now())",
+        )
+        .bind(guild.id as i64)
+        .bind(u.as_i64())
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+        ctx.users.push(u);
+    }
+
+    // Page 1: the cap (100), more remain, ascending + de-duplicated by user_id.
+    let page1 = ctx.svc.request_members(owner, gid, 0, 100).await.unwrap();
+    assert_eq!(page1.members.len(), 100);
+    assert!(page1.has_more);
+    assert_eq!(page1.users.len(), 100, "user records ride along");
+    assert!(
+        page1
+            .members
+            .windows(2)
+            .all(|w| w[0].user_id < w[1].user_id),
+        "ascending keyset order"
+    );
+
+    // Page 2: the remaining 50, no more, strictly after page 1 (no overlap).
+    let after = page1.members.last().unwrap().user_id;
+    let page2 = ctx
+        .svc
+        .request_members(owner, gid, after, 100)
+        .await
+        .unwrap();
+    assert_eq!(page2.members.len(), 50);
+    assert!(!page2.has_more);
+    assert!(
+        page2.members.iter().all(|m| m.user_id > after),
+        "strict keyset: page 2 never repeats page 1"
+    );
+
+    // A non-member cannot enumerate the roster.
+    let outsider = new_user(&ctx.pool).await;
+    ctx.users.push(outsider);
+    assert!(matches!(
+        ctx.svc.request_members(outsider, gid, 0, 100).await,
+        Err(ChatError::NotAMember)
+    ));
+
+    ctx.finish().await;
+}
+
+#[tokio::test]
 async fn set_avatar_persists_validates_and_broadcasts_user_update() {
     let ctx = Ctx::new(2).await;
     let (a, b) = (ctx.users[0], ctx.users[1]);
