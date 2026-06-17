@@ -762,6 +762,24 @@ impl ClientCore {
         .map_err(|_| CoreError::NotConnected)
     }
 
+    /// On-demand user resolution: ask the gateway for the given user ids (to fill
+    /// in unknown message authors). The records arrive asynchronously as a
+    /// `users` event (the bridge forwards the chunk; the webview merges it).
+    /// Unparseable ids are skipped; an empty result is a no-op.
+    pub async fn request_users(&self, user_ids: Vec<String>) -> Result<(), CoreError> {
+        let ids: Vec<u64> = user_ids.iter().filter_map(|id| parse_id(id)).collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let cmds = self.gateway_cmds().ok_or(CoreError::NotConnected)?;
+        cmds.send(Command::RequestUsers {
+            user_ids: ids,
+            nonce: self.nonce_seq.fetch_add(1, Ordering::Relaxed),
+        })
+        .await
+        .map_err(|_| CoreError::NotConnected)
+    }
+
     async fn fail_send(
         &self,
         wire_nonce: u64,

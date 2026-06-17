@@ -82,6 +82,13 @@ pub async fn request_guild_members(
         .map_err(user)
 }
 
+/// `requestUsers()`: resolve user records by id (fill in unknown message
+/// authors). The records arrive asynchronously as a `users` event.
+#[tauri::command]
+pub async fn request_users(core: Core<'_>, user_ids: Vec<String>) -> CmdResult<()> {
+    core.request_users(user_ids).await.map_err(user)
+}
+
 /// Confirm an email address with a mailed verification token.
 #[tauri::command]
 pub async fn verify_email(core: Core<'_>, token: String) -> CmdResult<()> {

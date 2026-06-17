@@ -225,6 +225,14 @@ impl DiceEvent {
             has_more: chunk.has_more,
         }
     }
+
+    /// Build a `Users` event from an on-demand user-fetch chunk reply.
+    #[must_use]
+    pub fn users(chunk: &v1::UsersChunk) -> Self {
+        Self::Users {
+            users: chunk.users.iter().map(UserDto::from).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,6 +465,10 @@ pub enum DiceEvent {
         users: Vec<UserDto>,
         has_more: bool,
     },
+    /// Resolved user records (on-demand user-fetch reply): merge into the
+    /// directory so previously-unknown message authors render.
+    #[serde(rename_all = "camelCase")]
+    Users { users: Vec<UserDto> },
     /// A new channel was created in a guild (text or voice) — add it live.
     #[serde(rename_all = "camelCase")]
     ChannelCreate { channel: ChannelDto },

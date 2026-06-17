@@ -161,6 +161,12 @@ pub enum ClientEvent {
         nonce: u64,
         chunk: Box<v1::GuildMembersChunk>,
     },
+    /// `UsersChunk` reply to [`Command::RequestUsers`] (by nonce): resolved user
+    /// records for on-demand author/user resolution.
+    Users {
+        nonce: u64,
+        chunk: Box<v1::UsersChunk>,
+    },
     /// Request-scoped `Error` (nonce echoed), or a synthetic error when the
     /// connection died before the gateway replied.
     RequestError { nonce: u64, error: v1::Error },
@@ -225,6 +231,13 @@ pub enum Command {
         guild_id: u64,
         after: u64,
         limit: u32,
+        nonce: u64,
+    },
+    /// On-demand user resolution: fetch user records by id to fill in message
+    /// authors the client lacks (members beyond the ~100 Ready inlines). The
+    /// reply arrives as [`ClientEvent::Users`] (nonce-matched).
+    RequestUsers {
+        user_ids: Vec<u64>,
         nonce: u64,
     },
     /// Drop the transport WITHOUT a clean close and reconnect (resume state
@@ -819,7 +832,8 @@ impl Driver {
                     }
                     Some(cmd) => {
                         if let Command::SendMessage { nonce, .. }
-                        | Command::RequestGuildMembers { nonce, .. } = &cmd
+                        | Command::RequestGuildMembers { nonce, .. }
+                        | Command::RequestUsers { nonce, .. } = &cmd
                         {
                             self.pending.insert(*nonce);
                         }
@@ -882,6 +896,13 @@ impl Driver {
             Some(Payload::GuildMembersChunk(chunk)) => {
                 self.pending.complete(frame.nonce);
                 ClientEvent::GuildMembers {
+                    nonce: frame.nonce,
+                    chunk: Box::new(chunk.clone()),
+                }
+            }
+            Some(Payload::UsersChunk(chunk)) => {
+                self.pending.complete(frame.nonce);
+                ClientEvent::Users {
                     nonce: frame.nonce,
                     chunk: Box::new(chunk.clone()),
                 }
@@ -1186,6 +1207,12 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
                 guild_id: *guild_id,
                 after: *after,
                 limit: *limit,
+            }),
+        )),
+        Command::RequestUsers { user_ids, nonce } => Some(Frame::with_nonce(
+            *nonce,
+            Payload::RequestUsers(v1::RequestUsers {
+                user_ids: user_ids.clone(),
             }),
         )),
         Command::ForceReconnect | Command::Shutdown => None,

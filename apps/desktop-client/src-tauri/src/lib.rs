@@ -155,6 +155,7 @@ pub fn run() {
             commands::edit_message,
             commands::delete_message,
             commands::request_guild_members,
+            commands::request_users,
             commands::react,
             commands::fetch_messages,
             commands::start_typing,
