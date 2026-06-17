@@ -289,6 +289,7 @@ impl Chat for ChatService {
         .await
         .map_err(internal)?;
         tx.commit().await.map_err(internal)?;
+        dice_metrics::counter!("dice_chat_messages_total").increment(1);
 
         let message = v1::Message {
             id: id.0,
