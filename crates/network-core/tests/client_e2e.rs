@@ -718,6 +718,77 @@ async fn gateway_journey() {
     let _ = std::fs::remove_dir_all(&env.cert_dir);
 }
 
+/// Lazy member loading end-to-end: a `RequestGuildMembers` command round-trips
+/// through the gateway + chat-service to a nonce-correlated `GuildMembers`
+/// chunk carrying the guild's members and their user records.
+#[tokio::test]
+async fn request_guild_members_returns_the_roster() {
+    let env = spawn_env("members", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+
+    let (a_name, a_email) = unique("ma");
+    let (b_name, b_email) = unique("mb");
+    let a_auth = api
+        .register(&a_email, &a_name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let b_auth = api
+        .register(&b_email, &b_name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let a_user = a_auth.user.clone().unwrap();
+    let b_user = b_auth.user.clone().unwrap();
+    let a_api = api
+        .clone()
+        .with_token_provider(Arc::new(StaticToken(a_auth.access_token.clone())));
+    let b_api = api
+        .clone()
+        .with_token_provider(Arc::new(StaticToken(b_auth.access_token.clone())));
+
+    let guild = a_api.create_guild("members hq").await.unwrap();
+    b_api.join_guild(&guild.invite_code).await.unwrap();
+
+    let mut alice = gw_connect(&env, Arc::new(StaticToken(a_auth.access_token.clone())));
+    let _ = expect_ready(&mut alice).await;
+
+    let nonce = 0x9001_u64;
+    alice
+        .send(Command::RequestGuildMembers {
+            guild_id: guild.id,
+            after: 0,
+            limit: 50,
+            nonce,
+        })
+        .await
+        .unwrap();
+    let chunk = expect_event(&mut alice, "GuildMembers", |e| match e {
+        ClientEvent::GuildMembers { nonce: n, chunk } if n == nonce => Some(chunk),
+        _ => None,
+    })
+    .await;
+    assert_eq!(chunk.guild_id, guild.id);
+    let mut got: Vec<u64> = chunk.members.iter().map(|m| m.user_id).collect();
+    got.sort_unstable();
+    let mut want = vec![a_user.id, b_user.id];
+    want.sort_unstable();
+    assert_eq!(got, want, "both members come back in one page");
+    assert!(!chunk.has_more, "two members fit in one page");
+    assert_eq!(
+        chunk.users.len(),
+        2,
+        "user records ride along for the dictionary"
+    );
+
+    alice.shutdown().await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[a_user.id, b_user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
 /// A resume attempt after the window expired is rejected with
 /// `Error{INVALID_SESSION}`; the driver emits `SessionInvalidated` and
 /// re-identifies ON THE SAME CONNECTION (protocol §3), landing on a fresh

@@ -205,6 +205,28 @@ pub struct MemberDto {
     pub guild_id: String,
 }
 
+impl From<&v1::Member> for MemberDto {
+    fn from(m: &v1::Member) -> Self {
+        Self {
+            user_id: id_str(m.user_id),
+            guild_id: id_str(m.guild_id),
+        }
+    }
+}
+
+impl DiceEvent {
+    /// Build a `GuildMembers` event from a lazy-load chunk reply.
+    #[must_use]
+    pub fn guild_members(chunk: &v1::GuildMembersChunk) -> Self {
+        Self::GuildMembers {
+            guild_id: id_str(chunk.guild_id),
+            members: chunk.members.iter().map(MemberDto::from).collect(),
+            users: chunk.users.iter().map(UserDto::from).collect(),
+            has_more: chunk.has_more,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuildDto {
@@ -425,6 +447,15 @@ pub enum DiceEvent {
     GuildCreate {
         guild: GuildDto,
         channels: Vec<ChannelDto>,
+    },
+    /// A page of guild members (lazy-loading reply): merge `members` + `users`
+    /// into the directory, then request the next page while `has_more`.
+    #[serde(rename_all = "camelCase")]
+    GuildMembers {
+        guild_id: String,
+        members: Vec<MemberDto>,
+        users: Vec<UserDto>,
+        has_more: bool,
     },
     /// A new channel was created in a guild (text or voice) — add it live.
     #[serde(rename_all = "camelCase")]

@@ -155,6 +155,12 @@ pub enum ClientEvent {
     Dispatch(Box<Frame>),
     /// `SendMessageAck` correlated to [`Command::SendMessage`] by nonce.
     Ack { nonce: u64, message: v1::Message },
+    /// `GuildMembersChunk` reply to [`Command::RequestGuildMembers`] (by nonce):
+    /// one page of a guild's members for lazy loading.
+    GuildMembers {
+        nonce: u64,
+        chunk: Box<v1::GuildMembersChunk>,
+    },
     /// Request-scoped `Error` (nonce echoed), or a synthetic error when the
     /// connection died before the gateway replied.
     RequestError { nonce: u64, error: v1::Error },
@@ -210,6 +216,16 @@ pub enum Command {
     },
     UpdatePresence {
         status: i32,
+    },
+    /// Lazy member loading: page a guild's roster beyond the ~100 inlined in
+    /// Ready. The reply arrives as [`ClientEvent::GuildMembers`] (nonce-matched);
+    /// page again with `after` = the last member's user_id until `has_more` is
+    /// false.
+    RequestGuildMembers {
+        guild_id: u64,
+        after: u64,
+        limit: u32,
+        nonce: u64,
     },
     /// Drop the transport WITHOUT a clean close and reconnect (resume state
     /// kept) — also the way out of `Failed`.
@@ -802,7 +818,9 @@ impl Driver {
                         return Flow::Retry { delay: Some(FORCE_RECONNECT_DELAY) };
                     }
                     Some(cmd) => {
-                        if let Command::SendMessage { nonce, .. } = &cmd {
+                        if let Command::SendMessage { nonce, .. }
+                        | Command::RequestGuildMembers { nonce, .. } = &cmd
+                        {
                             self.pending.insert(*nonce);
                         }
                         if let Some(frame) = command_frame(&cmd)
@@ -859,6 +877,13 @@ impl Driver {
                 ClientEvent::Ack {
                     nonce: frame.nonce,
                     message: ack.message.clone().unwrap_or_default(),
+                }
+            }
+            Some(Payload::GuildMembersChunk(chunk)) => {
+                self.pending.complete(frame.nonce);
+                ClientEvent::GuildMembers {
+                    nonce: frame.nonce,
+                    chunk: Box::new(chunk.clone()),
                 }
             }
             Some(Payload::Error(error)) if frame.nonce != 0 => {
@@ -1150,6 +1175,19 @@ fn command_frame(cmd: &Command) -> Option<Frame> {
         Command::UpdatePresence { status } => Some(Frame::control(Payload::UpdatePresence(
             v1::UpdatePresenceRequest { status: *status },
         ))),
+        Command::RequestGuildMembers {
+            guild_id,
+            after,
+            limit,
+            nonce,
+        } => Some(Frame::with_nonce(
+            *nonce,
+            Payload::RequestGuildMembers(v1::RequestGuildMembers {
+                guild_id: *guild_id,
+                after: *after,
+                limit: *limit,
+            }),
+        )),
         Command::ForceReconnect | Command::Shutdown => None,
     }
 }

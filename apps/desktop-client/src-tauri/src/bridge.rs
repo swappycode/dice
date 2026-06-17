@@ -241,6 +241,10 @@ impl Bridge {
                     },
                 );
             }
+            ClientEvent::GuildMembers { chunk, .. } => {
+                // Lazy-load page reply → merge into the frontend directory.
+                emit_dice(&self.emitter, &DiceEvent::guild_members(&chunk));
+            }
             ClientEvent::VoiceData(bytes) => {
                 // Inbound voice datagram → the audio engine's playback path
                 // (decode + per-ssrc jitter buffer). Dropped if not in voice.
