@@ -68,6 +68,8 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
         .with_context(|| format!("connect event bus ({})", cfg.bus_name()))?;
     let ids = Arc::new(SnowflakeGenerator::new(cfg.node_id).context("DICE_NODE_ID")?);
     let rate = RateLimiter::new(cache.clone());
+    // Cloned before `bus` is moved into GatewayDeps below, for the outbox relay.
+    let relay_bus = bus.clone();
 
     // --- services -> gateway deps (direct trait calls by default) ---
     let mut deps = GatewayDeps {
@@ -132,6 +134,23 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
 
     // --- gateway (REST + WSS on one TLS port, QUIC on UDP) ---
     let shutdown = Shutdown::new();
+
+    // --- transactional-outbox relay (M4): reconcile any message event whose
+    // inline publish was dropped (process crash / bus outage). Runs only when
+    // chat is in-process; in split mode the chat-service bin owns the write path
+    // and runs its own relay. ---
+    if !cfg.split {
+        let pool = pool.clone();
+        let bus = relay_bus;
+        let token = shutdown.child_token();
+        shutdown.tracker.spawn(async move {
+            tokio::select! {
+                () = chat_service::relay::run(pool, bus) => {}
+                () = token.cancelled() => {}
+            }
+        });
+        tracing::info!("outbox relay started (in-process chat)");
+    }
 
     // notification-service: durable JetStream consumer that maintains per-user
     // unread counts. Full profile only — dev-lite's in-process Local bus has no

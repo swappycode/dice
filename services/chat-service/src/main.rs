@@ -36,6 +36,14 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(SnowflakeGenerator::new(env_or("DICE_NODE_ID", 0u16)?).context("DICE_NODE_ID")?);
 
     dice_database::init_metrics_from_env(&pool);
+
+    // This bin owns the chat write path in split mode, so it runs the
+    // transactional-outbox relay that reconciles any dropped inline publish. The
+    // `event_outbox` table is provisioned by the gateway's migrate-on-boot
+    // (`just split-up` starts it first); drain errors before then are logged and
+    // retried, never fatal.
+    tokio::spawn(chat_service::relay::run(pool.clone(), bus.clone()));
+
     let chat = Arc::new(ChatService::new(pool, bus, ids));
     let rpc = RpcClient::connect(&nats_url)
         .await
