@@ -735,6 +735,33 @@ impl ClientCore {
         cmds.send(cmd).await.map_err(|_| CoreError::NotConnected)
     }
 
+    /// Lazy member loading: ask the gateway for one page of `guild`'s members
+    /// after `after` (empty / "0" = from the start), up to `limit`. The page
+    /// arrives asynchronously as a `guildMembers` event (the bridge forwards the
+    /// chunk); the webview merges it and re-requests while `hasMore`.
+    pub async fn request_guild_members(
+        &self,
+        guild_id: &str,
+        after: &str,
+        limit: u32,
+    ) -> Result<(), CoreError> {
+        let guild = parse_id(guild_id).ok_or_else(|| CoreError::BadId(guild_id.into()))?;
+        let after = if after.is_empty() {
+            0
+        } else {
+            parse_id(after).ok_or_else(|| CoreError::BadId(after.into()))?
+        };
+        let cmds = self.gateway_cmds().ok_or(CoreError::NotConnected)?;
+        cmds.send(Command::RequestGuildMembers {
+            guild_id: guild,
+            after,
+            limit,
+            nonce: self.nonce_seq.fetch_add(1, Ordering::Relaxed),
+        })
+        .await
+        .map_err(|_| CoreError::NotConnected)
+    }
+
     async fn fail_send(
         &self,
         wire_nonce: u64,

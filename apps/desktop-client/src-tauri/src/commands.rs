@@ -67,6 +67,21 @@ pub async fn totp_disable(core: Core<'_>, code: String) -> CmdResult<()> {
     core.totp_disable(&code).await.map_err(user)
 }
 
+/// `requestGuildMembers()`: lazy member loading — fetch one page of a guild's
+/// members after `after` (empty = from the start). The page arrives
+/// asynchronously as a `guildMembers` event.
+#[tauri::command]
+pub async fn request_guild_members(
+    core: Core<'_>,
+    guild_id: String,
+    after: String,
+    limit: u32,
+) -> CmdResult<()> {
+    core.request_guild_members(&guild_id, &after, limit)
+        .await
+        .map_err(user)
+}
+
 /// Confirm an email address with a mailed verification token.
 #[tauri::command]
 pub async fn verify_email(core: Core<'_>, token: String) -> CmdResult<()> {
