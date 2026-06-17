@@ -58,5 +58,6 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!("presence-service: Ctrl-C received, shutting down");
         }
     }
+    dice_logging::shutdown();
     Ok(())
 }

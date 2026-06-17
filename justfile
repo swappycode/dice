@@ -74,12 +74,12 @@ run-full:
 # DICE_NODE_ID so snowflake ids never collide. Ctrl-C / close each window to stop.
 split-up:
     cargo build -p dice-monolith -p auth-service -p chat-service -p presence-service
-    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_PROFILE='full'; `$env:DICE_SPLIT='1'; `$env:DICE_NODE_ID='0'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9600'; cargo run -p dice-monolith"
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_PROFILE='full'; `$env:DICE_SPLIT='1'; `$env:DICE_NODE_ID='0'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9600'; `$env:DICE_SERVICE_NAME='gateway'; `$env:DICE_OTLP_ENDPOINT='http://localhost:4318'; cargo run -p dice-monolith"
     Start-Sleep -Seconds 5
-    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='1'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9601'; cargo run -p auth-service"
-    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='2'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9602'; cargo run -p chat-service"
-    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='3'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9603'; cargo run -p presence-service"
-    Write-Host "split fleet launched (4 windows): gateway + auth/chat/presence. /metrics: 9600 gateway, 9601/9602/9603 auth/chat/presence. Point the client at https://localhost:8443; Ctrl-C each window to stop."
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='1'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9601'; `$env:DICE_SERVICE_NAME='auth-service'; `$env:DICE_OTLP_ENDPOINT='http://localhost:4318'; cargo run -p auth-service"
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='2'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9602'; `$env:DICE_SERVICE_NAME='chat-service'; `$env:DICE_OTLP_ENDPOINT='http://localhost:4318'; cargo run -p chat-service"
+    Start-Process powershell -WorkingDirectory $PWD -ArgumentList '-NoExit','-Command',"`$env:DICE_NODE_ID='3'; `$env:DICE_ADMIN_ADDR='0.0.0.0:9603'; `$env:DICE_SERVICE_NAME='presence-service'; `$env:DICE_OTLP_ENDPOINT='http://localhost:4318'; cargo run -p presence-service"
+    Write-Host "split fleet launched (4 windows): gateway + auth/chat/presence. /metrics: 9600 gateway, 9601/9602/9603 auth/chat/presence. Traces -> Tempo (run 'just metrics-up' first). Point the client at https://localhost:8443; Ctrl-C each window to stop."
 
 # Desktop client dev loop (own workspace). One instance; HMR; predev frees :1420.
 client:

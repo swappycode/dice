@@ -19,6 +19,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Single-binary Tempo for traces: OTLP/HTTP in on :4318 (the host services
+  # export there), query API on :3200 (Grafana). Ephemeral local storage.
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    ports: ["${DICE_TEMPO_PORT:-3200}:3200", "4318:4318"]
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+
   grafana:
     image: grafana/grafana:11.4.0
     ports: ["${DICE_GRAFANA_PORT:-3000}:3000"]
@@ -31,4 +40,4 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on: [prometheus]
+    depends_on: [prometheus, tempo]

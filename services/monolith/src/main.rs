@@ -183,6 +183,7 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
     } else {
         tracing::warn!("drain deadline expired with tasks still running; exiting anyway");
     }
+    dice_logging::shutdown();
     Ok(())
 }
 
