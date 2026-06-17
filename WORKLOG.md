@@ -7,6 +7,47 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-18 - M4 (9/n): Scaling - on-demand user fetch + Ready.users[] trim
+
+**M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. `just check` green
++ desktop-client workspace gate (clippy + tests) + frontend `npm run check`/`build`.
+`just sqlx-prepare` re-run (new get_users query).
+
+**What + why.** Finishes lazy member loading (5/n): trims the Ready `users[]`
+dictionary to the inlined set, with an on-demand user-fetch so message authors
+beyond the ~100 Ready inlines still resolve. Closes the last lazy-members follow-up
+(the safe-trim prerequisite: authors must be resolvable on demand).
+- **Wire** (mirrors RequestGuildMembers/GuildMembersChunk): `RequestUsers` (frame
+  38, request) + `UsersChunk` (frame 52, nonce-echoed reply) in user.proto;
+  protocol payload_field_number entries (Control class).
+- **chat-service**: `Chat::get_users(actor, user_ids)` returns only users sharing a
+  guild with the actor (visibility gate; DISTINCT shared-guild self-join; clamp 100)
+  + full split RPC parity (ChatGetUsersReq/Resp + serve arm + ChatNatsClient).
+- **gateway**: a `dispatch.rs` RequestUsers arm (rate-limited, one nonce-echoed
+  UsersChunk). **THE TRIM** (`handshake.rs::retain_inlined_users`): for
+  CAP_LAZY_MEMBERS clients, Ready `users[]` is filtered to self + inlined guild
+  members + DM recipients (DM recipients kept on purpose - they can't be re-fetched
+  via the shared-guild-gated get_users). The presence snapshot then covers only the
+  trimmed set.
+- **client/host**: network-core `Command::RequestUsers` (nonce-tracked) + chunk ->
+  `ClientEvent::Users`; Tauri host `DiceEvent::Users` + a `request_users` command.
+- **UI**: `applyUsers` merge + a `users` dispatch case + a pure `unknownUserIds`
+  store query; the three message-entry points (live messageCreate, channel-open
+  page, scrollback) resolve unknown authors via `ipc.requestUsers`.
+
+**Verified.** `handshake::tests::trim_keeps_self_inlined_members_and_dm_recipients`
+(unit) + `live.rs::get_users_returns_only_shared_guild_members` (shared-guild gate +
+empty no-op) + the chat_rpc get_users round-trip; existing client_e2e / host_gate
+Ready paths unchanged; `just check` + desktop gate + frontend `npm run check`/`build`
+all green.
+
+**NEXT.** Lazy member loading is now fully closed (5/n + 9/n). M4 remaining =
+cross-node resume phase 0b/1+ (ADR-0007) + the HW-gated 100k-conn benchmark. Next
+free Frame dispatch # = 121 (RequestUsers 38 / UsersChunk 52 are request/reply, not
+dispatches).
+
+---
+
 ## 2026-06-18 - M4 (8/n): Scaling - cross-node resume phase 0 (session directory)
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. `just check` green
