@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let ids =
         Arc::new(SnowflakeGenerator::new(env_or("DICE_NODE_ID", 0u16)?).context("DICE_NODE_ID")?);
 
+    dice_database::init_metrics_from_env(&pool);
     let chat = Arc::new(ChatService::new(pool, bus, ids));
     let rpc = RpcClient::connect(&nats_url)
         .await

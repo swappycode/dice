@@ -86,6 +86,27 @@ pub fn spawn_pool_metrics(pool: PgPool) {
     });
 }
 
+/// For the split-mode service bins: if `DICE_ADMIN_ADDR` is set to a valid
+/// socket address, install the Prometheus `/metrics` exporter there and start
+/// the pool-utilisation sampler. Non-fatal, and a no-op when the var is unset —
+/// so a bin always serves its RPC regardless. (`just split-up` gives each bin a
+/// distinct admin port; the monolith wires its own exporter directly.)
+pub fn init_metrics_from_env(pool: &PgPool) {
+    let Some(addr) = dice_common::config::env_opt("DICE_ADMIN_ADDR") else {
+        return;
+    };
+    match addr.parse::<std::net::SocketAddr>() {
+        Ok(sock) => match dice_metrics::init_prometheus(sock) {
+            Ok(()) => {
+                spawn_pool_metrics(pool.clone());
+                tracing::info!(%addr, "metrics: serving /metrics");
+            }
+            Err(error) => tracing::warn!(%error, %addr, "metrics exporter unavailable"),
+        },
+        Err(error) => tracing::warn!(%error, %addr, "invalid DICE_ADMIN_ADDR; metrics off"),
+    }
+}
+
 /// The embedded migrator: the full M1 schema, compiled into the binary.
 /// Exposed for tests and for the monolith's self-migrate-on-boot path.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

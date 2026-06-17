@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(SnowflakeGenerator::new(env_or("DICE_NODE_ID", 0u16)?).context("DICE_NODE_ID")?);
     let jwt = load_jwt()?;
 
+    dice_database::init_metrics_from_env(&pool);
     let auth = Arc::new(AuthService::new(pool, cache, jwt, ids, bus));
     let rpc = RpcClient::connect(&nats_url)
         .await
