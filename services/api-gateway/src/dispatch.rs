@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use chat_service::ChatError;
-use dice_common::id::{ChannelId, MediaId, MessageId};
+use dice_common::id::{ChannelId, GuildId, MediaId, MessageId};
 use dice_network_core::server::FramedTransport;
 use dice_protocol::v1::frame::Payload;
 use dice_protocol::v1::{self, ErrorCode, Frame};
@@ -327,6 +327,38 @@ pub(crate) async fn handle(
                     .await
                 }
             }
+        }
+
+        // Lazy member loading: page a guild's roster on demand. One page per
+        // request (nonce-echoed); the client requests again with `after` = the
+        // last user_id until `has_more` is false.
+        Some(Payload::RequestGuildMembers(req)) => {
+            if let Err(retry_after_ms) = st.bucket.try_take(Instant::now()) {
+                return send_or_detach(transport, &rate_limited_frame(nonce, retry_after_ms)).await;
+            }
+            let reply = match gw
+                .deps
+                .chat
+                .request_members(
+                    st.user,
+                    GuildId::from_raw(req.guild_id),
+                    req.after,
+                    req.limit.min(100) as u8,
+                )
+                .await
+            {
+                Ok(page) => Frame::with_nonce(
+                    nonce,
+                    Payload::GuildMembersChunk(v1::GuildMembersChunk {
+                        guild_id: req.guild_id,
+                        members: page.members,
+                        users: page.users,
+                        has_more: page.has_more,
+                    }),
+                ),
+                Err(error) => chat_error_frame(nonce, &error),
+            };
+            send_or_detach(transport, &reply).await
         }
 
         // A client-initiated Close frame = clean goodbye (no resume window).
