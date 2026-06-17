@@ -56,6 +56,17 @@ pub struct UserSyncState {
     pub users: Vec<v1::User>,
 }
 
+/// One page of guild members for lazy member loading ([`Chat::request_members`]).
+#[derive(Debug, Default)]
+pub struct MemberPage {
+    /// Members with `user_id` greater than the request cursor, ascending.
+    pub members: Vec<v1::Member>,
+    /// The user records for `members` (keeps the client dictionary warm).
+    pub users: Vec<v1::User>,
+    /// More members remain — request again with `after` = the last `user_id`.
+    pub has_more: bool,
+}
+
 #[async_trait::async_trait]
 pub trait Chat: Send + Sync {
     /// Snapshot for `Ready`. Also used by the gateway to (re)build interest.
@@ -85,6 +96,18 @@ pub trait Chat: Send + Sync {
         cursor: HistoryCursor,
         limit: u8,
     ) -> Result<Vec<v1::Message>, ChatError>;
+
+    /// Page a guild's members for lazy loading (CAP_LAZY_MEMBERS): members with
+    /// `user_id > after`, ascending by `user_id`, up to `limit` (clamped 1..=100),
+    /// plus their user records. `has_more` signals another page remains.
+    /// Membership-gated (caller must be a member of `guild`).
+    async fn request_members(
+        &self,
+        actor: UserId,
+        guild: GuildId,
+        after: u64,
+        limit: u8,
+    ) -> Result<MemberPage, ChatError>;
 
     /// Edits a message's content. AUTHOR-ONLY (mods cannot edit others, even
     /// with MANAGE_MESSAGES — matches Discord). Sets `edited_at` and publishes

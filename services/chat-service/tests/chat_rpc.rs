@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chat_service::rpc::{ChatNatsClient, serve};
-use chat_service::{Chat, ChatError, HistoryCursor, UserSyncState};
+use chat_service::{Chat, ChatError, HistoryCursor, MemberPage, UserSyncState};
 use dice_common::{ChannelId, GuildId, MediaId, MessageId, UserId};
 use dice_event_bus::rpc::RpcClient;
 use dice_permissions::{MissingPermissions, Permissions};
@@ -81,6 +81,29 @@ impl Chat for MockChat {
                 ..Default::default()
             })
             .collect())
+    }
+
+    async fn request_members(
+        &self,
+        _actor: UserId,
+        guild: GuildId,
+        after: u64,
+        limit: u8,
+    ) -> Result<MemberPage, ChatError> {
+        // Echo cursor + guild + limit so the test confirms they crossed the wire.
+        Ok(MemberPage {
+            members: vec![v1::Member {
+                user_id: after + 1,
+                guild_id: guild.raw(),
+                permissions: u64::from(limit),
+                ..Default::default()
+            }],
+            users: vec![v1::User {
+                id: after + 1,
+                ..Default::default()
+            }],
+            has_more: limit > 1,
+        })
     }
 
     async fn edit_message(
@@ -290,6 +313,17 @@ async fn chat_round_trips_over_nats() {
         other => panic!("expected Forbidden, got {other:?}"),
     }
     client.typing(actor, ChannelId::from_raw(10)).await.unwrap();
+
+    // Lazy member page: cursor + guild + has_more round-trip through the wire.
+    let page = client
+        .request_members(actor, GuildId::from_raw(9), 100, 50)
+        .await
+        .unwrap();
+    assert_eq!(page.members.len(), 1);
+    assert_eq!(page.members[0].user_id, 101);
+    assert_eq!(page.members[0].guild_id, 9);
+    assert_eq!(page.users[0].id, 101);
+    assert!(page.has_more);
 
     task.abort();
 }

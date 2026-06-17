@@ -116,6 +116,17 @@ message ChatGetMessagesReq {
   uint32 limit = 5;
 }
 message ChatMessagesResp { repeated dice.v1.Message messages = 1; }
+message ChatRequestMembersReq {
+  fixed64 actor = 1;
+  fixed64 guild = 2;
+  fixed64 after = 3;
+  uint32 limit = 4;
+}
+message ChatRequestMembersResp {
+  repeated dice.v1.Member members = 1;
+  repeated dice.v1.User users = 2;
+  bool has_more = 3;
+}
 
 message ChatEditMessageReq {
   fixed64 actor = 1;

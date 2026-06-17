@@ -21,7 +21,7 @@ use rand::Rng;
 use sqlx::PgPool;
 use sqlx::types::time::OffsetDateTime;
 
-use crate::{Chat, ChatError, HistoryCursor, UserSyncState};
+use crate::{Chat, ChatError, HistoryCursor, MemberPage, UserSyncState};
 
 /// `BusEvent.origin` for every event this service publishes.
 const ORIGIN: &str = "chat-service";
@@ -222,6 +222,78 @@ impl Chat for ChatService {
             guilds,
             dm_channels,
             users,
+        })
+    }
+
+    async fn request_members(
+        &self,
+        actor: UserId,
+        guild: GuildId,
+        after: u64,
+        limit: u8,
+    ) -> Result<MemberPage, ChatError> {
+        // Membership gate: only a member may enumerate the roster.
+        let is_member = sqlx::query_scalar!(
+            r#"SELECT EXISTS(
+                 SELECT 1 FROM guild_members WHERE guild_id = $1 AND user_id = $2
+               ) AS "exists!""#,
+            guild.as_i64(),
+            actor.as_i64()
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(internal)?;
+        if !is_member {
+            return Err(ChatError::NotAMember);
+        }
+
+        // Keyset page by user_id; fetch one extra row to detect `has_more`.
+        let n = i64::from(limit.clamp(1, 100));
+        let rows = sqlx::query!(
+            "SELECT user_id, permissions, joined_at FROM guild_members \
+             WHERE guild_id = $1 AND user_id > $2 ORDER BY user_id LIMIT $3",
+            guild.as_i64(),
+            after as i64,
+            n + 1
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let has_more = rows.len() as i64 > n;
+        let page = &rows[..rows.len().min(n as usize)];
+
+        let members = page
+            .iter()
+            .map(|r| v1::Member {
+                user_id: r.user_id as u64,
+                guild_id: guild.raw(),
+                joined_at_ms: ms(r.joined_at),
+                permissions: Permissions::from_db(r.permissions).bits(),
+            })
+            .collect();
+        let ids: Vec<i64> = page.iter().map(|r| r.user_id).collect();
+        let users = sqlx::query!(
+            "SELECT id, username, display_name, flags, avatar_media_id FROM users \
+             WHERE id = ANY($1::bigint[])",
+            &ids[..]
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|r| v1::User {
+            id: r.id as u64,
+            username: r.username,
+            display_name: r.display_name.unwrap_or_default(),
+            flags: r.flags as u32,
+            avatar_id: r.avatar_media_id.map_or(0, |v| v as u64),
+        })
+        .collect();
+
+        Ok(MemberPage {
+            members,
+            users,
+            has_more,
         })
     }
 

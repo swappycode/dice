@@ -14,7 +14,7 @@ use dice_protocol::internal::v1 as rpc;
 use dice_protocol::prost::{self, Message as _};
 use dice_protocol::v1;
 
-use crate::{Chat, ChatError, HistoryCursor, UserSyncState};
+use crate::{Chat, ChatError, HistoryCursor, MemberPage, UserSyncState};
 
 /// RPC service name (subject segment + queue group): `dice.rpc.chat.*`.
 pub const SERVICE: &str = "chat";
@@ -169,6 +169,25 @@ pub async fn serve(client: RpcClient, chat: Arc<dyn Chat>) -> Result<(), RpcErro
                             .await
                             .map_err(to_fault)?;
                         Ok(rpc::ChatMessagesResp { messages }.encode_to_vec())
+                    }
+                    "request_members" => {
+                        let r = rpc::ChatRequestMembersReq::decode(body.as_slice())
+                            .map_err(decode_fault)?;
+                        let page = chat
+                            .request_members(
+                                UserId::from_raw(r.actor),
+                                GuildId::from_raw(r.guild),
+                                r.after,
+                                r.limit as u8,
+                            )
+                            .await
+                            .map_err(to_fault)?;
+                        Ok(rpc::ChatRequestMembersResp {
+                            members: page.members,
+                            users: page.users,
+                            has_more: page.has_more,
+                        }
+                        .encode_to_vec())
                     }
                     "edit_message" => {
                         let r = rpc::ChatEditMessageReq::decode(body.as_slice())
@@ -407,6 +426,32 @@ impl Chat for ChatNatsClient {
         Ok(rpc::ChatMessagesResp::decode(bytes.as_slice())
             .map_err(internal)?
             .messages)
+    }
+
+    async fn request_members(
+        &self,
+        actor: UserId,
+        guild: GuildId,
+        after: u64,
+        limit: u8,
+    ) -> Result<MemberPage, ChatError> {
+        let req = rpc::ChatRequestMembersReq {
+            actor: actor.raw(),
+            guild: guild.raw(),
+            after,
+            limit: u32::from(limit),
+        };
+        let bytes = self
+            .rpc
+            .call(SERVICE, "request_members", req.encode_to_vec())
+            .await
+            .map_err(to_err)?;
+        let r = rpc::ChatRequestMembersResp::decode(bytes.as_slice()).map_err(internal)?;
+        Ok(MemberPage {
+            members: r.members,
+            users: r.users,
+            has_more: r.has_more,
+        })
     }
 
     async fn edit_message(
