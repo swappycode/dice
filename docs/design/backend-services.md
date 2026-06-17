@@ -278,7 +278,7 @@ pub trait RateLimiter: Send + Sync {
 
 ## 5. chat-service
 
-Owns: users' social graph data â€” guilds, members, channels, DMs, messages. All writes publish events to the bus *after* commit (transactional outbox deferred â€” see Risks).
+Owns: users' social graph data â€” guilds, members, channels, DMs, messages. The message path (create/edit/delete) records its dispatch in a transactional outbox inside the write tx and reconciles via a relay (ADR-0006); the other fan-outs publish *after* commit and heal via resume + REST backfill.
 
 - **Snowflakes** (crates/common): 41 bits ms since `2026-01-01T00:00:00Z` | 10 bits node id | 12 bits sequence; `i64`-safe, generated in-process (`SnowflakeGen` per node, node id from config). PKs for users, sessions, guilds, channels, messages â€” gives free time-ordering for message pagination.
 - **Pagination:** `WHERE channel_id=$1 AND id < $before ORDER BY id DESC LIMIT $n` (and the `after` mirror) on index `(channel_id, id DESC)` â€” pure keyset, no OFFSET.
@@ -535,7 +535,7 @@ volumes: { pgdata: {}, natsdata: {} }
 
 ## 12. Risks and open questions
 
-- **DB-commitâ†’bus-publish gap (no transactional outbox in M1):** a crash between commit and publish loses a fan-out event; clients heal via REST backfill on reconnect, but live clients could miss one message until then. Mitigation candidates for M2: outbox table or publishing inside a listener on WAL. Accepted for M1; document it.
+- **DB-commitâ†’bus-publish gap:** closed for the message path in M4 (ADR-0006): create/edit/delete record their dispatch in an event_outbox row inside the write tx; an inline publish carries the live path and a poll relay reconciles anything it missed (at-least-once, idempotent by event_id). The other fan-outs still accept the gap and heal via REST backfill.
 - **async-nats and redis crate API churn:** both have history of breaking minor releases â€” pin exact versions in the workspace and gate upgrades.
 - **axum-server 0.7 + rustls-ring interop:** verify it accepts a pre-built ring `ServerConfig`; fallback is a small hyper-1.x/tokio-rustls accept loop (contained in network-core).
 - **quinn + self-signed certs:** rustls requires proper SANs and the client must use the dev CA root store â€” a frequent "works in WSS, fails in QUIC" footgun; xtask must generate CA-signed (not self-signed-leaf) certs and the client must thread `DICE_DEV_CA` into *both* transports.

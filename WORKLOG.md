@@ -7,6 +7,56 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-18 - M4 (6/n): Scaling - transactional outbox (chat message path)
+
+**M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. Gates green:
+`just check` (server) + host clippy/fmt + frontend `npm run check`/`build` (frontend
+untouched this slice). `just sqlx-prepare` re-run (migration 0014 + new chat queries).
+
+**What + why.** Closes the commit->publish gap for the message path (create/edit/
+delete) with a transactional outbox (ADR-0006). Previously a crash or bus outage
+between `tx.commit()` and the post-commit publish could lose a fan-out event; live
+clients only healed via resume + REST backfill.
+- **Migration 0014** (`0014_event_outbox.sql`): `event_outbox(event_id PK, subject,
+  payload BYTEA, created_at, published_at)` + a partial index over the unpublished
+  rows. All three migrator assertions bumped (count 13->14, descriptions array, live
+  13-table check).
+- **chat-service** (`service.rs`): send/edit/delete build the `BusEvent` pre-commit
+  and INSERT it into the outbox WITHIN the write tx (`outbox_insert`), then publish
+  inline and stamp `published_at` on success (`publish_outboxed`); a failed publish
+  leaves the row for the relay. edit/delete are now wrapped in a tx (were single
+  statements). `channel_event` shares the subject/event build with the best-effort
+  reaction broadcast (`publish_to_channel`, unchanged behaviour).
+- **relay** (`chat-service/src/relay.rs`): a poll-based reconciler - claims due
+  unpublished rows `FOR UPDATE SKIP LOCKED` oldest-first (grace window so it never
+  races the inline path), republishes through the `EventBus` seam, stamps published;
+  poison rows (undecodable / bad subject) are skipped + counted; a slow sweep
+  reclaims published rows. Off the live path, so a simple poll suffices (no NOTIFY).
+- **wiring**: the monolith runs the relay in-process when `!DICE_SPLIT`; the
+  `chat-service` bin runs it in split mode (it owns the write path). One relay per
+  Postgres cluster; SKIP LOCKED keeps concurrent relays safe regardless.
+
+**Model = inline publish + outbox backstop** (not relay-as-sole-publisher): keeps
+instant live delivery and leaves the six gateway/e2e harnesses untouched; the relay
+is purely the durability backstop. Delivery is at-least-once, idempotent by
+`event_id` / message id.
+
+**Verified (live, infra up).** `chat-service/tests/outbox.rs`
+`relay_reconciles_a_dropped_publish_exactly_once` seeds an unpublished row (a dropped
+publish) and asserts the relay delivers it once, stamps it published, and does not
+re-send. Full `just check` green.
+
+**Scope / deferred.** Message path only; the other ~12 fan-outs keep the M1
+post-commit publish; typing stays ephemeral. Gateway-side `event_id` dedup, the
+outbox for the remaining sites, and multi-node relay election are follow-ups.
+
+**NEXT (M4 remaining).** Observability + lazy members + outbox done. Remaining BIG
+item: multi-node gateway cross-node resume (start with the ADR-0001 trait extraction
++ a sticky-LB phase-0; gate cross-node shared-replay behind a per-node-seq ADR).
+Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-17 — M4 (5/n): Scaling — lazy member lists (RequestGuildMembers)
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits (`bd6f4b8` proto / `e01188c`
