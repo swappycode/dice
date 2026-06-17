@@ -15,3 +15,17 @@ message SetAvatarRequest {
 message UserUpdate {
   User user = 1;
 }
+
+// -- on-demand user resolution (M4) --
+// Client->server request (frame 38, nonce set): resolve user records by id, used
+// to fill in message authors the client does not yet have (e.g. guild members
+// beyond the ~100 Ready inlines for CAP_LAZY_MEMBERS clients). The server returns
+// only users the actor shares a guild with; unknown / not-shared ids are omitted.
+message RequestUsers {
+  repeated fixed64 user_ids = 1;   // server clamps to <= 100 per request
+}
+// Server->client reply (frame 52, nonce echoed): the resolved user records — a
+// subset of the request.
+message UsersChunk {
+  repeated User users = 1;
+}
