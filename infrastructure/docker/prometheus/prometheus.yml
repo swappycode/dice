@@ -1,0 +1,22 @@
+# Prometheus scrape config for the Dice observability stack (just metrics-up).
+# Targets are on the HOST (the gateway/monolith and split-mode bins run via
+# `cargo run`, not in Docker), reached through host.docker.internal. The app
+# must bind its admin port on 0.0.0.0 (not 127.0.0.1) to be reachable here.
+#
+# `node` is a target label distinct from the metrics' own `service` label
+# (dice_rpc_request_seconds carries service=auth|chat|presence already).
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+
+scrape_configs:
+  - job_name: dice
+    static_configs:
+      - targets: ["host.docker.internal:9600"]
+        labels: { node: gateway }
+      - targets: ["host.docker.internal:9601"]
+        labels: { node: auth }
+      - targets: ["host.docker.internal:9602"]
+        labels: { node: chat }
+      - targets: ["host.docker.internal:9603"]
+        labels: { node: presence }

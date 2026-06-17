@@ -1,0 +1,34 @@
+# Opt-in observability stack: Prometheus + Grafana scraping the Dice
+# gateway/service /metrics ports on the host. Bring up with `just metrics-up`
+# (separate from `just infra-up` — not needed for the dev loop). Run the app
+# (`just run-full` or `just split-up`) so there are live targets, then open
+# Grafana at http://localhost:3000 — anonymous admin, the "Dice" dashboard is
+# provisioned. Stop with `just metrics-down`.
+name: dice-observability
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    # Host ports overridable (DICE_PROMETHEUS_PORT / DICE_GRAFANA_PORT) for when
+    # 9090/3000 are already taken on the dev box.
+    ports: ["${DICE_PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # Make host.docker.internal resolve on Linux too (Docker Desktop sets it
+    # automatically; this is a harmless no-op there).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports: ["${DICE_GRAFANA_PORT:-3000}:3000"]
+    environment:
+      # Demo-friendly: open the dashboard with no login.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: "dark"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]

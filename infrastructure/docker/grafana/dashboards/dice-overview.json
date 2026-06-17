@@ -1,0 +1,104 @@
+{
+  "uid": "dice-overview",
+  "title": "Dice — Gateway & Services",
+  "tags": ["dice"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Gateway connections (by transport)",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "dice_gateway_connections", "legendFormat": "{{transport}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Gateway frames/sec (by dir, class)",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "sum by (dir, class) (rate(dice_gateway_frames_total[1m]))", "legendFormat": "{{dir}} {{class}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "RPC latency p99 (s) — service/method",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "dice_rpc_request_seconds{quantile=\"0.99\"}", "legendFormat": "{{service}}/{{method}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "RPC latency p50 (s) — service/method",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "dice_rpc_request_seconds{quantile=\"0.5\"}", "legendFormat": "{{service}}/{{method}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Chat messages/sec",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "sum(rate(dice_chat_messages_total[1m]))", "legendFormat": "messages/s" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Gateway closes/sec (by code)",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "sum by (code) (rate(dice_gateway_closes_total[1m]))", "legendFormat": "code {{code}}" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "DB pool — open vs idle (by node)",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "dice_db_pool_connections", "legendFormat": "{{node}} open" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "dice_db_pool_idle_connections", "legendFormat": "{{node}} idle" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Bus dropped events (total)",
+      "datasource": { "type": "prometheus", "uid": "dice-prom" },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "dice-prom" }, "expr": "sum(dice_bus_dropped_events_total)", "legendFormat": "dropped" }
+      ]
+    }
+  ]
+}
