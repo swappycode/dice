@@ -133,8 +133,18 @@ where
         let req = msg.payload.to_vec();
         let client = client.clone();
         let handler = Arc::clone(&handler);
+        let service_label = service.to_owned();
         tokio::spawn(async move {
-            let payload = match handler(method, req).await {
+            let method_label = method.clone();
+            let started = std::time::Instant::now();
+            let result = handler(method, req).await;
+            dice_metrics::histogram!(
+                "dice_rpc_request_seconds",
+                "service" => service_label,
+                "method" => method_label
+            )
+            .record(started.elapsed().as_secs_f64());
+            let payload = match result {
                 Ok(resp) => encode_ok(resp),
                 Err(fault) => encode_err(&fault),
             };
