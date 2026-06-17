@@ -7,6 +7,48 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-18 - M4 (8/n): Scaling - cross-node resume phase 0 (session directory)
+
+**M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. `just check` green
++ the desktop-client workspace gate (host_gate harness touched).
+
+**What + why.** First slice of multi-node gateway resume (ADR-0007;
+docs/design/cross-node-resume.md). Resume stays node-local; this adds the routing
+substrate so a reconnect that lands on a different gateway node can be told which
+node still owns the detached session, within the resume window, without moving any
+replay state. The hard part - the per-node seq model - is deliberately out of scope;
+phase 0 relies on sticky-LB affinity routing the reconnect back to the owner, where
+resume already works.
+- **dice-common**: `SnowflakeGenerator::node_id()` accessor (the gateway's self
+  identity).
+- **dice-cache**: `SessionDirectory` over the shared `Cache` -
+  `resume:owner:{session_id}` -> owning `u16` node id, TTL = resume window
+  (record/owner/clear). Genuine cross-node only with Redis; in-memory = per-process
+  (harmless). Proven by a live-Redis cross-instance test (two directories on one
+  Redis stand in for two nodes).
+- **api-gateway**: `GatewayDeps` gains `cache`; the gateway holds a `SessionDirectory`
+  + its `node_id`. `detached_wait` records ownership on entry (ttl = resume_window)
+  and clears on every exit; a `Resume` that misses the local registry consults the
+  directory and emits `dice_gateway_resume_total{outcome=resumed|cross_node|gone}` +
+  (for cross_node) an info log and a clearer INVALID_SESSION message. The `cache`
+  field rippled to the 5 GatewayDeps construction sites (monolith + 4 harnesses).
+
+**Verified.** dice-cache unit + live-Redis cross-instance directory tests; single-node
+resume unchanged (gateway resume/session + client_e2e resume tests pass); `just check`
+green + desktop-client clippy/test.
+
+**Deferred (in the design).** Phase 0b = a machine-actionable redirect frame (needs a
+proto + client change + per-node advertised address). Phase 1+ = durable session
+identity then hand-off / shared replay (must preserve seq monotonicity). If the owning
+node dies mid-window the session falls back to REST backfill (accepted for phase 0).
+
+**NEXT.** M4 scaling architecture is complete to its single-box-verifiable extent:
+outbox (6/n), resume seam (7/n), cross-node resume phase 0 (8/n). Remaining = phase
+0b/1+ cross-node resume (own slice, gated by ADR-0007) + the deferred Ready.users[]
+trim; the 100k-conn gate needs real HW. Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-18 - M4 (7/n): Scaling - resume seam extracted (ADR-0001 traits)
 
 **M4 theme = Scaling.** Branch `main`. Two commits (refactor + docs), pushed.
