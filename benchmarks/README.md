@@ -56,6 +56,15 @@ keeping pace with `sent`.
 loadgen and the gateway run on the **same** Linux box (the dev cert only has
 `localhost`/`127.0.0.1`/`::1` SANs, so dial loopback).
 
+**One-shot (hand it to anyone with a Linux/WSL2 box):**
+```bash
+git clone <repo> && cd <repo>
+bash benchmarks/loadgen/run-bench.sh 50000 2000 90      # CONNS RATE HOLD
+```
+`run-bench.sh` bootstraps Rust, brings up Postgres (Docker), builds release, runs
+the tuned gateway + loadgen together, samples peak connections + gateway RSS, and
+prints a report. The manual steps below are the same thing, broken out.
+
 **1. Boot the gateway once** (generates `dev/certs` + `dev/keys`), then with tuning:
 
 ```bash
