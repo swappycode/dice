@@ -7,6 +7,30 @@ The headline M4 (scaling) gate: **100k concurrent connections** on one gateway.
 > batching, so numbers there are meaningless. Windows is fine for *correctness*
 > smokes (connections reach Ready + heartbeat); run the real gate on Linux.
 
+## Results
+
+Ubuntu 22.04 (WSL2), gateway + loadgen co-located, QUIC over loopback, dev-lite
+(Postgres only). Gateway tuned with `DICE_QUIC_RECV_WINDOW=262144
+DICE_QUIC_DATAGRAMS=false DICE_QUIC_SO_RCVBUF/SNDBUF=32 MiB` (effective 64 MiB
+after `net.core.rmem_max=64 MiB`); each connection held with 30 s heartbeats.
+
+| Connections | Ramp | Gateway RSS | KB/conn (incl. base) | connect p99 | hb-RTT p99 | connect-fail | closes |
+|---|---|---|---|---|---|---|---|
+| **30,000** | 500/s | **1.71 GB** | **58** | 200 ms | 100 ms | **0** | none |
+| 5,537\* | 2000/s | 665 MB | 120 | 2 s | 10 s | 22,249\* | none |
+
+\* The 2000/s run saturated the accept path *before* `net.core.rmem_max` was
+raised (the 32 MiB `SO_RCVBUF` was kernel-clamped → dropped handshake packets);
+kept only to bracket the memory curve.
+
+**Per-connection memory.** The two points fit `RSS ≈ 429 MB base + ~44 KB/conn`,
+so one gateway node extrapolates to **~4.7 GB at 100k connections** — well within
+a commodity server. At 30k it sheds nothing (`dice_gateway_closes_total` empty)
+and heartbeat RTT stays ~1 ms (p50). The only blocker to a *literal* 100k on a
+single WSL2 box is RAM (the gateway **and** the load generator share it); the
+per-connection cost itself is comfortable.
+
+
 ## What `dice-loadgen` does
 
 Opens N concurrent **QUIC** (or **WSS**) connections to a running gateway, drives
