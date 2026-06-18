@@ -1,5 +1,8 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 set dotenv-load := true
+# Lets the same recipe name have [windows] + [unix] variants (the OS attributes
+# pick which one is active), so the run/bench recipes work on Windows AND in WSL.
+set allow-duplicate-recipes := true
 
 default:
     @just --list
@@ -55,22 +58,48 @@ gate-aws-lc:
 
 # ---------- benchmark (100k-connection load gen) ----------
 
-# Local loadgen smoke against a running gateway (Windows dev box). Start the
-# gateway first (`just dev` or `just run-full`). NOTE: Windows has no quinn UDP
-# GSO, so this validates CORRECTNESS (connections reach Ready + heartbeat), NOT
-# throughput. The real 100k run is on Linux — see benchmarks/README.md and
-# benchmarks/loadgen/bench.sh. Positional args (just is positional): conns,
-# transport (quic|wss), hold seconds — e.g. `just bench 1000 quic 30`.
+# Terminal 1: the gateway tuned for the benchmark — dev-lite (Postgres only),
+# RELEASE build, /metrics on 0.0.0.0:9600. Prefix DICE_QUIC_* to tune, e.g.
+# (WSL/Linux)  DICE_QUIC_RECV_WINDOW=262144 DICE_QUIC_DATAGRAMS=false just bench-server
+# See .env.example "QUIC server tuning" + benchmarks/README.md. Needs DATABASE_URL
+# (in .env; `cp .env.example .env`) and `just infra-up` for Postgres.
+[unix]
+bench-server:
+    DICE_PROFILE=dev-lite DICE_ADMIN_ADDR=0.0.0.0:9600 cargo run --release -p dice-monolith
+
+[windows]
+bench-server:
+    $env:DICE_PROFILE = "dev-lite"; $env:DICE_ADMIN_ADDR = "0.0.0.0:9600"; cargo run --release -p dice-monolith
+
+# Terminal 2: the load generator (run `just bench-server` first). Positional args
+# (just is positional): conns, transport (quic|wss), hold seconds —
+# e.g. `just bench 100000 quic 120`. On WSL/Linux this is the REAL run (release +
+# UDP GSO); on the Windows host it's a debug correctness smoke only (no GSO).
+[unix]
+bench conns="1000" transport="quic" hold="30":
+    DICE_LOADGEN_CONNS={{conns}} DICE_LOADGEN_TRANSPORT={{transport}} DICE_LOADGEN_HOLD_SECS={{hold}} DICE_LOADGEN_CA="$PWD/dev/certs/dev-ca.pem" cargo run --release -p dice-loadgen
+
+[windows]
 bench conns="1000" transport="quic" hold="30":
     $env:DICE_LOADGEN_CONNS = "{{conns}}"; $env:DICE_LOADGEN_TRANSPORT = "{{transport}}"; $env:DICE_LOADGEN_HOLD_SECS = "{{hold}}"; $env:DICE_LOADGEN_CA = "$PWD/dev/certs/dev-ca.pem"; cargo run -p dice-loadgen
 
 # ---------- run ----------
 
 # Fast iteration: monolith with in-proc bus + memory cache; docker Postgres only.
+[unix]
+dev:
+    DICE_PROFILE=dev-lite cargo run -p dice-monolith
+
+[windows]
 dev:
     $env:DICE_PROFILE = "dev-lite"; cargo run -p dice-monolith
 
 # Monolith against the full docker infra (Postgres + Redis + NATS).
+[unix]
+run-full:
+    DICE_PROFILE=full cargo run -p dice-monolith
+
+[windows]
 run-full:
     $env:DICE_PROFILE = "full"; cargo run -p dice-monolith
 
