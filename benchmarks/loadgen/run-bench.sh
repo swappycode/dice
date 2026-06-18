@@ -16,7 +16,9 @@
 set -euo pipefail
 
 CONNS="${1:-50000}"
-RATE="${2:-2000}"
+RATE="${2:-500}"   # conns/sec ramp. Keep modest — too fast and the gateway can't
+                   # accept in time and connections time out at connect (raise once
+                   # you see a stable plateau with connect-fail≈0).
 HOLD="${3:-90}"
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -44,6 +46,17 @@ docker compose -f infrastructure/docker/docker-compose.yml up -d --wait
 set -a; . ./.env; set +a
 
 ulimit -n 1048576 2>/dev/null || true  # WSS needs the fds; harmless for QUIC
+
+# Raise the UDP socket-buffer ceiling so the gateway's SO_RCVBUF/SO_SNDBUF request
+# isn't silently clamped (the #1 cause of handshake timeouts at scale). Best-effort:
+# needs root, skip cleanly otherwise.
+if sudo -n true 2>/dev/null; then
+  sudo sysctl -qw net.core.rmem_max=67108864 net.core.wmem_max=67108864 net.core.netdev_max_backlog=16384 || true
+  echo "==> raised net.core.rmem_max/wmem_max to 64 MiB"
+else
+  echo "==> NOTE: run this once as root so SO_RCVBUF isn't clamped (else expect connect timeouts):"
+  echo "         sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864"
+fi
 
 # --- build ---
 echo "==> building release (first run takes a few minutes)"
@@ -99,6 +112,8 @@ if [ "${peak_c:-0}" -gt 0 ]; then
 else
   echo "peak gateway RSS: $((peak_r/1024)) MB"
 fi
+echo "--- gateway UDP socket buffers (a 'clamped' line = raise net.core.rmem_max) ---"
+grep -i 'UDP socket buffer' "$GWLOG" 2>/dev/null || echo "(no socket-buffer log)"
 echo "--- gateway closes by code (4012=hb-timeout 4010=slow-consumer) ---"
 curl -s localhost:9600/metrics 2>/dev/null | grep '^dice_gateway_closes_total' || echo "(none — good)"
 echo "--- loadgen final line ---"
