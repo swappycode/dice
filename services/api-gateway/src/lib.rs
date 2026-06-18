@@ -123,6 +123,12 @@ impl Started {
 /// Budget for the post-shutdown drain (docs/design §9: 10 s).
 const DRAIN_DEADLINE: Duration = Duration::from_secs(10);
 
+/// Bound on concurrent in-flight QUIC handshakes (TLS + the 5 s control-stream
+/// wait). Establishment runs off the accept loop so a slow peer can't block new
+/// accepts; this caps the number of simultaneously-establishing connections so a
+/// connect flood can't spawn unbounded tasks. Established sessions don't count.
+const MAX_INFLIGHT_HANDSHAKES: usize = 1024;
+
 /// Bind both listeners and start serving. Returns once the sockets are live;
 /// the gateway then runs until `ct` is cancelled (see [`Started::wait`]).
 pub async fn start(
@@ -185,14 +191,26 @@ pub async fn start(
         });
     }
 
-    // QUIC accept loop: every established control stream becomes a session.
+    // QUIC accept loop: accept is non-blocking — each connection's TLS handshake
+    // + 5 s control-stream wait runs in its OWN task (bounded by a semaphore) so a
+    // slow/stalled peer can't head-of-line-block new accepts, and establishment
+    // throughput isn't serialized at the 100k ramp. The session itself does not
+    // hold a handshake permit.
     {
         let gw = Arc::clone(&gw);
+        let establishing = Arc::new(tokio::sync::Semaphore::new(MAX_INFLIGHT_HANDSHAKES));
         tracker.spawn(async move {
-            while let Some(transport) = acceptor.accept(&gw.ct).await {
+            while let Some(incoming) = acceptor.accept_incoming(&gw.ct).await {
+                let Ok(permit) = Arc::clone(&establishing).acquire_owned().await else {
+                    break; // semaphore closed (never, here) — stop accepting
+                };
                 let session_gw = Arc::clone(&gw);
-                gw.tracker
-                    .spawn(session::drive_connection(session_gw, Box::new(transport)));
+                gw.tracker.spawn(async move {
+                    if let Some(transport) = QuicAcceptor::establish(incoming).await {
+                        drop(permit); // release before the long-lived session
+                        session::drive_connection(session_gw, Box::new(transport)).await;
+                    }
+                });
             }
         });
     }

@@ -196,7 +196,7 @@ fn parse_flag_default(key: &'static str, default: bool) -> bool {
 /// the 100k benchmark overrides them (see `.env.example` + the bench runbook).
 fn parse_quic_tuning() -> Result<QuicServerTuning, ConfigError> {
     let d = QuicServerTuning::default();
-    Ok(QuicServerTuning {
+    let quic = QuicServerTuning {
         stream_receive_window: env_or("DICE_QUIC_STREAM_RECV_WINDOW", d.stream_receive_window)?,
         receive_window: env_or("DICE_QUIC_RECV_WINDOW", d.receive_window)?,
         max_idle_timeout_ms: env_or("DICE_QUIC_MAX_IDLE_MS", d.max_idle_timeout_ms)?,
@@ -208,7 +208,27 @@ fn parse_quic_tuning() -> Result<QuicServerTuning, ConfigError> {
         datagrams: parse_flag_default("DICE_QUIC_DATAGRAMS", d.datagrams),
         socket_send_buffer: env_opt_parse("DICE_QUIC_SO_SNDBUF")?,
         socket_recv_buffer: env_opt_parse("DICE_QUIC_SO_RCVBUF")?,
-    })
+    };
+    // Reject footgun zeros: a 0 flow-control window stalls all stream data, and
+    // DICE_QUIC_MAX_IDLE_MS=0 means "idle timeout DISABLED" (RFC 9000) — never
+    // what the benchmark wants, and impossible to spot from the gateway side.
+    for (key, value) in [
+        ("DICE_QUIC_RECV_WINDOW", u64::from(quic.receive_window)),
+        (
+            "DICE_QUIC_STREAM_RECV_WINDOW",
+            u64::from(quic.stream_receive_window),
+        ),
+        ("DICE_QUIC_MAX_IDLE_MS", u64::from(quic.max_idle_timeout_ms)),
+    ] {
+        if value == 0 {
+            return Err(ConfigError::Invalid {
+                key,
+                value: "0".to_owned(),
+                reason: "must be greater than 0".to_owned(),
+            });
+        }
+    }
+    Ok(quic)
 }
 
 /// Truthy-env flag: set + non-empty + not an explicit off value enables it.

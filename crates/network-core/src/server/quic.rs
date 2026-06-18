@@ -64,11 +64,17 @@ impl QuicAcceptor {
         use socket2::{Domain, Protocol, Socket, Type};
         let socket = Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
         // Set buffer sizes BEFORE bind (the kernel applies them at/after bind).
+        // Linux SILENTLY CLAMPS SO_RCVBUF/SO_SNDBUF to net.core.{r,w}mem_max — the
+        // setsockopt succeeds but the effective buffer can be far smaller. Read it
+        // back and warn so the operator knows to raise the sysctl, instead of
+        // chasing phantom packet loss at 100k.
         if let Some(n) = recv_buffer {
             socket.set_recv_buffer_size(n)?;
+            log_socket_buffer("SO_RCVBUF", n, socket.recv_buffer_size());
         }
         if let Some(n) = send_buffer {
             socket.set_send_buffer_size(n)?;
+            log_socket_buffer("SO_SNDBUF", n, socket.send_buffer_size());
         }
         socket.set_nonblocking(true)?; // quinn/tokio require a non-blocking socket
         socket.bind(&addr.into())?;
@@ -92,15 +98,17 @@ impl QuicAcceptor {
     /// for the client's control stream. Connections that fail along the way
     /// are dropped and the loop continues. Returns `None` once `ct` is
     /// cancelled or the endpoint is closed.
+    ///
+    /// NOTE: this serializes establishment (the handshake + 5 s control-stream
+    /// wait run inline). The gateway instead uses [`Self::accept_incoming`] +
+    /// [`Self::establish`] so a slow peer can't block new accepts at scale; this
+    /// method is kept for tests and simple callers.
     pub async fn accept(&self, ct: &CancellationToken) -> Option<QuicTransport> {
         loop {
-            let incoming = tokio::select! {
-                () = ct.cancelled() => return None,
-                incoming = self.endpoint.accept() => incoming?,
-            };
+            let incoming = self.accept_incoming(ct).await?;
             let established = tokio::select! {
                 () = ct.cancelled() => return None,
-                res = Self::establish(incoming) => res,
+                res = Self::establish_inner(incoming) => res,
             };
             match established {
                 Ok(transport) => return Some(transport),
@@ -111,7 +119,32 @@ impl QuicAcceptor {
         }
     }
 
-    async fn establish(incoming: quinn::Incoming) -> Result<QuicTransport, EstablishError> {
+    /// Accept the next INCOMING connection without driving its handshake — returns
+    /// as soon as a connection arrives (or `None` on cancel / endpoint close). The
+    /// caller spawns [`Self::establish`] per incoming so establishment runs
+    /// concurrently and one slow/stalled peer never head-of-line-blocks the accept
+    /// loop (the 5 s control-stream wait would otherwise stall all new accepts).
+    pub async fn accept_incoming(&self, ct: &CancellationToken) -> Option<quinn::Incoming> {
+        tokio::select! {
+            () = ct.cancelled() => None,
+            incoming = self.endpoint.accept() => incoming,
+        }
+    }
+
+    /// Drive one accepted connection to a ready transport: complete the handshake
+    /// and wait (up to 5 s) for the client's control stream. Returns `None`
+    /// (logging at debug) on any failure. Safe to run in its own task.
+    pub async fn establish(incoming: quinn::Incoming) -> Option<QuicTransport> {
+        match Self::establish_inner(incoming).await {
+            Ok(transport) => Some(transport),
+            Err(err) => {
+                tracing::debug!(error = %err, "QUIC connection failed before control stream");
+                None
+            }
+        }
+    }
+
+    async fn establish_inner(incoming: quinn::Incoming) -> Result<QuicTransport, EstablishError> {
         let conn = incoming.await?;
         let bi = tokio::time::timeout(CONTROL_STREAM_DEADLINE, conn.accept_bi()).await;
         let (send, recv) = match bi {
@@ -135,6 +168,35 @@ impl QuicAcceptor {
             scratch: vec![0u8; READ_CHUNK].into_boxed_slice(),
             remote,
         })
+    }
+}
+
+/// Log the requested vs kernel-effective UDP socket buffer size. Linux reports
+/// roughly 2× the requested value when it honored the request (kernel
+/// bookkeeping) and silently clamps to `net.core.{r,w}mem_max` otherwise, so an
+/// effective size BELOW the request means the sysctl ceiling is too low.
+fn log_socket_buffer(name: &str, requested: usize, effective: std::io::Result<usize>) {
+    match effective {
+        Ok(eff) if eff < requested => tracing::warn!(
+            socket_opt = name,
+            requested,
+            effective = eff,
+            "UDP socket buffer clamped by the kernel — raise net.core.rmem_max/wmem_max"
+        ),
+        Ok(eff) => {
+            tracing::info!(
+                socket_opt = name,
+                requested,
+                effective = eff,
+                "UDP socket buffer set"
+            )
+        }
+        Err(err) => tracing::warn!(
+            socket_opt = name,
+            requested,
+            error = %err,
+            "could not read back UDP socket buffer"
+        ),
     }
 }
 
