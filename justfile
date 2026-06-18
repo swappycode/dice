@@ -53,6 +53,17 @@ check:
 gate-aws-lc:
     $out = cargo tree -i aws-lc-sys 2>&1 | Out-String; if ($out -notmatch 'nothing to print|did not match any packages|error: package ID specification') { Write-Error "aws-lc-sys found in dependency tree!`n$out" } else { Write-Host "aws-lc-sys gate: clean" }
 
+# ---------- benchmark (100k-connection load gen) ----------
+
+# Local loadgen smoke against a running gateway (Windows dev box). Start the
+# gateway first (`just dev` or `just run-full`). NOTE: Windows has no quinn UDP
+# GSO, so this validates CORRECTNESS (connections reach Ready + heartbeat), NOT
+# throughput. The real 100k run is on Linux — see benchmarks/README.md and
+# benchmarks/loadgen/bench.sh. Positional args (just is positional): conns,
+# transport (quic|wss), hold seconds — e.g. `just bench 1000 quic 30`.
+bench conns="1000" transport="quic" hold="30":
+    $env:DICE_LOADGEN_CONNS = "{{conns}}"; $env:DICE_LOADGEN_TRANSPORT = "{{transport}}"; $env:DICE_LOADGEN_HOLD_SECS = "{{hold}}"; $env:DICE_LOADGEN_CA = "$PWD/dev/certs/dev-ca.pem"; cargo run -p dice-loadgen
+
 # ---------- run ----------
 
 # Fast iteration: monolith with in-proc bus + memory cache; docker Postgres only.
