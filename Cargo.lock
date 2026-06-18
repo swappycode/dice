@@ -638,6 +638,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dice-loadgen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "dice-auth-core",
+ "dice-common",
+ "dice-logging",
+ "dice-network-core",
+ "dice-protocol",
+ "futures-util",
+ "quinn",
+ "rustls",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "dice-logging"
 version = "0.1.0"
 dependencies = [

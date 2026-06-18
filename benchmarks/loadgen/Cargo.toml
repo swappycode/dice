@@ -1,0 +1,36 @@
+[package]
+name = "dice-loadgen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# A benchmark tool, never published or shipped in a release artifact.
+publish = false
+
+[[bin]]
+name = "dice-loadgen"
+path = "src/main.rs"
+
+[dependencies]
+# Network surface: TlsOptions (dev-CA trust) + the QUIC client config builder.
+# The `client` feature is part of the crate's default set (feature-unified with
+# the gateway in a workspace build regardless), so inherit the default.
+dice-network-core = { workspace = true }
+dice-protocol     = { workspace = true }
+dice-auth-core    = { workspace = true }
+dice-common       = { workspace = true }
+dice-logging      = { workspace = true }
+
+quinn        = { workspace = true }
+rustls       = { workspace = true }
+bytes        = { workspace = true }
+futures-util = { workspace = true }
+tokio        = { workspace = true }
+tokio-util   = { workspace = true }
+# WSS variant: same ring-only rustls stack the rest of the workspace pins.
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+anyhow  = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -20,6 +20,7 @@ members = [
   "services/presence-service",
   "services/voice-service",
   "services/monolith",
+  "benchmarks/loadgen",
 ]
 # services/* is deliberately NOT a glob: placeholder dirs (voice/search) hold
 # only a README and must not be parsed as packages. Do not "tidy" this.
