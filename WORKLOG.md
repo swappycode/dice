@@ -10,9 +10,10 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 ## 2026-06-18 - M4 (10/n): Scaling - 100k loadgen harness + QUIC server tuning + runbook
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed (`8b2f041` loadgen /
-`715c172` gateway tuning / `f7fcdb9` bench docs). Gates green: `just check` + host
-clippy + host_gate. Fulfils the PLAN below - the client half of the 100k collaboration
-loop is built; the user runs the throughput gate on Linux.
+`715c172` gateway tuning / `f7fcdb9` bench docs / `33e5a00` gateway hardening /
+`fde5851` loadgen hardening). Gates green: `just check` + host clippy + host_gate.
+Fulfils the PLAN below - the client half of the 100k collaboration loop is built; the
+user runs the throughput gate on Linux.
 
 **What + why.** Everything needed to drive + tune the headline 100k-conn gate, deferred
 all milestone because this Windows box lacks quinn UDP GSO. Assistant codes the harness +
@@ -55,15 +56,27 @@ DICE_HEARTBEAT_MS=5000 binds via bind_tuned and serves 50 QUIC conns with the 5 
 honoured from Hello. `just bench 200 quic 6` -> 200/200. `just check` + host clippy +
 host_gate (2/2) all green.
 
+**Adversarial review hardening** (17-agent review workflow -> 12 confirmed findings, fixed
+in `33e5a00` + `fde5851`). Highest-value: the gateway's QUIC accept loop awaited
+establish() (TLS handshake + 5 s control-stream wait) INLINE, serializing accept
+throughput AND letting one slow peer block all new accepts for 5 s -> split into
+`accept_incoming` + a spawned `establish` bounded by a 1024 semaphore (the serial-accept
+lever, now landed, not deferred). `bind_tuned` reads back SO_RCVBUF/SO_SNDBUF + warns on
+kernel clamp. parse_quic_tuning rejects 0 windows / idle-ms. loadgen: heartbeat jitter
+(first beat random phase in [0,interval) - was lock-step, would have distorted the metrics),
+biased drain select, shutdown-aware handshake/connect, endpoint.wait_idle() drain, QUIC
+idle-timeout/reset report buckets, attempt-count + report-secs clamp fixes. Re-verified by
+a 300-conn smoke (heartbeat ramp visibly spread by the jitter; clean drain to live=0).
+
 **NEXT - the user runs the 100k gate on Linux (collaboration loop).** Boot the gateway with
 DICE_QUIC_* tuning + DICE_ADMIN_ADDR=0.0.0.0:9600; apply the OS tuning; run
 `benchmarks/loadgen/bench.sh` (ramp toward 100k); report `dice_gateway_connections{transport}`
 (target ~100k sustained), `dice_gateway_closes_total{code}`, frame p99, and gateway RSS/CPU.
 Assistant tunes (RECV_WINDOW for RSS, SO_* buffers / rate for connect-fail, heartbeat for
-keep-alive load). If the serial QUIC accept loop bottlenecks the ramp (establish() is awaited
-inline in network-core `server/quic.rs`), the next lever is spawning per-incoming handshakes.
-*Also still open (own slices):* cross-node resume phase 0b/1+ (ADR-0007). Next free Frame
-dispatch # = 121.
+keep-alive load). The QUIC accept loop is now concurrent (1024-permit bound), so accept
+throughput shouldn't cap the ramp; watch dice_gateway_connections vs the loadgen's
+established count for any remaining server-accept ceiling. *Also still open (own slices):*
+cross-node resume phase 0b/1+ (ADR-0007). Next free Frame dispatch # = 121.
 
 ---
 
