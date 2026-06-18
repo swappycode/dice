@@ -7,6 +7,66 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-18 - M4 (10/n): Scaling - 100k loadgen harness + QUIC server tuning + runbook
+
+**M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed (`8b2f041` loadgen /
+`715c172` gateway tuning / `f7fcdb9` bench docs). Gates green: `just check` + host
+clippy + host_gate. Fulfils the PLAN below - the client half of the 100k collaboration
+loop is built; the user runs the throughput gate on Linux.
+
+**What + why.** Everything needed to drive + tune the headline 100k-conn gate, deferred
+all milestone because this Windows box lacks quinn UDP GSO. Assistant codes the harness +
+server knobs; the user runs on GSO-capable Linux and reports the `dice_*` metrics +
+gateway RSS/CPU; assistant iterates.
+
+- **`dice-loadgen` (new member `benchmarks/loadgen`).** Opens N concurrent QUIC or WSS
+  conns, drives the real Hello->Identify->Ready handshake, holds each with app heartbeats;
+  reports client-side established / connect-fail / handshake-fail / disconnected
+  (close-code breakdown) + connect-latency & heartbeat-RTT percentiles. Ramp-controlled
+  (DICE_LOADGEN_CONNS/RATE). **Identity:** tokens PRE-MINTED OFFLINE from the gateway's
+  dev Ed25519 key (`sign_access`) - the gateway verifies crypto-only at Identify (public
+  key, no DB, no auth hop) and accepts tokens for users absent from Postgres, so zero DB
+  seeding + zero REST/login traffic. **For 100k:** QUIC conns SHARE a pool of
+  quinn::Endpoints (one per core) instead of one-socket-per-conn (what the desktop client's
+  QuicTransport does) - bounds sockets + lets GSO batch; thin hand-rolled frame I/O over the
+  one dice-protocol codec, no per-conn driver tasks. Env-only config (ADR-0002).
+- **QUIC server tuning (env-driven, `DICE_QUIC_*`).** network-core `QuicServerTuning`
+  (Default == protocol §1 values, so unset = unchanged) + `quic_server_config_tuned`; the
+  shared transport-config helper split so the desktop client is untouched.
+  `QuicAcceptor::bind_tuned` builds the UDP socket via socket2 when SO_SNDBUF/SO_RCVBUF are
+  set (quinn::Endpoint::new with a pre-sized socket; GSO stays auto on Linux). Knobs:
+  RECV_WINDOW (4 MiB default - the dominant per-conn memory term), STREAM_RECV_WINDOW,
+  MAX_IDLE_MS, MAX_BIDI/UNI_STREAMS, DATAGRAMS (off saves ~128 KiB/conn), SO_SNDBUF/RCVBUF,
+  + DICE_HEARTBEAT_MS / DICE_RESUME_WINDOW_MS (were protocol consts). Threaded MonolithConfig
+  -> GatewayConfig -> network-core; the `quic` field rippled to the 4 GatewayConfig sites
+  (monolith + 3 harnesses). Documented in the config doc-table + `.env.example`.
+- **Runbook + recipes.** `benchmarks/README.md` (replaces the M5 placeholder): the full
+  100k guide (gateway tuning env, OS tuning, ramp, metrics to report, DICE_LOADGEN_* +
+  DICE_QUIC_* refs) - incl. the QUIC-vs-WSS OS-tuning split (QUIC = memory/CPU-bound, one
+  UDP socket per endpoint -> big `net.core.*mem_max`, NOT fd/port limits; WSS = `ulimit -n`
+  + ephemeral ports). `benchmarks/loadgen/bench.sh` (Linux runner: raises ulimit, prints
+  sysctls, runs release loadgen). `just bench <conns> <transport> <hold>` (Windows smoke).
+
+**Verified (Windows, correctness NOT throughput - no GSO here).** loadgen QUIC (50 conns:
+298 heartbeats sent = 298 acked) + WSS (20 conns: 79 = 79) against a dev-lite monolith -
+all reach Ready, the gateway connection gauge tracks up then back to 0 on clean shutdown. A
+monolith booted with shrunk windows + datagrams off + uni=0 + 4 MiB socket buffers +
+DICE_HEARTBEAT_MS=5000 binds via bind_tuned and serves 50 QUIC conns with the 5 s heartbeat
+honoured from Hello. `just bench 200 quic 6` -> 200/200. `just check` + host clippy +
+host_gate (2/2) all green.
+
+**NEXT - the user runs the 100k gate on Linux (collaboration loop).** Boot the gateway with
+DICE_QUIC_* tuning + DICE_ADMIN_ADDR=0.0.0.0:9600; apply the OS tuning; run
+`benchmarks/loadgen/bench.sh` (ramp toward 100k); report `dice_gateway_connections{transport}`
+(target ~100k sustained), `dice_gateway_closes_total{code}`, frame p99, and gateway RSS/CPU.
+Assistant tunes (RECV_WINDOW for RSS, SO_* buffers / rate for connect-fail, heartbeat for
+keep-alive load). If the serial QUIC accept loop bottlenecks the ramp (establish() is awaited
+inline in network-core `server/quic.rs`), the next lever is spawning per-incoming handshakes.
+*Also still open (own slices):* cross-node resume phase 0b/1+ (ADR-0007). Next free Frame
+dispatch # = 121.
+
+---
+
 ## 2026-06-18 - M4 - PLAN for next session (2026-06-19): the 100k-conn benchmark
 
 The last open M4 item is the headline **100k concurrent-connection** gate, deferred
