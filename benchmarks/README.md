@@ -120,6 +120,70 @@ ps -o rss=,pcpu= -p "$(pgrep -f dice-monolith)"   # RSS in KB
 - **Gateway RSS at 100k** is the key scaling number — divide by 100k for the
   per-connection cost; shrink `DICE_QUIC_RECV_WINDOW` if it's too high.
 
+## Running it in WSL2 (Windows)
+
+WSL2 is the supported way to run the *real* benchmark from a Windows machine — it
+has quinn's UDP GSO, the Windows host doesn't. Everything below runs **inside** WSL
+(`wsl` from a terminal); gateway and loadgen share the box and dial loopback.
+
+**One-time setup:**
+
+```bash
+# Rust + build deps
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+. "$HOME/.cargo/env"
+sudo apt update && sudo apt install -y build-essential pkg-config
+
+# just (apt's package is too old on Ubuntu 22.04)
+cargo install just
+```
+
+For Postgres, enable **Docker Desktop → Settings → Resources → WSL Integration**
+for your distro (then `docker info` works inside WSL), or install native Postgres
+and match `DATABASE_URL` (`...@localhost:5433/dice` — note **port 5433**).
+
+**Clone into WSL's native filesystem**, *not* `/mnt/d` — building on the Windows
+mount is slow and fights the Windows `target/` dir:
+
+```bash
+git clone <repo> ~/dice && cd ~/dice
+cp .env.example .env
+just infra-up        # Postgres/Redis/NATS; for only Postgres (saves RAM):
+                     #   docker compose -f infrastructure/docker/docker-compose.yml up -d --wait postgres
+```
+
+**Three terminals**, all in `~/dice`. This is the `just`-recipe form of the manual
+run above — knob meanings are in *The 100k run (Linux)*, step 1, and the OS buffer
+sysctls from step 2 apply here too (WSL2 is a real kernel):
+
+```bash
+# Terminal 1 — gateway. `just bench-server` already sets dev-lite + admin :9600;
+# prefix only the tuning. First --release build takes a few minutes.
+DICE_QUIC_RECV_WINDOW=262144 DICE_QUIC_STREAM_RECV_WINDOW=131072 \
+DICE_QUIC_MAX_UNI_STREAMS=0 DICE_QUIC_DATAGRAMS=false \
+DICE_QUIC_SO_RCVBUF=33554432 DICE_QUIC_SO_SNDBUF=33554432 \
+DICE_HEARTBEAT_MS=30000 just bench-server
+#   wait for: bound_quic=0.0.0.0:8444
+
+# Terminal 2 — loadgen (positional: conns transport hold). Trial, confirm fail=0, ramp:
+just bench 5000 quic 30        # expect live ≈ 5000, fail = 0
+just bench 30000 quic 60
+
+# Terminal 3 — watch (see The 100k run, step 4 for how to read these)
+watch -n2 'curl -s localhost:9600/metrics | grep -E "^dice_gateway_(connections|closes_total)"; ps -o rss=,pcpu= -p $(pgrep -f dice-monolith)'
+```
+
+> **Memory ceiling.** gateway + loadgen + Postgres are memory-bound; a ~7–8 GB WSL
+> tops out around **30k–50k** connections — plenty to read per-conn RSS off
+> `/metrics` and prove the curve is linear (it extrapolates to 100k). To actually
+> reach 100k, give WSL more RAM via `C:\Users\<you>\.wslconfig` on the Windows side:
+> ```ini
+> [wsl2]
+> memory=12GB
+> ```
+> then `wsl --shutdown` from Windows PowerShell and reopen WSL (worth it only if the
+> host has ≥ 16 GB).
+
 ## `DICE_LOADGEN_*` reference
 
 | Variable | Default | Meaning |
