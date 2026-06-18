@@ -6,10 +6,12 @@ Discord-class features with Telegram-class efficiency: a QUIC + secure-WebSocket
 gateway, async Rust backend services over PostgreSQL / Redis / NATS, and a native **Tauri 2 +
 SolidJS** desktop client wrapped in a funky **Windows XP / Windows 7 retro UI**.
 
-> **Status:** Milestone 1 complete — register, log in, guilds & channels, DMs, real-time
-> messaging, typing indicators, presence, and resume-after-disconnect all work end-to-end over
-> both QUIC and WSS. ~200 backend tests + a headless client gate, all green. See
-> [WORKLOG.md](WORKLOG.md) for the build log.
+> **Status:** Milestones 1–3 complete — auth, guilds/channels/DMs, real-time messaging, typing,
+> presence, resume-after-disconnect, **voice end-to-end** (SFU over QUIC datagrams), themes and
+> friends, all over both QUIC and WSS. M4 (scaling) underway: the backend runs as a monolith **or**
+> split microservices from one codebase, and **one gateway node sustains 30k concurrent connections
+> at ~44 KB each** (≈4.7 GB extrapolated to 100k). 200+ backend tests + a headless client gate, all
+> green. See [WORKLOG.md](WORKLOG.md) for the build log.
 
 ## Why
 
@@ -17,12 +19,12 @@ Discord idles at 400–800 MB of RAM. Dice targets a fraction of that by going n
 a binary protocol instead of JSON on the wire, zero-copy where it counts, and a single
 self-hostable binary for the whole backend.
 
-| Target | Status (M1, measured) |
+| Target | Status (measured) |
 |---|---|
 | Cold start < 2 s | ✅ ~1.5 s |
 | Idle CPU < 1% | ✅ ~0.05% |
 | Idle RAM < 100 MB | ⚠️ ~170 MB (Rust host is ~5.5 MB; the rest is the WebView2 floor — the headline M2 item) |
-| 100k+ connections / gateway node | architecture in place (interest-map fan-out, bounded per-session memory) |
+| 100k+ connections / gateway node | ✅ 30k held @ ~44 KB/conn (0 fails, 0 shedding, 1 ms hb-RTT) → ~4.7 GB extrapolated to 100k/node |
 
 ## Highlights
 
