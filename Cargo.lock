@@ -650,6 +650,7 @@ dependencies = [
  "dice-protocol",
  "futures-util",
  "quinn",
+ "rand 0.9.4",
  "rustls",
  "tokio",
  "tokio-tungstenite",

@@ -137,8 +137,17 @@ impl Rx {
     }
 }
 
+/// Synthetic close codes for QUIC connection-level errors that carry NO
+/// application close code — so the report can tell a transport idle-timeout or
+/// reset (often "the loadgen couldn't heartbeat fast enough") apart from a
+/// gateway-sent application close like 4012 HEARTBEAT_TIMEOUT. Chosen below the
+/// 1000+ WS/QUIC close-code range so they never collide.
+pub const QUIC_TIMED_OUT: u32 = 1;
+pub const QUIC_RESET: u32 = 2;
+
 /// The QUIC application close code, if the peer closed with one. quinn's
-/// implicit drop-close (code 0) and a clean local close read as `None`.
+/// implicit drop-close (code 0) and a clean local close read as `None`; a
+/// transport idle-timeout / reset map to the synthetic codes above.
 fn quic_close_code(err: &quinn::ReadError) -> Option<u32> {
     use quinn::{ConnectionError, ReadError};
     match err {
@@ -148,6 +157,8 @@ fn quic_close_code(err: &quinn::ReadError) -> Option<u32> {
                 code => u32::try_from(code).ok(),
             }
         }
+        ReadError::ConnectionLost(ConnectionError::TimedOut) => Some(QUIC_TIMED_OUT),
+        ReadError::ConnectionLost(ConnectionError::Reset) => Some(QUIC_RESET),
         _ => None,
     }
 }

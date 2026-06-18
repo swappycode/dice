@@ -113,8 +113,11 @@ impl LoadgenConfig {
                 .context("DICE_LOADGEN_HEARTBEAT_MS")?,
             capabilities: env_or("DICE_LOADGEN_CAPABILITIES", 0u64)
                 .context("DICE_LOADGEN_CAPABILITIES")?,
+            // .max(1): tokio::time::interval panics on a zero period.
             report: Duration::from_secs(
-                env_or("DICE_LOADGEN_REPORT_SECS", 5u64).context("DICE_LOADGEN_REPORT_SECS")?,
+                env_or("DICE_LOADGEN_REPORT_SECS", 5u64)
+                    .context("DICE_LOADGEN_REPORT_SECS")?
+                    .max(1),
             ),
             connect_timeout: Duration::from_millis(
                 env_or("DICE_LOADGEN_CONNECT_TIMEOUT_MS", 10_000u64)

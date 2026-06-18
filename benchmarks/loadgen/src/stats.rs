@@ -82,6 +82,8 @@ pub struct Stats {
     closed_slow_consumer: AtomicU64,     // 4010
     closed_going_away: AtomicU64,        // 4011
     closed_unauthenticated: AtomicU64,   // 4001
+    closed_quic_timed_out: AtomicU64,    // transport idle timeout (synthetic)
+    closed_quic_reset: AtomicU64,        // transport reset (synthetic)
     closed_other: AtomicU64,
     connect_ms: Histogram,
     rtt_ms: Histogram,
@@ -102,6 +104,8 @@ impl Stats {
             closed_slow_consumer: AtomicU64::new(0),
             closed_going_away: AtomicU64::new(0),
             closed_unauthenticated: AtomicU64::new(0),
+            closed_quic_timed_out: AtomicU64::new(0),
+            closed_quic_reset: AtomicU64::new(0),
             closed_other: AtomicU64::new(0),
             connect_ms: Histogram::new(),
             rtt_ms: Histogram::new(),
@@ -141,6 +145,8 @@ impl Stats {
             Some(4010) => &self.closed_slow_consumer,
             Some(4011) => &self.closed_going_away,
             Some(4001) => &self.closed_unauthenticated,
+            Some(crate::transport::QUIC_TIMED_OUT) => &self.closed_quic_timed_out,
+            Some(crate::transport::QUIC_RESET) => &self.closed_quic_reset,
             _ => &self.closed_other,
         };
         bucket.fetch_add(1, Ordering::Relaxed);
@@ -181,6 +187,8 @@ impl Stats {
             ("slow_consumer(4010)", &self.closed_slow_consumer),
             ("going_away(4011)", &self.closed_going_away),
             ("unauth(4001)", &self.closed_unauthenticated),
+            ("quic_idle_timeout", &self.closed_quic_timed_out),
+            ("quic_reset", &self.closed_quic_reset),
             ("other", &self.closed_other),
         ];
         parts

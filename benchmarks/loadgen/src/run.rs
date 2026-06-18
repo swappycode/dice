@@ -53,6 +53,10 @@ pub async fn run(cfg: LoadgenConfig) -> anyhow::Result<()> {
     };
     let properties = client_properties();
 
+    // Kept for the drain: quinn::Connection::close() only ENQUEUES the close, so
+    // on shutdown we wait_idle() each endpoint to flush them (prompt gauge drain).
+    let mut quic_endpoints: Option<Arc<Vec<Endpoint>>> = None;
+
     // One spawn closure per transport so the ramp loop below is transport-blind.
     let mut spawn_one: Box<dyn FnMut(String)> = match cfg.transport {
         Transport::Quic => {
@@ -65,6 +69,7 @@ pub async fn run(cfg: LoadgenConfig) -> anyhow::Result<()> {
                 .clone()
                 .unwrap_or_else(|| host_of(&cfg.quic_target).to_owned());
             let endpoints = Arc::new(build_endpoints(cfg.endpoints)?);
+            quic_endpoints = Some(endpoints.clone());
             tracing::info!(
                 "QUIC -> {addr} (sni={server_name}) over {} shared endpoint(s)",
                 endpoints.len()
@@ -94,9 +99,13 @@ pub async fn run(cfg: LoadgenConfig) -> anyhow::Result<()> {
                 let stats = stats.clone();
                 let shutdown = shutdown.clone();
                 tracker.spawn(async move {
-                    match quic_connect(&endpoint, quic_cfg, addr, &server_name, connect_timeout)
-                        .await
-                    {
+                    // Abandon an in-flight connect immediately on shutdown rather
+                    // than blocking the drain for up to connect_timeout.
+                    let connected = tokio::select! {
+                        () = shutdown.cancelled() => return,
+                        result = quic_connect(&endpoint, quic_cfg, addr, &server_name, connect_timeout) => result,
+                    };
+                    match connected {
                         Ok((conn, tx, rx)) => {
                             let close_conn = conn.clone();
                             run_connection(
@@ -156,11 +165,14 @@ pub async fn run(cfg: LoadgenConfig) -> anyhow::Result<()> {
                 let stats = stats.clone();
                 let shutdown = shutdown.clone();
                 tracker.spawn(async move {
-                    let established = wss_connect(&url, ws_tls, connect_timeout).await;
+                    let connected = tokio::select! {
+                        () = shutdown.cancelled() => return,
+                        result = wss_connect(&url, ws_tls, connect_timeout) => result,
+                    };
                     // Dropping the WS halves on shutdown ends the TCP connection,
                     // which the gateway reads as a clean close.
                     run_connection(
-                        established,
+                        connected,
                         &params,
                         hb,
                         stats,
@@ -189,11 +201,12 @@ pub async fn run(cfg: LoadgenConfig) -> anyhow::Result<()> {
         }
         let n = per_batch.min(cfg.conns - spawned);
         for _ in 0..n {
+            // Count every intended connection as attempted; a mint failure is then
+            // a connect_failed WITH a matching attempt (keeps the report's
+            // attempted == established + failures + in-flight identity honest).
+            stats.attempt();
             match identities.mint() {
-                Ok(token) => {
-                    stats.attempt();
-                    spawn_one(token);
-                }
+                Ok(token) => spawn_one(token),
                 Err(err) => {
                     tracing::error!(error = %err, "mint token failed");
                     stats.connect_failed();
@@ -221,14 +234,22 @@ pub async fn run(cfg: LoadgenConfig) -> anyhow::Result<()> {
 
     // ---- drain ----
     shutdown.cancel();
-    // Let the clean closes flush before tearing the runtime down.
-    tokio::time::sleep(Duration::from_millis(500)).await;
     tracker.close();
+    // Tasks see the cancel, queue their clean close, and return quickly.
     if tokio::time::timeout(Duration::from_secs(5), tracker.wait())
         .await
         .is_err()
     {
-        tracing::warn!("drain deadline expired with connections still closing");
+        tracing::warn!("drain deadline expired with connection tasks still running");
+    }
+    // Now flush the queued CONNECTION_CLOSE packets so the gateway gauge drains
+    // promptly (close() only enqueues; the endpoint driver does the transmit).
+    if let Some(endpoints) = &quic_endpoints {
+        let _ = tokio::time::timeout(
+            Duration::from_secs(3),
+            futures_util::future::join_all(endpoints.iter().map(|e| e.wait_idle())),
+        )
+        .await;
     }
     reporter.abort();
 

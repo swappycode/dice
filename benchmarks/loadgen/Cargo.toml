@@ -23,6 +23,7 @@ dice-logging      = { workspace = true }
 
 quinn        = { workspace = true }
 rustls       = { workspace = true }
+rand         = { workspace = true }
 bytes        = { workspace = true }
 futures-util = { workspace = true }
 tokio        = { workspace = true }

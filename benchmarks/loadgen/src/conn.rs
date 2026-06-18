@@ -32,11 +32,18 @@ enum HoldOutcome {
     Shutdown,
 }
 
-/// Send Identify and read frames until Ready. Returns the heartbeat interval the
-/// server advertised in Hello (or the protocol default if Hello never arrived,
-/// which it always does first). Identify is sent immediately — on QUIC the
-/// server can't even see the control stream until the client writes to it.
-async fn handshake(tx: &mut Tx, rx: &mut Rx, p: &HandshakeParams) -> anyhow::Result<u32> {
+/// Send Identify and read frames until Ready. Returns `Some(heartbeat_interval)`
+/// the server advertised in Hello (or the protocol default if Hello never
+/// arrived, which it always does first), or `None` if the harness shut down
+/// mid-handshake (a clean abort — the connection never established). Identify is
+/// sent immediately — on QUIC the server can't even see the control stream until
+/// the client writes to it.
+async fn handshake(
+    tx: &mut Tx,
+    rx: &mut Rx,
+    p: &HandshakeParams,
+    shutdown: &CancellationToken,
+) -> anyhow::Result<Option<u32>> {
     let identify = Frame::control(Payload::Identify(v1::Identify {
         access_token: p.token.clone(),
         properties: Some(p.properties.clone()),
@@ -50,12 +57,13 @@ async fn handshake(tx: &mut Tx, rx: &mut Rx, p: &HandshakeParams) -> anyhow::Res
     tokio::pin!(deadline);
     loop {
         tokio::select! {
+            () = shutdown.cancelled() => return Ok(None),
             () = &mut deadline => anyhow::bail!("no Ready within handshake timeout"),
             frame = rx.recv() => match frame? {
                 None => anyhow::bail!("closed during handshake (code {:?})", rx.closed_code()),
                 Some(frame) => match frame.payload {
                     Some(Payload::Hello(hello)) => heartbeat_ms = hello.heartbeat_interval_ms,
-                    Some(Payload::Ready(_)) => return Ok(heartbeat_ms),
+                    Some(Payload::Ready(_)) => return Ok(Some(heartbeat_ms)),
                     Some(Payload::Close(_)) | Some(Payload::Error(_)) => {
                         anyhow::bail!("server rejected Identify")
                     }
@@ -75,15 +83,24 @@ async fn hold(
     stats: &Stats,
     shutdown: &CancellationToken,
 ) -> HoldOutcome {
-    let mut ticker = tokio::time::interval(Duration::from_millis(u64::from(interval_ms.max(1))));
+    let interval = Duration::from_millis(u64::from(interval_ms.max(1)));
+    // Jitter the FIRST beat across [0, interval) so connections that reach Ready
+    // in the same ramp batch don't beat in lock-step. protocol.md §4 requires the
+    // client to jitter the first beat (±10%); a full random phase de-syncs the
+    // herd so the gateway's heartbeat + presence-cache load — the very thing the
+    // benchmark measures — stays at true steady state instead of 30 s spikes.
+    let jitter = Duration::from_millis(rand::random::<u64>() % (interval.as_millis() as u64));
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + jitter, interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // Consume the immediate first tick so the first beat lands ~one interval
-    // after Ready (mirrors the real client jittering its first beat).
-    ticker.tick().await;
+    // First tick fires after `jitter` — do NOT consume it.
 
     let mut last_seq: u64 = 0;
     loop {
         tokio::select! {
+            // Biased: a shutdown wins ties so an orderly drain is classified as
+            // Shutdown, not misattributed as a peer Disconnect in the report.
+            biased;
+            () = shutdown.cancelled() => return HoldOutcome::Shutdown,
             _ = ticker.tick() => {
                 let beat = Frame::control(Payload::Heartbeat(v1::Heartbeat {
                     last_seq,
@@ -107,7 +124,6 @@ async fn hold(
                 }
                 Ok(None) | Err(_) => return HoldOutcome::Disconnected(rx.closed_code()),
             },
-            () = shutdown.cancelled() => return HoldOutcome::Shutdown,
         }
     }
 }
@@ -139,14 +155,16 @@ pub async fn run_connection<C>(
     };
 
     let started = now_ms();
-    let heartbeat_ms = match handshake(&mut tx, &mut rx, params).await {
-        Ok(advertised) => {
+    let heartbeat_ms = match handshake(&mut tx, &mut rx, params, &shutdown).await {
+        Ok(Some(advertised)) => {
             if heartbeat_override_ms > 0 {
                 heartbeat_override_ms
             } else {
                 advertised
             }
         }
+        // Shutdown mid-handshake: clean abort, never reached Ready — count nothing.
+        Ok(None) => return,
         Err(err) => {
             tracing::debug!(error = %err, "handshake failed");
             stats.handshake_failed();
