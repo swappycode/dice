@@ -736,6 +736,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",
+ "socket2",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",

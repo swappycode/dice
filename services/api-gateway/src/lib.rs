@@ -53,7 +53,15 @@ pub struct GatewayConfig {
     pub heartbeat_interval_ms: u32,
     /// Advertised in `Hello`; 60000 in production.
     pub resume_window_ms: u32,
+    /// QUIC server transport tuning (the 100k-benchmark knobs). `Default`
+    /// reproduces the protocol §1 production values, so existing callers can use
+    /// `QuicServerTuning::default()` for behaviour-neutral operation.
+    pub quic: QuicServerTuning,
 }
+
+/// Re-exported so the monolith + harnesses can set [`GatewayConfig::quic`]
+/// without depending on `dice-network-core` directly.
+pub use tls::QuicServerTuning;
 
 /// Everything the gateway calls out to. The monolith builds this once.
 pub struct GatewayDeps {
@@ -129,10 +137,16 @@ pub async fn start(
     let quic_tls =
         tls::load_server_config(&cfg.tls_cert, &cfg.tls_key, &[dice_protocol::ALPN_GATEWAY])
             .context("load QUIC TLS config")?;
-    let quic_cfg = tls::quic_server_config(quic_tls).context("build QUIC server config")?;
+    let quic_cfg =
+        tls::quic_server_config_tuned(quic_tls, &cfg.quic).context("build QUIC server config")?;
 
-    let acceptor = QuicAcceptor::bind(cfg.quic_addr, quic_cfg)
-        .with_context(|| format!("bind QUIC endpoint on {}", cfg.quic_addr))?;
+    let acceptor = QuicAcceptor::bind_tuned(
+        cfg.quic_addr,
+        quic_cfg,
+        cfg.quic.socket_send_buffer,
+        cfg.quic.socket_recv_buffer,
+    )
+    .with_context(|| format!("bind QUIC endpoint on {}", cfg.quic_addr))?;
     let bound_quic = acceptor.local_addr().context("resolve bound QUIC addr")?;
     let listener = tokio::net::TcpListener::bind(cfg.rest_addr)
         .await

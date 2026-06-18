@@ -153,15 +153,98 @@ pub fn generate_dev_certs(dir: &Path) -> Result<DevCertPaths, TlsError> {
     Ok(paths)
 }
 
-/// Wrap a rustls server config for quinn with the transport tuning from
-/// docs/protocol.md §1: `max_concurrent_bidi_streams=4`, stream rx window
-/// 1 MiB, connection window 4 MiB, QUIC keep-alive OFF (the 30 s app heartbeat
-/// is the keep-alive), `max_idle_timeout` 90 s.
+/// QUIC **server** transport tuning. [`Default`] reproduces the docs/protocol.md
+/// §1 production values exactly, so `quic_server_config_tuned(tls,
+/// &QuicServerTuning::default())` is byte-for-byte equivalent to the historical
+/// [`quic_server_config`]. The api-gateway threads env-driven overrides through
+/// here for the 100k-connection benchmark (M4 scaling): the per-connection
+/// `receive_window` is the dominant memory term at scale, disabling `datagrams`
+/// drops the per-connection voice buffers, and the UDP `socket_*_buffer` sizes
+/// keep the kernel from dropping GSO-batched sends/receives on Linux.
+#[derive(Debug, Clone)]
+pub struct QuicServerTuning {
+    /// Per-stream flow-control receive window (bytes). Default 1 MiB.
+    pub stream_receive_window: u32,
+    /// Per-connection flow-control receive window (bytes). Default 4 MiB — the
+    /// dominant per-connection memory ceiling at 100k; shrink it for the bench.
+    pub receive_window: u32,
+    /// Transport idle timeout (ms). Default 90_000.
+    pub max_idle_timeout_ms: u32,
+    /// Max concurrent bidi streams the peer may open. Default 4 (Dice uses one
+    /// control stream).
+    pub max_concurrent_bidi_streams: u32,
+    /// Max concurrent uni streams the peer may open. `None` leaves quinn's
+    /// default (100); Dice opens none, so `Some(0)` shaves per-connection state.
+    pub max_concurrent_uni_streams: Option<u32>,
+    /// QUIC datagrams (voice transport). `true` keeps the 64 KiB datagram
+    /// buffers; `false` disables datagram support entirely — no voice, but it
+    /// saves ~128 KiB/conn, worth it for a control-only connection benchmark.
+    pub datagrams: bool,
+    /// UDP socket send buffer (SO_SNDBUF) in bytes; `None` = OS default.
+    /// Applied at endpoint bind time (see [`crate::server::QuicAcceptor`]).
+    pub socket_send_buffer: Option<usize>,
+    /// UDP socket receive buffer (SO_RCVBUF) in bytes; `None` = OS default.
+    pub socket_recv_buffer: Option<usize>,
+}
+
+impl Default for QuicServerTuning {
+    fn default() -> Self {
+        Self {
+            stream_receive_window: 1024 * 1024,
+            receive_window: 4 * 1024 * 1024,
+            max_idle_timeout_ms: 90_000,
+            max_concurrent_bidi_streams: 4,
+            max_concurrent_uni_streams: None,
+            datagrams: true,
+            socket_send_buffer: None,
+            socket_recv_buffer: None,
+        }
+    }
+}
+
+/// Wrap a rustls server config for quinn with the default docs/protocol.md §1
+/// transport tuning (`max_concurrent_bidi_streams=4`, stream rx window 1 MiB,
+/// connection window 4 MiB, QUIC keep-alive OFF, `max_idle_timeout` 90 s).
 pub fn quic_server_config(tls: Arc<rustls::ServerConfig>) -> Result<quinn::ServerConfig, TlsError> {
+    quic_server_config_tuned(tls, &QuicServerTuning::default())
+}
+
+/// Wrap a rustls server config for quinn with explicit [`QuicServerTuning`] (the
+/// 100k-benchmark knobs). The UDP socket-buffer fields are applied at endpoint
+/// bind time, not here (see [`crate::server::QuicAcceptor::bind_tuned`]).
+pub fn quic_server_config_tuned(
+    tls: Arc<rustls::ServerConfig>,
+    tuning: &QuicServerTuning,
+) -> Result<quinn::ServerConfig, TlsError> {
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(tls)?;
     let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    cfg.transport_config(Arc::new(quic_transport_config()?));
+    cfg.transport_config(Arc::new(server_transport_config(tuning)?));
     Ok(cfg)
+}
+
+/// Build the server-side [`quinn::TransportConfig`] from the tuning struct.
+fn server_transport_config(t: &QuicServerTuning) -> Result<quinn::TransportConfig, TlsError> {
+    let mut transport = quinn::TransportConfig::default();
+    transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(t.max_concurrent_bidi_streams));
+    if let Some(uni) = t.max_concurrent_uni_streams {
+        transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(uni));
+    }
+    transport.stream_receive_window(quinn::VarInt::from_u32(t.stream_receive_window));
+    transport.receive_window(quinn::VarInt::from_u32(t.receive_window));
+    transport.keep_alive_interval(None);
+    transport.max_idle_timeout(Some(
+        quinn::IdleTimeout::try_from(Duration::from_millis(u64::from(t.max_idle_timeout_ms)))
+            .map_err(|_| TlsError::TransportParam)?,
+    ));
+    if t.datagrams {
+        transport.datagram_receive_buffer_size(Some(64 * 1024));
+        transport.datagram_send_buffer_size(64 * 1024);
+    } else {
+        // `None` disables datagram support (advertises no datagram transport
+        // parameter, so the peer never sends one).
+        transport.datagram_receive_buffer_size(None);
+    }
+    Ok(transport)
 }
 
 /// Wrap a rustls client config (TLS 1.3, ALPN `dice/1`) for quinn with the
@@ -177,9 +260,11 @@ pub fn quic_client_config(tls: Arc<rustls::ClientConfig>) -> Result<quinn::Clien
     Ok(cfg)
 }
 
-/// The §1 transport knobs shared by both directions: keep-alive OFF, idle
-/// timeout 90 s. Stream/window limits only bind the receive side; the
-/// defaults on the client comfortably exceed one 256 KiB control stream.
+/// The §1 transport knobs for the **client** half: keep-alive OFF, idle
+/// timeout 90 s. (The server half is [`server_transport_config`], which the
+/// gateway tunes for the 100k benchmark — these stay fixed for the desktop
+/// client.) Stream/window limits only bind the receive side; the defaults
+/// comfortably exceed one 256 KiB control stream.
 fn quic_transport_config() -> Result<quinn::TransportConfig, TlsError> {
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(4));

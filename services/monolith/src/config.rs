@@ -25,10 +25,27 @@
 //! | `DICE_SPLIT`           | unset                         | `1` ⇒ route auth/chat/presence over NATS RPC to standalone bins (requires `full`); media+voice stay in-process |
 //! | `RUST_LOG`             | `info,dice=debug`             | tracing filter (read by `dice-logging`) |
 //! | `DICE_LOG_JSON`        | unset                         | `1` ⇒ NDJSON logs (read by `dice-logging`) |
+//!
+//! QUIC server tuning for the 100k-connection benchmark (M4 scaling). Each
+//! defaults to the protocol §1 production value, so an unset boot is unchanged:
+//!
+//! | Variable                       | Default  | Meaning |
+//! |--------------------------------|----------|---------|
+//! | `DICE_QUIC_RECV_WINDOW`        | `4194304`| per-connection flow-control window (bytes) — the dominant per-conn memory term at 100k; shrink to fit RAM |
+//! | `DICE_QUIC_STREAM_RECV_WINDOW` | `1048576`| per-stream flow-control window (bytes) |
+//! | `DICE_QUIC_MAX_IDLE_MS`        | `90000`  | transport idle timeout (ms) |
+//! | `DICE_QUIC_MAX_BIDI_STREAMS`   | `4`      | max concurrent bidi streams the peer may open |
+//! | `DICE_QUIC_MAX_UNI_STREAMS`    | unset    | max concurrent uni streams; unset = quinn default (100), `0` = none (Dice opens none) |
+//! | `DICE_QUIC_DATAGRAMS`          | `true`   | QUIC datagrams (voice); `0`/`false` disables them, saving ~128 KiB/conn for a control-only bench |
+//! | `DICE_QUIC_SO_SNDBUF`          | OS       | UDP socket send buffer SO_SNDBUF (bytes); raise so GSO batches aren't dropped |
+//! | `DICE_QUIC_SO_RCVBUF`          | OS       | UDP socket receive buffer SO_RCVBUF (bytes) |
+//! | `DICE_HEARTBEAT_MS`           | `30000`  | heartbeat interval advertised in `Hello`; raise to cut per-conn keep-alive load at 100k |
+//! | `DICE_RESUME_WINDOW_MS`       | `60000`  | resume window advertised in `Hello` |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use api_gateway::QuicServerTuning;
 use dice_cache::CacheConfig;
 use dice_common::config::{ConfigError, DiceProfile, env_opt, env_or};
 use dice_database::DbConfig;
@@ -61,6 +78,16 @@ pub struct MonolithConfig {
     /// service processes over NATS RPC instead of mounting them in-process.
     /// Requires the NATS bus (full profile); media + voice stay in-process.
     pub split: bool,
+    /// QUIC server transport tuning (100k-benchmark knobs; `DICE_QUIC_*`).
+    pub quic: QuicServerTuning,
+    /// Heartbeat interval advertised in `Hello` (ms). Default = protocol const
+    /// (30000). Raising it cuts per-connection heartbeat wakeups + presence
+    /// cache writes at 100k; the server closes a session after 2× this of silence.
+    pub heartbeat_ms: u32,
+    /// Resume window advertised in `Hello` (ms). Default = protocol const (60000).
+    /// Governs how long a detached session's task + replay ring live (memory
+    /// under reconnect churn).
+    pub resume_window_ms: u32,
 }
 
 impl MonolithConfig {
@@ -89,6 +116,9 @@ impl MonolithConfig {
             jwt_public_pem: path_or("DICE_JWT_PUBLIC_PEM", "dev/keys/jwt_ed25519.pub.pem"),
             media_dir: path_or("DICE_MEDIA_DIR", "data/media"),
             split: parse_flag("DICE_SPLIT"),
+            quic: parse_quic_tuning()?,
+            heartbeat_ms: env_or("DICE_HEARTBEAT_MS", dice_protocol::HEARTBEAT_INTERVAL_MS)?,
+            resume_window_ms: env_or("DICE_RESUME_WINDOW_MS", dice_protocol::RESUME_WINDOW_MS)?,
         })
     }
 
@@ -128,6 +158,57 @@ fn parse_addr(key: &'static str, default: &str) -> Result<SocketAddr, ConfigErro
 
 fn path_or(key: &'static str, default: &str) -> PathBuf {
     PathBuf::from(env_opt(key).unwrap_or_else(|| default.to_owned()))
+}
+
+/// Parse an optional typed env var: `None` when unset, else parsed (or a config
+/// error). Used for the QUIC knobs whose "unset" means "leave quinn's default".
+fn env_opt_parse<T>(key: &'static str) -> Result<Option<T>, ConfigError>
+where
+    T: std::str::FromStr,
+    <T as std::str::FromStr>::Err: std::fmt::Display,
+{
+    match env_opt(key) {
+        None => Ok(None),
+        Some(raw) => match raw.parse::<T>() {
+            Ok(v) => Ok(Some(v)),
+            Err(e) => Err(ConfigError::Invalid {
+                key,
+                value: raw,
+                reason: e.to_string(),
+            }),
+        },
+    }
+}
+
+/// Truthy-env flag with an explicit default when unset (QUIC datagrams default ON).
+fn parse_flag_default(key: &'static str, default: bool) -> bool {
+    match env_opt(key) {
+        Some(v) => !matches!(
+            v.to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        None => default,
+    }
+}
+
+/// QUIC server transport tuning from `DICE_QUIC_*`. Each knob defaults to the
+/// protocol §1 production value, so an unconfigured boot is behaviour-neutral;
+/// the 100k benchmark overrides them (see `.env.example` + the bench runbook).
+fn parse_quic_tuning() -> Result<QuicServerTuning, ConfigError> {
+    let d = QuicServerTuning::default();
+    Ok(QuicServerTuning {
+        stream_receive_window: env_or("DICE_QUIC_STREAM_RECV_WINDOW", d.stream_receive_window)?,
+        receive_window: env_or("DICE_QUIC_RECV_WINDOW", d.receive_window)?,
+        max_idle_timeout_ms: env_or("DICE_QUIC_MAX_IDLE_MS", d.max_idle_timeout_ms)?,
+        max_concurrent_bidi_streams: env_or(
+            "DICE_QUIC_MAX_BIDI_STREAMS",
+            d.max_concurrent_bidi_streams,
+        )?,
+        max_concurrent_uni_streams: env_opt_parse("DICE_QUIC_MAX_UNI_STREAMS")?,
+        datagrams: parse_flag_default("DICE_QUIC_DATAGRAMS", d.datagrams),
+        socket_send_buffer: env_opt_parse("DICE_QUIC_SO_SNDBUF")?,
+        socket_recv_buffer: env_opt_parse("DICE_QUIC_SO_RCVBUF")?,
+    })
 }
 
 /// Truthy-env flag: set + non-empty + not an explicit off value enables it.

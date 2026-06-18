@@ -156,6 +156,7 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
             tls_key: certs.server_key.clone(),
             heartbeat_interval_ms,
             resume_window_ms,
+            quic: Default::default(),
         },
         deps,
         ct.clone(),

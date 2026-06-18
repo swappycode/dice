@@ -25,7 +25,6 @@ use chat_service::ChatService;
 use dice_cache::RateLimiter;
 use dice_common::SnowflakeGenerator;
 use dice_common::shutdown::Shutdown;
-use dice_protocol::{HEARTBEAT_INTERVAL_MS, RESUME_WINDOW_MS};
 use media_service::{LocalFsStore, MediaService};
 use presence_service::PresenceService;
 use voice_service::VoiceService;
@@ -177,8 +176,9 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
             quic_addr: cfg.quic_addr,
             tls_cert: tls.cert.clone(),
             tls_key: tls.key.clone(),
-            heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
-            resume_window_ms: RESUME_WINDOW_MS,
+            heartbeat_interval_ms: cfg.heartbeat_ms,
+            resume_window_ms: cfg.resume_window_ms,
+            quic: cfg.quic.clone(),
         },
         deps,
         shutdown.child_token(),

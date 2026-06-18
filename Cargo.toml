@@ -77,6 +77,9 @@ hyper-util        = { version = "0.1", features = ["tokio", "server", "http1"] }
 reqwest           = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "http2"] }
 webpki-roots      = "0.26"
 url               = "2"
+# UDP socket buffer sizing for the QUIC endpoint (100k benchmark tuning). Already
+# in the tree via quinn-udp; declared here so the gateway can size SO_SNDBUF/RCVBUF.
+socket2           = "0.6"
 
 # ---- protocol ----
 prost               = "0.14"

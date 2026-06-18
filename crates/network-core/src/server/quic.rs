@@ -45,6 +45,44 @@ impl QuicAcceptor {
         })
     }
 
+    /// Bind with optional UDP socket buffer sizing (the 100k-benchmark knob).
+    /// When both buffer sizes are `None` this is exactly [`Self::bind`];
+    /// otherwise it constructs the UDP socket via `socket2` so SO_SNDBUF /
+    /// SO_RCVBUF can be set before quinn takes ownership. GSO/GRO are still
+    /// auto-detected by quinn-udp on Linux regardless of how the socket is made —
+    /// the larger buffers just keep the kernel from dropping batched datagrams at
+    /// scale. Must run inside a tokio runtime (quinn wraps the socket with it).
+    pub fn bind_tuned(
+        addr: SocketAddr,
+        cfg: quinn::ServerConfig,
+        send_buffer: Option<usize>,
+        recv_buffer: Option<usize>,
+    ) -> std::io::Result<Self> {
+        if send_buffer.is_none() && recv_buffer.is_none() {
+            return Self::bind(addr, cfg);
+        }
+        use socket2::{Domain, Protocol, Socket, Type};
+        let socket = Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
+        // Set buffer sizes BEFORE bind (the kernel applies them at/after bind).
+        if let Some(n) = recv_buffer {
+            socket.set_recv_buffer_size(n)?;
+        }
+        if let Some(n) = send_buffer {
+            socket.set_send_buffer_size(n)?;
+        }
+        socket.set_nonblocking(true)?; // quinn/tokio require a non-blocking socket
+        socket.bind(&addr.into())?;
+        let runtime = quinn::default_runtime()
+            .ok_or_else(|| std::io::Error::other("no async runtime for the QUIC endpoint"))?;
+        let endpoint = quinn::Endpoint::new(
+            quinn::EndpointConfig::default(),
+            Some(cfg),
+            socket.into(),
+            runtime,
+        )?;
+        Ok(Self { endpoint })
+    }
+
     /// The actual bound address (port 0 resolves here).
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.endpoint.local_addr()

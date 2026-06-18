@@ -9,7 +9,7 @@ license.workspace = true
 # Both halves default ON so plain `cargo check -p dice-network-core` covers
 # everything. The gateway depends on "server", the desktop host on "client".
 default = ["server", "client"]
-server = ["dep:async-trait", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio-util"]
+server = ["dep:async-trait", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio-util", "dep:socket2"]
 client = [
   "dep:rand",
   "dep:reqwest",
@@ -39,6 +39,7 @@ axum        = { workspace = true, optional = true }
 hyper       = { workspace = true, optional = true, features = ["http1", "server"] }
 hyper-util  = { workspace = true, optional = true, features = ["service"] }
 tokio-util  = { workspace = true, optional = true }
+socket2     = { workspace = true, optional = true }
 
 # client-only (feature-gated). Both tungstenite and reqwest declare rustls
 # with default-features = false, so the ring-only workspace policy holds.
