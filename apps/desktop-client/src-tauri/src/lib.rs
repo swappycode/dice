@@ -9,8 +9,9 @@
 //! - ring is the only rustls crypto provider (workspace policy).
 //! - single-instance: a second launch focuses the existing window — UNLESS a
 //!   `--profile <name>` / `DICE_CLIENT_PROFILE` is set, which gives that
-//!   instance its own app-data dir + keyring scope and lets it open its own
-//!   window (run two profiles for local two-user testing).
+//!   instance its own cache + keyring scope + WebView2 storage (so browser
+//!   `localStorage` is isolated too) and lets it open its own window (run two
+//!   profiles for local two-user testing).
 //! - when the keystore already holds a session the gateway connects in the
 //!   background at startup; otherwise the first `login`/`register` connects.
 
@@ -81,17 +82,24 @@ pub fn run() {
     builder
         .setup(move |app| {
             let base = app.path().app_data_dir()?;
-            // A profile gets `<app-data>/profiles/<name>/cache.db` + a scoped
-            // keyring entry; the default keeps `<app-data>/cache.db` + the
-            // default keyring so existing sessions still resolve.
+            // A profile gets its own `<app-data>/profiles/<name>` subtree
+            // (cache.db + WebView2 storage below) + a scoped keyring entry; the
+            // default keeps `<app-data>/cache.db` + the default keyring + the
+            // default WebView2 dir so an existing install's data still resolves.
+            let profile_dir = match &setup_profile {
+                Some(name) => {
+                    let dir = base.join("profiles").join(name);
+                    std::fs::create_dir_all(&dir)?;
+                    Some(dir)
+                }
+                None => None,
+            };
             let (cache_path, keystore): (std::path::PathBuf, Arc<dyn KeyStore>) =
-                match &setup_profile {
-                    Some(name) => {
-                        let dir = base.join("profiles").join(name);
-                        std::fs::create_dir_all(&dir)?;
+                match (&setup_profile, &profile_dir) {
+                    (Some(name), Some(dir)) => {
                         (dir.join("cache.db"), Arc::new(OsKeyring::for_profile(name)))
                     }
-                    None => (base.join("cache.db"), Arc::new(OsKeyring::new())),
+                    _ => (base.join("cache.db"), Arc::new(OsKeyring::new())),
                 };
             let cfg = CoreConfig::from_env(cache_path)?;
             let emitter: Arc<dyn Emitter> = Arc::new(TauriEmitter(app.handle().clone()));
@@ -120,7 +128,7 @@ pub fn run() {
             // managed `ClientCore` is guaranteed present before the webview's
             // first IPC call, and so the WebView2 browser args are tunable at
             // runtime via `DICE_WEBVIEW_ARGS` (one build, many RAM experiments).
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+            let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(title)
                 .inner_size(1100.0, 720.0)
                 .min_inner_size(800.0, 560.0)
@@ -128,8 +136,15 @@ pub fn run() {
                 .decorations(false)
                 .shadow(true)
                 .transparent(false)
-                .additional_browser_args(&webview_args())
-                .build()?;
+                .additional_browser_args(&webview_args());
+            // A named profile also gets its OWN WebView2 user-data-folder, so two
+            // side-by-side instances don't share browser `localStorage` (theme +
+            // perf prefs, the mock session key) — full isolation for the two-user
+            // demo. The default app keeps WebView2's default location.
+            if let Some(dir) = &profile_dir {
+                window = window.data_directory(dir.join("webview"));
+            }
+            window.build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
