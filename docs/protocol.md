@@ -80,6 +80,9 @@ client (within 5 s, else Close{UNAUTHENTICATED}):
     ──► Resumed{} + replay of buffered frames with seq > last_seq     (success)
     ──► Error{INVALID_SESSION}          (failure; CONNECTION STAYS OPEN — client must send a
                                          fresh Identify within the same standing 5 s deadline)
+    ──► Error{INVALID_SESSION, redirect_addr}  (cross-node: the session lives on another node at
+                                         redirect_addr; the client reconnects there and retries
+                                         Resume, keeping its caches — ADR-0007 phase 0b)
 ```
 
 `Ready{gateway_session_id (fixed64), resume_token (32 random bytes), user, guilds[], dm_channels[],
@@ -103,10 +106,17 @@ refreshes presence TTL. Server closes after 2 missed beats; client reconnects-an
 ## 5. Resume
 
 Per-session replay ring buffer: **256 frames OR 256 KiB**, whichever first; retained
-`resume_window_ms` (60 s) after disconnect; node-local (cross-node resume is out of scope —
-fails as INVALID_SESSION). Sequenced dispatches (class A) enter the buffer; typing never does.
-Resume failure degrades to full Identify + REST history backfill
-(`GET /v1/channels/{id}/messages?after=<last known id>`).
+`resume_window_ms` (60 s) after disconnect; the ring is **node-local**. Sequenced dispatches
+(class A) enter the buffer; typing never does. Resume failure degrades to full Identify + REST
+history backfill (`GET /v1/channels/{id}/messages?after=<last known id>`).
+
+**Cross-node** (multi-node gateway, ADR-0007): a detached session records its owner in a shared
+session directory (`resume:owner:{session_id}` → node id + advertised address, TTL = the resume
+window). A `Resume` that lands on a *different* node consults the directory: if the owner advertises
+a reachable address (`DICE_ADVERTISED_ADDR`), the gateway replies `Error{INVALID_SESSION,
+redirect_addr}` and the client reconnects to that address and retries Resume (phase 0b); otherwise a
+sticky load balancer must route the reconnect back to the owner (phase 0). The replay ring itself is
+never moved — durable session identity + hand-off are phase 1+.
 
 ## 6. Message classes
 

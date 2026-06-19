@@ -1,6 +1,8 @@
 # ADR-0007: Cross-node resume — seam extracted, hand-off gated on the seq model
 
-**Status:** accepted (M4) — seam extracted; cross-node delivery deferred
+**Status:** accepted (M4) — seam extracted; routing live through **phase 0b**
+(session directory + actionable redirect); true hand-off (phase 1+) deferred,
+gated on the seq model.
 
 ADR-0001 reserved resume as node-local and promised the replay buffer would "sit
 behind a trait" so a Redis-backed or hand-off implementation is additive. That
@@ -29,7 +31,18 @@ monotonic-seq invariant. So cross-node resume needs seq *continuity*, not just f
    detached session task is still alive there, so resume works unchanged — no seq
    coordination, ~80% of the scaling story for ~20% of the effort. Cost: if the
    owning node dies mid-window the session is unrecoverable except via REST backfill
-   (acceptable; document the operator requirement).
+   (acceptable; document the operator requirement). **Done** — a `Resume` that misses
+   the local registry consults `dice_cache::SessionDirectory`
+   (`resume:owner:{session_id}` → owner node id, TTL = resume window) and emits
+   `dice_gateway_resume_total{outcome=resumed|cross_node|gone}`.
+   **Phase 0b — actionable redirect (DONE).** The directory value also carries the
+   owner's advertised `host:port` (`DICE_ADVERTISED_ADDR`, recorded in `detached_wait`).
+   A cross-node `Resume` then gets `Error{INVALID_SESSION, redirect_addr=<owner addr>}`
+   (proto field on `dice.v1.Error`); the client reconnects to that address and retries
+   Resume, keeping its caches (network-core driver, bounded by `MAX_REDIRECTS`). No
+   sticky LB required when nodes advertise an address; the connection stays open
+   (protocol §3) so a client that ignores the redirect still falls back to a fresh
+   Identify. The replay ring is never moved — that is phase 1+.
 2. **Phase 1 — durable session identity.** Persist `(session_id, user, resume_token
    hash, node_id, next_seq, expires_at)` (or a Redis KV with TTL = resume window) so
    any node can validate the token and learn the last assigned seq without a live
