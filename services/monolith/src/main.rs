@@ -25,7 +25,7 @@ use chat_service::ChatService;
 use dice_cache::RateLimiter;
 use dice_common::SnowflakeGenerator;
 use dice_common::shutdown::Shutdown;
-use media_service::{LocalFsStore, MediaService};
+use media_service::{LocalFsStore, MediaService, MediaStore};
 use presence_service::PresenceService;
 use voice_service::VoiceService;
 
@@ -70,6 +70,9 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
     // Cloned before `bus` is moved into GatewayDeps below, for the outbox relay.
     let relay_bus = bus.clone();
 
+    // Shared media store — handed to both the service and the GC sweep below.
+    let media_store: Arc<dyn MediaStore> = Arc::new(LocalFsStore::new(cfg.media_dir.clone()));
+
     // --- services -> gateway deps (direct trait calls by default) ---
     let mut deps = GatewayDeps {
         cache: cache.clone(),
@@ -83,7 +86,7 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
         chat: Arc::new(ChatService::new(pool.clone(), bus.clone(), ids.clone())),
         media: Arc::new(MediaService::new(
             pool.clone(),
-            Arc::new(LocalFsStore::new(cfg.media_dir.clone())),
+            media_store.clone(),
             ids.clone(),
         )),
         presence: Arc::new(PresenceService::new(
@@ -150,6 +153,21 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
             }
         });
         tracing::info!("outbox relay started (in-process chat)");
+    }
+
+    // --- orphaned-media GC: reap media blobs no message or avatar references any
+    // more. Media always stays in-process, so the sweep runs here unconditionally. ---
+    {
+        let pool = pool.clone();
+        let store = media_store.clone();
+        let token = shutdown.child_token();
+        shutdown.tracker.spawn(async move {
+            tokio::select! {
+                () = media_service::gc::run(pool, store) => {}
+                () = token.cancelled() => {}
+            }
+        });
+        tracing::info!("media GC sweep started");
     }
 
     // notification-service: durable JetStream consumer that maintains per-user

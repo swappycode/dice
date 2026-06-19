@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM media m WHERE NOT EXISTS (SELECT 1 FROM message_attachments ma WHERE ma.media_id = m.id) AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar_media_id = m.id) AND m.created_at < now() - make_interval(secs => $1) ORDER BY m.created_at, m.id FOR UPDATE SKIP LOCKED LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b360f8cf732fc12f3f5a52bf8bf844f75fce1a01feb9745dcb04b6aad37f39c2"
+}

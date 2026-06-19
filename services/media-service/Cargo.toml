@@ -9,6 +9,7 @@ license.workspace = true
 dice-common = { workspace = true }
 dice-protocol = { workspace = true }
 dice-database = { workspace = true }
+dice-metrics = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

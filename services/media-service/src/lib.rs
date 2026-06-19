@@ -15,6 +15,7 @@ use bytes::Bytes;
 use dice_common::{MediaId, UserId};
 use dice_protocol::v1;
 
+pub mod gc;
 mod service;
 mod store;
 

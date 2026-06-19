@@ -1584,6 +1584,7 @@ dependencies = [
  "bytes",
  "dice-common",
  "dice-database",
+ "dice-metrics",
  "dice-protocol",
  "imagesize",
  "sqlx",
