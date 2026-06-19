@@ -7,6 +7,56 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-19 - M4 (11/n): Scaling - cross-node resume phase 0b (actionable redirect)
+
+**M4 theme = Scaling.** Branch `main`. Two commits (`e439e65` feat / `ecea276` docs), pushed.
+Gates green: `just check` (fmt + clippy --workspace --all-targets -D warnings + cargo test
+--workspace + aws-lc gate) + desktop-client clippy + `host_gate` (2/2); frontend untouched.
+
+**What + why.** ADR-0007 phase 0b. Before this, a Resume that landed on a gateway node which did
+NOT own the detached session returned a human-readable `INVALID_SESSION` ("reconnect via the sticky
+LB") - phase 0 relied entirely on a sticky load balancer routing the reconnect back to the owner.
+Now the redirect is **machine-actionable**: the owning node advertises its address, and a cross-node
+miss tells the client exactly where to reconnect, so multi-node resume works **without** a sticky LB.
+- **Wire** (`gateway.proto`): `Error.redirect_addr` (field 4) - the owner node's reachable
+  `host:port`, set ONLY on a cross-node `INVALID_SESSION`. Additive; the 9 existing `v1::Error`
+  literals across api-gateway / network-core / desktop got the new field. protocol.md section 3/5
+  updated.
+- **Directory** (`dice_cache::SessionDirectory`): the `resume:owner:{session_id}` value now carries
+  the owner's advertised address after the `u16` node id (UTF-8 tail; empty = none). `record()` takes
+  `addr: Option<&str>`, `owner()` returns `SessionOwner{node_id, addr}`.
+- **Gateway** (`session.rs`): `detached_wait` records `DICE_ADVERTISED_ADDR`; the cross-node Resume
+  miss emits `redirect_frame(owner_node, addr)` when the owner advertises one (else the phase-0
+  message). New `GatewayConfig.advertised_addr` (rippled to the 4 harnesses); `MonolithConfig` parses
+  `DICE_ADVERTISED_ADDR`.
+- **Client** (`network-core` driver): on a resuming `INVALID_SESSION` with a `redirect_addr`, the
+  driver KEEPS its resume state (no `SessionInvalidated` - caches stay valid), splices the authority
+  into both the WSS URL (`effective_wss_url`) and the QUIC dial target (`effective_quic`), and retries
+  Resume against the owner. Bounded by `MAX_REDIRECTS` (degrades to a fresh Identify past it); reset on
+  Ready/Resumed. Garbage/empty `redirect_addr` is ignored (validated via `QuicEndpoint::from_host_port`).
+
+**Design note (why a field, not a new frame).** The existing protocol already overloads
+`INVALID_SESSION` for the cross-node case, and the connection stays open (section 3) so the client can
+retry; a `redirect_addr` field is the minimal, backward-compatible evolution (old clients ignore it
+and fall back to a fresh Identify). A dedicated `ResumeRedirect` frame was the alternative - rejected
+to keep the protocol surface small and reuse the existing client seam.
+
+**Why the e2e test is server-emit + client-splice, not one round-trip.** With a single fixed-target
+driver, first-connect-node == reconnect-node == owner, so the real cross-node case (an LB *misroute*)
+can't be reproduced in-process without changing the driver's target mid-flight. So: a genuine
+server-emit integration test (`client_e2e::cross_node_resume_redirects_to_the_owner_address` seeds the
+shared directory with a remote owner+addr and asserts a raw-QUIC Resume gets the redirect over real
+QUIC) + client-splice unit tests + a documented manual two-node round-trip (design doc). The
+SessionDirectory address round-trips in-memory + live Redis.
+
+**NEXT (M4 remaining).** Cross-node resume **phase 1+** (ADR-0007, the last M4 architecture slice):
+durable session identity (persist `session_id -> token hash, node_id, next_seq, expiry` in Redis, TTL
+= resume window) so any node can validate a Resume + learn the last seq without a live origin task,
+then phase 2 hand-off / shared replay - which MUST preserve seq monotonicity (the hard part). Next
+free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-18 - M4 (10/n): Scaling - 100k loadgen harness + QUIC server tuning + runbook
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed (`8b2f041` loadgen /
