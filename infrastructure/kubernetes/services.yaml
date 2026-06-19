@@ -1,0 +1,157 @@
+# The split-mode service responders. Each is a StatefulSet so every pod gets a
+# distinct DICE_NODE_ID (base offset + ordinal) for snowflake uniqueness across
+# the whole fleet (gateway 0.., auth 256.., chat 512.., presence 768..). They
+# answer the gateway over NATS RPC (queue groups load-balance replicas), so they
+# need NO client-facing Service — only a headless one for stable DNS + metrics
+# scraping. No DICE_SPLIT, no advertised address (they are not gateways).
+#
+# --- auth-service: verifies the SAME Ed25519 JWT pair the gateway signs with ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dice-auth
+  namespace: dice
+  labels: { app.kubernetes.io/name: dice-auth, app.kubernetes.io/part-of: dice }
+spec:
+  serviceName: dice-auth-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app.kubernetes.io/name: dice-auth }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: dice-auth, app.kubernetes.io/part-of: dice }
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: auth
+          image: ghcr.io/swappycode/dice:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              export DICE_NODE_ID="$((NODE_ID_BASE + ${HOSTNAME##*-}))"
+              exec /usr/local/bin/auth-service
+          env:
+            - { name: NODE_ID_BASE, value: "256" }
+            - { name: DICE_SERVICE_NAME, value: "auth-service" }
+          envFrom:
+            - configMapRef: { name: dice-config }
+            - secretRef: { name: dice-db }
+          ports:
+            - { name: admin, containerPort: 9600, protocol: TCP }
+          readinessProbe: { httpGet: { path: /metrics, port: admin }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+          volumeMounts:
+            - { name: jwt, mountPath: /etc/dice/keys, readOnly: true }
+      volumes:
+        - { name: jwt, secret: { secretName: dice-jwt } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: dice-auth-headless, namespace: dice, labels: { app.kubernetes.io/name: dice-auth } }
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: dice-auth }
+  ports: [{ name: admin, port: 9600, protocol: TCP }]
+---
+# --- chat-service: owns the message write path + runs the outbox relay ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dice-chat
+  namespace: dice
+  labels: { app.kubernetes.io/name: dice-chat, app.kubernetes.io/part-of: dice }
+spec:
+  serviceName: dice-chat-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app.kubernetes.io/name: dice-chat }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: dice-chat, app.kubernetes.io/part-of: dice }
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: chat
+          image: ghcr.io/swappycode/dice:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              export DICE_NODE_ID="$((NODE_ID_BASE + ${HOSTNAME##*-}))"
+              exec /usr/local/bin/chat-service
+          env:
+            - { name: NODE_ID_BASE, value: "512" }
+            - { name: DICE_SERVICE_NAME, value: "chat-service" }
+          envFrom:
+            - configMapRef: { name: dice-config }
+            - secretRef: { name: dice-db }
+          ports:
+            - { name: admin, containerPort: 9600, protocol: TCP }
+          readinessProbe: { httpGet: { path: /metrics, port: admin }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: dice-chat-headless, namespace: dice, labels: { app.kubernetes.io/name: dice-chat } }
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: dice-chat }
+  ports: [{ name: admin, port: 9600, protocol: TCP }]
+---
+# --- presence-service: presence in Redis + bus fan-out ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dice-presence
+  namespace: dice
+  labels: { app.kubernetes.io/name: dice-presence, app.kubernetes.io/part-of: dice }
+spec:
+  serviceName: dice-presence-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app.kubernetes.io/name: dice-presence }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: dice-presence, app.kubernetes.io/part-of: dice }
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: presence
+          image: ghcr.io/swappycode/dice:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              export DICE_NODE_ID="$((NODE_ID_BASE + ${HOSTNAME##*-}))"
+              exec /usr/local/bin/presence-service
+          env:
+            - { name: NODE_ID_BASE, value: "768" }
+            - { name: DICE_SERVICE_NAME, value: "presence-service" }
+          envFrom:
+            - configMapRef: { name: dice-config }
+            - secretRef: { name: dice-db }
+          ports:
+            - { name: admin, containerPort: 9600, protocol: TCP }
+          readinessProbe: { httpGet: { path: /metrics, port: admin }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: dice-presence-headless, namespace: dice, labels: { app.kubernetes.io/name: dice-presence } }
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: dice-presence }
+  ports: [{ name: admin, port: 9600, protocol: TCP }]

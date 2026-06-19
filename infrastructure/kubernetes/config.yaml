@@ -1,0 +1,64 @@
+# Non-secret runtime config shared by every bin. Backing stores (Postgres, NATS,
+# Redis) are external — managed services or in-cluster operators (see README);
+# point the URLs below at them. The QUIC tuning mirrors the 100k-benchmark knobs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dice-config
+  namespace: dice
+data:
+  DICE_PROFILE: "full" # NATS + Redis (required for split mode + cross-node resume)
+  DICE_NATS_URL: "nats://dice-nats.dice.svc.cluster.local:4222"
+  DICE_REDIS_URL: "redis://dice-redis.dice.svc.cluster.local:6379"
+  # Distributed tracing -> the OTLP collector / Tempo (drop to disable).
+  DICE_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4318"
+  # Socket + protocol addresses (per-pod identity is computed in the entrypoint).
+  DICE_REST_ADDR: "0.0.0.0:8443"
+  DICE_QUIC_ADDR: "0.0.0.0:8444"
+  DICE_ADMIN_ADDR: "0.0.0.0:9600"
+  # TLS + JWT come from mounted Secrets (see below).
+  DICE_TLS_CERT: "/etc/dice/tls/tls.crt"
+  DICE_TLS_KEY: "/etc/dice/tls/tls.key"
+  DICE_JWT_PRIVATE_PEM: "/etc/dice/keys/jwt_ed25519.pem"
+  DICE_JWT_PUBLIC_PEM: "/etc/dice/keys/jwt_ed25519.pub.pem"
+  # QUIC server tuning (per the benchmark runbook). RECV_WINDOW dominates per-conn
+  # memory at scale; raise the heartbeat to cut keep-alive load.
+  DICE_QUIC_RECV_WINDOW: "4194304"
+  DICE_QUIC_SO_SNDBUF: "8388608"
+  DICE_QUIC_SO_RCVBUF: "8388608"
+  DICE_HEARTBEAT_MS: "30000"
+  DICE_RESUME_WINDOW_MS: "60000"
+---
+# --- Secret TEMPLATES. Do NOT commit real values. In production, generate these
+# via cert-manager (TLS) + a sealed-secrets / external-secrets operator (JWT, DB).
+# The placeholders below are stringData so `kubectl apply` is syntactically valid
+# in a throwaway/dev cluster; replace before any real deployment. ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dice-tls
+  namespace: dice
+type: kubernetes.io/tls
+stringData:
+  tls.crt: "<<< PEM cert chain — provision via cert-manager >>>"
+  tls.key: "<<< PEM private key (PKCS#8) >>>"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dice-jwt
+  namespace: dice
+type: Opaque
+stringData:
+  # The gateway signs + verifies; the auth bin verifies (reads the SAME pair).
+  jwt_ed25519.pem: "<<< Ed25519 private key PEM >>>"
+  jwt_ed25519.pub.pem: "<<< Ed25519 public key PEM >>>"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dice-db
+  namespace: dice
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://dice:CHANGE_ME@dice-postgres.dice.svc.cluster.local:5432/dice"

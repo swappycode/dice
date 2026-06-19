@@ -1,0 +1,141 @@
+# The gateway runs as a StatefulSet, NOT a Deployment, so each pod gets a STABLE
+# ordinal + DNS name. That gives every node a distinct, persistent DICE_NODE_ID
+# (snowflake uniqueness) and a reachable DICE_ADVERTISED_ADDR — which cross-node
+# resume (ADR-0007 phase 0b/2b) uses to redirect/re-host sessions across nodes.
+# DICE_SPLIT=1: the gateway routes auth/chat/presence over NATS RPC to the bins.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dice-gateway
+  namespace: dice
+  labels: { app.kubernetes.io/name: dice-gateway, app.kubernetes.io/part-of: dice }
+spec:
+  serviceName: dice-gateway-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app.kubernetes.io/name: dice-gateway }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: dice-gateway, app.kubernetes.io/part-of: dice }
+    spec:
+      terminationGracePeriodSeconds: 40 # > the 10s in-flight drain
+      containers:
+        - name: gateway
+          image: ghcr.io/swappycode/dice:latest # built from infrastructure/docker/Dockerfile
+          imagePullPolicy: IfNotPresent
+          # Per-pod identity: node id = base + ordinal; advertised addr = the
+          # pod's stable headless-service DNS (what another node redirects to).
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              ORD="${HOSTNAME##*-}"
+              export DICE_NODE_ID="$((NODE_ID_BASE + ORD))"
+              export DICE_ADVERTISED_ADDR="${HOSTNAME}.dice-gateway-headless.dice.svc.cluster.local:8443"
+              exec /usr/local/bin/dice-monolith
+          env:
+            - { name: NODE_ID_BASE, value: "0" } # gateway nodes: 0..=255
+            - { name: DICE_SPLIT, value: "1" }
+            - { name: DICE_SERVICE_NAME, value: "gateway" }
+          envFrom:
+            - configMapRef: { name: dice-config }
+            - secretRef: { name: dice-db } # DATABASE_URL
+          ports:
+            - { name: wss, containerPort: 8443, protocol: TCP }
+            - { name: quic, containerPort: 8444, protocol: UDP }
+            - { name: admin, containerPort: 9600, protocol: TCP }
+          readinessProbe:
+            tcpSocket: { port: wss }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /metrics, port: admin }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "2Gi" } # ~44 KB/conn => 2Gi ~ 40k conns/pod
+          volumeMounts:
+            - { name: tls, mountPath: /etc/dice/tls, readOnly: true }
+            - { name: jwt, mountPath: /etc/dice/keys, readOnly: true }
+      volumes:
+        - { name: tls, secret: { secretName: dice-tls } }
+        - { name: jwt, secret: { secretName: dice-jwt } }
+---
+# Headless service: stable per-pod DNS (dice-gateway-0.dice-gateway-headless...),
+# the basis for DICE_ADVERTISED_ADDR.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dice-gateway-headless
+  namespace: dice
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: { app.kubernetes.io/name: dice-gateway }
+  ports:
+    - { name: wss, port: 8443, protocol: TCP }
+    - { name: quic, port: 8444, protocol: UDP }
+---
+# Client-facing WSS/REST (TCP). The gateway terminates TLS itself, so this is an
+# L4 pass-through LB (NOT an HTTP Ingress). ClientIP affinity routes a reconnect
+# back to its node within the resume window (cross-node resume phase 0); phase
+# 0b/2b make it an optimization, not a requirement. externalTrafficPolicy: Local
+# preserves the real client IP (per-IP rate limiting + QUIC path validation).
+apiVersion: v1
+kind: Service
+metadata:
+  name: dice-gateway-wss
+  namespace: dice
+  labels: { app.kubernetes.io/name: dice-gateway }
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  sessionAffinity: ClientIP
+  selector: { app.kubernetes.io/name: dice-gateway }
+  ports:
+    - { name: wss, port: 8443, targetPort: wss, protocol: TCP }
+---
+# Client-facing QUIC (UDP). Separate Service so it works on every LB
+# implementation (mixed TCP+UDP on one LB needs the MixedProtocolLBService GA in
+# 1.26+). QUIC connection-ids survive a UDP-LB rehash; a reshuffle to another
+# node is absorbed by cross-node resume re-host.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dice-gateway-quic
+  namespace: dice
+  labels: { app.kubernetes.io/name: dice-gateway }
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector: { app.kubernetes.io/name: dice-gateway }
+  ports:
+    - { name: quic, port: 8444, targetPort: quic, protocol: UDP }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dice-gateway
+  namespace: dice
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: StatefulSet, name: dice-gateway }
+  minReplicas: 3
+  maxReplicas: 32
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 } # don't shed nodes holding sessions hastily
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dice-gateway
+  namespace: dice
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: dice-gateway }

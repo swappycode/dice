@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dice
+resources:
+  - namespace.yaml
+  - config.yaml
+  - gateway.yaml
+  - services.yaml
+# Pin the image tag in one place. Build + push from infrastructure/docker/Dockerfile.
+images:
+  - name: ghcr.io/swappycode/dice
+    newTag: latest

@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Prefer an external secrets
+# manager (Vault/SSM/Secrets Manager data sources) over inlining real secrets.
+
+kubeconfig_path    = "~/.kube/config"
+kubeconfig_context = "my-dice-cluster"
+image              = "ghcr.io/swappycode/dice:latest"
+
+database_url = "postgres://dice:CHANGE_ME@my-managed-pg.example.com:5432/dice"
+
+# PEM blobs (use file("path") or a secrets-manager data source in real use).
+jwt_private_pem = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+jwt_public_pem  = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"
+tls_cert_pem    = "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+tls_key_pem     = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"

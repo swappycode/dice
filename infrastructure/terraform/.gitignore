@@ -1,0 +1,11 @@
+# Terraform state + locals — never commit (state can contain secrets).
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+# Real variable values (the .example is committed).
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
