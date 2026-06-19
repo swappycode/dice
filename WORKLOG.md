@@ -7,6 +7,61 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-19 - M4 (12/n): Scaling - cross-node resume phase 1+2b (durable snapshot + re-host)
+
+**M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. Gates green: `just check`
+(fmt + clippy --workspace --all-targets -D warnings + cargo test --workspace + aws-lc gate) +
+desktop-client clippy + `host_gate` (2/2); frontend untouched. **Hardened via a multi-agent
+adversarial review** (5 dimensions × find→verify, 11 agents): **6 confirmed high-severity findings,
+all fixed before commit** — (1) `from_snapshot` re-ran the hot-path eviction → could drop a frame +
+open a seq gap → now restores the ring as-is; (2) split-brain: a concurrent owner `clear()` let a
+racing node re-win the claim → re-verify the snapshot survived the load→claim gap; (3) the owner lease
+(TTL ½ window, refresh ¼ window) outlived the window → tightened to TTL ¼ / refresh ⅛ window; (4)
+`decode` frame-count could exceed `MAX_BUFFERED_FRAMES` → capped; (5)+(6) a re-host that won the claim
+then failed presence/router setup orphaned the claim (blocked retries) → release the claim (keep the
+snapshot) on those paths.
+
+**What + why.** The LAST M4 architecture slice (ADR-0007 phases 1 + 2b). Phase 0b (11/n) handles
+the common cross-node case — the owner is alive, redirect there. This handles the owner's **death
+mid-window**: a *different* node re-hosts the detached session from a durable snapshot, replaying its
+buffered ring with seq continuity, so resume survives losing the origin node (was: REST backfill only).
+- **Durable snapshot (`durable.rs`, new).** On detach, the session task (single seq writer) serializes
+  a `ResumeSnapshot {user, auth_session, resume_token, next_seq, trimmed_to, frames[]}` into the shared
+  `Cache` (`resume:snapshot:{sid}`, TTL = window). Hand-rolled length-prefixed encoding (no schema
+  churn); decode is total (malformed → `None` → fresh Identify). `DurableResume` = save / load / clear /
+  **`try_claim`** (single-takeover via `Cache::incr_expire == 1` — the only atomic single-winner
+  primitive; the `Cache` trait has no SET-NX/CAS).
+- **Owner directory → lease (`session.rs`).** `detached_wait` now records `resume:owner` with a SHORT
+  TTL (½ window) refreshed every ¼ window (+ refreshes the snapshot on the same tick), so a *dead*
+  owner's lease expires within the window (the re-host trigger) while a *live* owner's stays fresh (the
+  phase-0b redirect trigger). Cleared (lease + snapshot) on clean exit.
+- **Re-host (`session.rs::try_rehost` → `handshake::rehost`).** A `Resume` that misses the LOCAL
+  registry AND finds no live owner lease: load the snapshot, constant-time token check + coverage
+  (`last_seq >= trimmed_to`), win the claim, then re-derive the user's world (`sync_user_state` →
+  presence + router), rehydrate `LocalReplayBuffer::from_snapshot`, `ack(last_seq)`, continue seq from
+  `next_seq` (floored at `last_ring_seq + 1`), send `Resumed` + replay, run the session. New metric
+  outcome `dice_gateway_resume_total{outcome="rehosted"}`.
+
+**Seq-safety argument (the crux).** Snapshotting only on detach is monotonic-safe because a DETACHED
+client receives nothing: any seq the origin assigns after the snapshot was never client-visible, so a
+re-host continuing from `next_seq` cannot regress/duplicate a seq the client already saw. The gap of
+post-snapshot events is recovered via REST backfill. **Death while ATTACHED** (no snapshot yet) still
+degrades to a fresh Identify — accepted.
+
+**Verified.** `client_e2e::cross_node_rehost_replays_from_a_snapshot` (seed a snapshot → raw-QUIC
+`Resume` → re-host + replays the ring in seq order over real QUIC) + `detach_persists_a_durable_snapshot`
+(write side) + `durable::tests` (encode/decode round-trip incl. empty/truncated/garbage + claim
+single-winner) + addr round-trip (mem + live Redis). Same-node + phase-0b resume unchanged.
+ResumeSnapshot is seeded via a `#[doc(hidden)]` test seam (a live second node's lease-refresh would
+race an in-process test). Manual two-node (kill A, resume on B) documented in the design doc.
+
+**NEXT.** M4 scaling architecture is COMPLETE: microservices split, observability, lazy members,
+outbox, resume seam, and cross-node resume phases 0/0b/1/2b. The 100k gate is proven (10/n). Remaining
+M4 = none architectural; optional = a literal larger benchmark run + the carried M2/M3 follow-ups.
+M5 (hardening) is next, theme TBD with the user. Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-19 - M4 (11/n): Scaling - cross-node resume phase 0b (actionable redirect)
 
 **M4 theme = Scaling.** Branch `main`. Two commits (`e439e65` feat / `ecea276` docs), pushed.

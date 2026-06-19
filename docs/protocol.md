@@ -111,12 +111,16 @@ Per-session replay ring buffer: **256 frames OR 256 KiB**, whichever first; reta
 history backfill (`GET /v1/channels/{id}/messages?after=<last known id>`).
 
 **Cross-node** (multi-node gateway, ADR-0007): a detached session records its owner in a shared
-session directory (`resume:owner:{session_id}` → node id + advertised address, TTL = the resume
-window). A `Resume` that lands on a *different* node consults the directory: if the owner advertises
-a reachable address (`DICE_ADVERTISED_ADDR`), the gateway replies `Error{INVALID_SESSION,
-redirect_addr}` and the client reconnects to that address and retries Resume (phase 0b); otherwise a
-sticky load balancer must route the reconnect back to the owner (phase 0). The replay ring itself is
-never moved — durable session identity + hand-off are phase 1+.
+session directory as a short **lease** (`resume:owner:{session_id}` → node id + advertised address,
+refreshed while the owner lives) plus a durable **snapshot** (`resume:snapshot:{session_id}` →
+identity + next seq + the ring, TTL = the resume window). A `Resume` that lands on a *different* node:
+if the owner lease is fresh (owner alive) and advertises an address (`DICE_ADVERTISED_ADDR`), the
+gateway replies `Error{INVALID_SESSION, redirect_addr}` and the client reconnects there and retries
+Resume (phase 0b; else a sticky LB routes it — phase 0). If the lease has expired (owner **dead**),
+the landing node re-hosts the session from the snapshot — replaying the buffered ring and continuing
+the seq from where the origin left off (phase 2b), fenced by a single-takeover claim so only one node
+re-hosts. Seq monotonicity is preserved because a detached client has seen nothing past its
+`last_seq`; events lost between the last snapshot and the death are recovered by REST backfill.
 
 ## 6. Message classes
 

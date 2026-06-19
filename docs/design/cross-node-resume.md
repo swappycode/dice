@@ -67,11 +67,47 @@ node that advertises no address keeps the phase-0 behaviour (sticky LB routes it
 This sits behind the same `ResumeRegistry`/`ReplayBuffer` traits (M4 7/n): the redirect
 is additive and a future `SharedResumeRegistry` can fold it in.
 
+## Phase 1 + 2b — durable snapshot + re-host (done)
+
+Phase 0b sends a reconnect back to a *live* owner. Phase 2b survives the owner's **death**:
+a different node re-hosts the session from a durable snapshot.
+
+**The directory entry is now a lease.** `detached_wait` records `resume:owner:{sid}` with a
+short TTL (½ window) and re-records it every ¼ window. A live owner keeps it fresh (→ phase-0b
+redirect); a dead owner's lease expires within the window (→ re-host). The snapshot
+(`resume:snapshot:{sid}`, TTL = full window) carries the identity + `next_seq` + `trimmed_to`
++ the serialized ring; it is refreshed on the same tick. Both are cleared on a clean exit.
+
+**Write side** (`session.rs`): `snapshot_of` captures the ring from the single-writer session
+task; `persist_snapshot` saves it via `durable::DurableResume`. Hand-rolled length-prefixed
+encoding (no schema churn), decode is total (malformed → `None` → fresh Identify).
+
+**Read side** (`session.rs::try_rehost` → `handshake::rehost`): on a local-miss `Resume` with no
+live owner lease — load the snapshot, constant-time token check + coverage (`last_seq >=
+trimmed_to`), then win a **single-takeover claim** (`Cache::incr_expire == 1`, the only atomic
+single-winner primitive — the `Cache` trait has no SET-NX/CAS) so two nodes never re-host the
+same session. The winner re-derives the user's subscriptions (`sync_user_state` → presence +
+router), rehydrates `LocalReplayBuffer::from_snapshot`, `ack(last_seq)`, continues seq from
+`next_seq` (floored at `last_ring_seq + 1`), and sends `Resumed` + replay.
+
+**Why snapshot-on-detach is seq-safe.** A *detached* client receives nothing, so any seq the
+origin assigns AFTER the snapshot was never client-visible. A re-host continuing from the
+snapshot's `next_seq` therefore cannot regress or duplicate a seq the client already saw; the
+gap of post-snapshot events is recovered via REST backfill. **Death while ATTACHED** (no
+snapshot yet) still degrades to a fresh Identify — accepted.
+
+**Cost / accepted limitations.** Re-host detection lags by up to ½ window (the lease TTL). The
+periodic lease+snapshot refresh is one small `Cache` write per detached session per ¼ window.
+A re-host that crashes after winning the claim leaves the claim until its TTL (re-host blocked
+for the rest of the window — rare). The owner's still-alive detached task keeps buffering with
+no transport until it expires (no client-visible double-send).
+
 ## Deferred
 
-- **Phase 1+ — true hand-off / shared replay.** Durable session identity (persist the
-  `resume_token` hash + `next_seq`), then either fetch the buffer from the origin via
-  RPC or move the ring to Redis — must preserve seq monotonicity (ADR-0007).
+- **Phase 2a — hand-off RPC** from a *live* origin. Not built: phase 0b already redirects to a
+  live origin, so re-host targets the dead-origin case directly.
+- **Death-while-attached full replay.** Would need periodic snapshots of attached sessions —
+  deliberately avoided (hot-path cost); REST backfill covers it.
 
 ## Verification
 
@@ -81,6 +117,11 @@ is additive and a future `SharedResumeRegistry` can fold it in.
 - `client_e2e::cross_node_resume_redirects_to_the_owner_address` — seeds the shared
   directory with a remote owner + address and asserts a raw-QUIC `Resume` gets
   `Error{INVALID_SESSION, redirect_addr=<addr>}` (server emit, real QUIC).
+- `client_e2e::cross_node_rehost_replays_from_a_snapshot` — seeds a durable snapshot
+  (the dead origin's ring) and asserts a raw-QUIC `Resume` re-hosts + replays the ring
+  in seq order over real QUIC; `detach_persists_a_durable_snapshot` asserts the write side.
+- `api-gateway durable::tests` — snapshot encode/decode round-trip (incl. empty ring +
+  truncated/garbage → `None`) + `try_claim` admits exactly one winner.
 - Client splicing: `gateway::tests::{redirect_target_accepts_authorities_rejects_garbage,
   redirected_wss_url_splices_authority, effective_wss_url_follows_a_pending_redirect}`.
 - Single-node resume is unchanged (all gateway resume/session + `client_e2e` resume
