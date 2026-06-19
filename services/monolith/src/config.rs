@@ -88,6 +88,11 @@ pub struct MonolithConfig {
     /// Governs how long a detached session's task + replay ring live (memory
     /// under reconnect churn).
     pub resume_window_ms: u32,
+    /// This node's externally-reachable `host:port` (`DICE_ADVERTISED_ADDR`).
+    /// Recorded in the cross-node session directory so a reconnect on another
+    /// node can be redirected here to resume (ADR-0007 phase 0b). Unset = no
+    /// redirect emitted (single-node or sticky-LB-only deployments).
+    pub advertised_addr: Option<String>,
 }
 
 impl MonolithConfig {
@@ -119,6 +124,7 @@ impl MonolithConfig {
             quic: parse_quic_tuning()?,
             heartbeat_ms: env_or("DICE_HEARTBEAT_MS", dice_protocol::HEARTBEAT_INTERVAL_MS)?,
             resume_window_ms: env_or("DICE_RESUME_WINDOW_MS", dice_protocol::RESUME_WINDOW_MS)?,
+            advertised_addr: env_opt("DICE_ADVERTISED_ADDR"),
         })
     }
 

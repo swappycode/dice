@@ -161,6 +161,7 @@ fn error_response(code: ErrorCode, message: impl Into<String>, retry_after_ms: u
             code: code as i32,
             message: message.into(),
             retry_after_ms,
+            redirect_addr: String::new(),
         },
     )
 }

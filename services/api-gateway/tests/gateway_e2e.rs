@@ -163,6 +163,7 @@ async fn spawn_env(tag: &str) -> Env {
         heartbeat_interval_ms: 30_000,
         resume_window_ms: 60_000,
         quic: Default::default(),
+        advertised_addr: None,
     };
     let ct = CancellationToken::new();
     let started = api_gateway::start(cfg, deps, ct.clone()).await.unwrap();

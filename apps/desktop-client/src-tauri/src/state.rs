@@ -1181,6 +1181,7 @@ mod tests {
                 code: 16,
                 message: "invalid credentials".into(),
                 retry_after_ms: 0,
+                redirect_addr: String::new(),
             },
         });
         assert_eq!(api_err.user_message(), "invalid credentials");

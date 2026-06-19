@@ -128,6 +128,7 @@ impl ApiClient {
                     code: ErrorCode::Internal as i32,
                     message: "login response carried no outcome".to_owned(),
                     retry_after_ms: 0,
+                    redirect_addr: String::new(),
                 },
             }),
         }
@@ -434,6 +435,7 @@ impl ApiClient {
                 code: ErrorCode::Internal as i32,
                 message: "upload response missing attachment".to_owned(),
                 retry_after_ms: 0,
+                redirect_addr: String::new(),
             },
         })
     }
@@ -679,6 +681,7 @@ fn error_from(status: StatusCode, body: &[u8]) -> ApiError {
         code: ErrorCode::Unspecified as i32,
         message: format!("HTTP {status} with undecodable error body"),
         retry_after_ms: 0,
+        redirect_addr: String::new(),
     });
     ApiError::Api {
         status: status.as_u16(),

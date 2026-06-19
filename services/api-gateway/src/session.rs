@@ -179,6 +179,24 @@ pub(crate) fn error_frame(nonce: u64, code: ErrorCode, message: &str) -> Frame {
             code: code as i32,
             message: message.to_owned(),
             retry_after_ms: 0,
+            redirect_addr: String::new(),
+        }),
+    )
+}
+
+/// An `INVALID_SESSION` carrying an actionable cross-node redirect (ADR-0007
+/// phase 0b): the resuming client should reconnect to `addr` — the reachable
+/// address of `owner_node`, which still owns the detached session — and retry
+/// Resume there. The connection stays open (protocol §3) so a client that does
+/// not act on `redirect_addr` can still fall back to a fresh Identify.
+pub(crate) fn redirect_frame(owner_node: u16, addr: String) -> Frame {
+    Frame::with_nonce(
+        0,
+        Payload::Error(v1::Error {
+            code: ErrorCode::InvalidSession as i32,
+            message: format!("session owned by node {owner_node}; reconnect to {addr}"),
+            retry_after_ms: 0,
+            redirect_addr: addr,
         }),
     )
 }
@@ -190,6 +208,7 @@ pub(crate) fn rate_limited_frame(nonce: u64, retry_after_ms: u32) -> Frame {
             code: ErrorCode::RateLimited as i32,
             message: "rate limited".to_owned(),
             retry_after_ms,
+            redirect_addr: String::new(),
         }),
     )
 }
@@ -334,26 +353,38 @@ pub(crate) async fn drive_connection(gw: Arc<Gateway>, mut transport: Box<dyn Fr
                             Some(returned) => {
                                 transport = returned;
                                 // Local miss: consult the cross-node directory. If
-                                // another node still owns the detached session, say
-                                // so (phase 0 — the sticky LB routes the reconnect;
-                                // an actionable redirect frame is ADR-0007 phase 0b).
-                                let message = match gw.directory.owner(session_id).await {
-                                    Ok(Some(owner)) if owner != gw.node_id => {
+                                // another node still owns the detached session, send
+                                // an actionable redirect to its advertised address
+                                // (ADR-0007 phase 0b) — or, if that node advertises
+                                // none, the phase-0 message (the sticky LB routes it).
+                                let invalid = match gw.directory.owner(session_id).await {
+                                    Ok(Some(owner)) if owner.node_id != gw.node_id => {
                                         dice_metrics::counter!("dice_gateway_resume_total", "outcome" => "cross_node").increment(1);
                                         tracing::info!(
                                             session_id,
-                                            owner_node = owner,
+                                            owner_node = owner.node_id,
                                             this_node = gw.node_id,
-                                            "resume for a session owned by another node; reconnect via sticky LB"
+                                            redirect = owner.addr.is_some(),
+                                            "resume for a session owned by another node"
                                         );
-                                        "session lives on another node; reconnect via the sticky load balancer"
+                                        match owner.addr {
+                                            Some(addr) => redirect_frame(owner.node_id, addr),
+                                            None => error_frame(
+                                                0,
+                                                ErrorCode::InvalidSession,
+                                                "session lives on another node; reconnect via the sticky load balancer",
+                                            ),
+                                        }
                                     }
                                     _ => {
                                         dice_metrics::counter!("dice_gateway_resume_total", "outcome" => "gone").increment(1);
-                                        "cannot resume; send a fresh Identify"
+                                        error_frame(
+                                            0,
+                                            ErrorCode::InvalidSession,
+                                            "cannot resume; send a fresh Identify",
+                                        )
                                     }
                                 };
-                                let invalid = error_frame(0, ErrorCode::InvalidSession, message);
                                 if transport.send(&invalid).await.is_err() {
                                     return;
                                 }
@@ -573,7 +604,12 @@ async fn detached_wait(gw: &Gateway, st: &mut SessionState) -> Option<Box<dyn Fr
     // degrades to the local INVALID_SESSION path.
     if let Err(error) = gw
         .directory
-        .record(st.session_id, gw.node_id, gw.resume_window)
+        .record(
+            st.session_id,
+            gw.node_id,
+            gw.advertised_addr.as_deref(),
+            gw.resume_window,
+        )
         .await
     {
         tracing::debug!(%error, session_id = st.session_id, "resume directory record failed");

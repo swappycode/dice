@@ -81,6 +81,9 @@ struct Env {
     quic: std::net::SocketAddr,
     tls: TlsOptions,
     cert_dir: PathBuf,
+    /// The shared cache backing the session directory (cross-node resume tests
+    /// seed an owner here).
+    cache: Arc<dyn dice_cache::Cache>,
 }
 
 /// dev-lite in-process gateway: Local bus + Memory cache + live Postgres +
@@ -137,7 +140,7 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
         jwt,
         ids,
         unread: dice_cache::UnreadStore::new(cache.clone()),
-        rate: RateLimiter::new(cache),
+        rate: RateLimiter::new(cache.clone()),
     };
 
     let cert_dir = std::env::temp_dir().join(format!(
@@ -157,6 +160,7 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
             heartbeat_interval_ms,
             resume_window_ms,
             quic: Default::default(),
+            advertised_addr: None,
         },
         deps,
         ct.clone(),
@@ -177,6 +181,7 @@ async fn spawn_env(tag: &str, heartbeat_interval_ms: u32, resume_window_ms: u32)
             extra_ca_pem: Some(certs.ca_pem),
         },
         cert_dir,
+        cache,
     }
 }
 
@@ -839,6 +844,66 @@ async fn expired_resume_invalidates_and_reidentifies() {
         .unwrap()
         .unwrap();
     cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+/// Cross-node resume phase 0b (ADR-0007): a `Resume` for a session this node
+/// never owned, which the shared directory says another node owns AND that node
+/// advertises a reachable address, is answered with an ACTIONABLE redirect —
+/// `Error{INVALID_SESSION, redirect_addr = <owner address>}` — and the
+/// connection stays open. (The seeded directory entry stands in for the owning
+/// node; a real owner records itself in `detached_wait`.)
+#[tokio::test]
+async fn cross_node_resume_redirects_to_the_owner_address() {
+    let env = spawn_env("xnode", 30_000, 60_000).await;
+
+    // Seed the shared directory: a session owned by some OTHER node id (not this
+    // gateway's) that advertises a reachable address.
+    let session_id = 9_900_000_321u64;
+    let owner_addr = "198.51.100.9:8443";
+    let dir = dice_cache::SessionDirectory::new(env.cache.clone());
+    dir.record(session_id, 4095, Some(owner_addr), Duration::from_secs(60))
+        .await
+        .unwrap();
+
+    // Raw QUIC: send a Resume for that session. This node has no local detached
+    // task for it, so it consults the directory and emits the redirect.
+    let target = quic_endpoint(env.quic);
+    let mut quic = QuicTransport::connect(&target, env.tls.quic_client_config().unwrap())
+        .await
+        .expect("dev-CA-anchored QUIC connect must succeed");
+    let resume = Frame::control(Payload::Resume(v1::Resume {
+        gateway_session_id: session_id,
+        resume_token: vec![0u8; 32].into(),
+        last_seq: 0,
+    }));
+    quic.send(&resume).await.unwrap();
+
+    let error = loop {
+        match tokio::time::timeout(RECV_TIMEOUT, quic.recv())
+            .await
+            .expect("timed out waiting for the redirect")
+            .expect("transport error")
+        {
+            Some(frame) => match frame.payload {
+                Some(Payload::Error(error)) => break error,
+                _ => continue, // Hello and any other pre-Error frames
+            },
+            None => panic!("connection closed before the redirect arrived"),
+        }
+    };
+    assert_eq!(error.code, ErrorCode::InvalidSession as i32);
+    assert_eq!(
+        error.redirect_addr, owner_addr,
+        "the redirect carries the owning node's advertised address"
+    );
+
+    quic.close(1000, "test done").await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
     let _ = std::fs::remove_dir_all(&env.cert_dir);
 }
 

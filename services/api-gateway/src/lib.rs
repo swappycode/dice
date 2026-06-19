@@ -57,6 +57,11 @@ pub struct GatewayConfig {
     /// reproduces the protocol §1 production values, so existing callers can use
     /// `QuicServerTuning::default()` for behaviour-neutral operation.
     pub quic: QuicServerTuning,
+    /// This node's externally-reachable `host:port`, recorded in the cross-node
+    /// session directory so a reconnect that lands on another node can be
+    /// redirected here to resume (ADR-0007 phase 0b). `None` = no redirect
+    /// emitted (the sticky-LB phase-0 path).
+    pub advertised_addr: Option<String>,
 }
 
 /// Re-exported so the monolith + harnesses can set [`GatewayConfig::quic`]
@@ -96,6 +101,10 @@ pub(crate) struct Gateway {
     /// which node still owns the detached session.
     pub(crate) directory: dice_cache::SessionDirectory,
     pub(crate) node_id: u16,
+    /// This node's externally-reachable `host:port` (`DICE_ADVERTISED_ADDR`),
+    /// recorded in the directory so another node can redirect a reconnect here
+    /// (resume phase 0b). `None` ⇒ phase-0 sticky-LB behaviour.
+    pub(crate) advertised_addr: Option<String>,
     /// Process-wide shutdown token; sessions broadcast `Close{GOING_AWAY}`
     /// on cancellation.
     pub(crate) ct: CancellationToken,
@@ -171,6 +180,7 @@ pub async fn start(
         resume: Box::new(resume::LocalResumeRegistry::new()),
         directory: dice_cache::SessionDirectory::new(deps.cache.clone()),
         node_id: deps.ids.node_id(),
+        advertised_addr: cfg.advertised_addr,
         heartbeat_interval: Duration::from_millis(u64::from(cfg.heartbeat_interval_ms)),
         resume_window: Duration::from_millis(u64::from(cfg.resume_window_ms)),
         deps,

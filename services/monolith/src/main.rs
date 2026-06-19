@@ -179,6 +179,7 @@ async fn run(cfg: MonolithConfig) -> anyhow::Result<()> {
             heartbeat_interval_ms: cfg.heartbeat_ms,
             resume_window_ms: cfg.resume_window_ms,
             quic: cfg.quic.clone(),
+            advertised_addr: cfg.advertised_addr.clone(),
         },
         deps,
         shutdown.child_token(),

@@ -170,6 +170,7 @@ async fn spawn_env(tag: &str) -> Env {
             heartbeat_interval_ms: dice_protocol::HEARTBEAT_INTERVAL_MS,
             resume_window_ms: dice_protocol::RESUME_WINDOW_MS,
             quic: Default::default(),
+            advertised_addr: None,
         },
         deps,
         ct.clone(),

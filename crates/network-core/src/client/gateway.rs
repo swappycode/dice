@@ -53,6 +53,15 @@ const BACKOFF_CAP_MS: u64 = 30_000;
 const FORCE_RECONNECT_DELAY: Duration = Duration::from_millis(500);
 /// Two missing heartbeat acks ⇒ drop the transport and resume (protocol §4).
 const MAX_MISSED_ACKS: u32 = 2;
+/// A cross-node resume redirect (ADR-0007 phase 0b) reconnects after this short
+/// delay — long enough for the abandoned socket to register at the old node,
+/// short because the owner node already holds the detached session ready to
+/// resume. Does not count as a backoff attempt.
+const REDIRECT_DELAY: Duration = Duration::from_millis(250);
+/// Cap on redirects followed per resume cycle, so a misconfigured directory
+/// cannot bounce a client between nodes forever; past it the client degrades to
+/// a fresh Identify on the current connection.
+const MAX_REDIRECTS: u32 = 3;
 
 // ------------------------------------------------------------ public types
 
@@ -384,6 +393,8 @@ pub fn connect(cfg: GatewayClientConfig, rt: tokio::runtime::Handle) -> GatewayH
             events: event_tx,
             state: state_tx,
             resume: None,
+            redirect: None,
+            redirects_followed: 0,
             attempt: 0,
             auth_retry_used: false,
             pending: PendingSends::default(),
@@ -431,6 +442,37 @@ fn transport_setup(
         }),
     };
     Ok((tls, quic))
+}
+
+/// Validate a cross-node resume redirect address (ADR-0007 phase 0b). Returns
+/// the owned `host:port` only if it is non-empty and a dialable authority
+/// (`QuicEndpoint::from_host_port` accepts `host:port`, `ip:port` and
+/// `[v6]:port`); a malformed or empty `redirect_addr` yields `None` and the
+/// client degrades to a fresh Identify.
+fn redirect_target(redirect_addr: &str) -> Option<String> {
+    if redirect_addr.is_empty() {
+        return None;
+    }
+    QuicEndpoint::from_host_port(redirect_addr)
+        .ok()
+        .map(|_| redirect_addr.to_owned())
+}
+
+/// Splice a redirect authority (`host:port`) into a WSS URL, preserving the
+/// scheme and path (ADR-0007 phase 0b). `None` if the authority is unparseable
+/// or the URL rejects the host/port (caller then keeps the configured URL).
+fn redirected_wss_url(base: &url::Url, authority: &str) -> Option<url::Url> {
+    let (host, port) = authority.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    if host.is_empty() {
+        return None;
+    }
+    let mut url = base.clone();
+    // `rsplit_once(':')` keeps IPv6 literals bracketed (`[::1]`), which is the
+    // form `set_host` parses as IPv6; hostnames/IPv4 pass through unchanged.
+    url.set_host(Some(host)).ok()?;
+    url.set_port(Some(port)).ok()?;
+    Some(url)
 }
 
 // ------------------------------------------------------------------ driver
@@ -504,6 +546,14 @@ struct Driver {
     events: mpsc::Sender<ClientEvent>,
     state: watch::Sender<ConnState>,
     resume: Option<ResumeState>,
+    /// Pending cross-node resume redirect (ADR-0007 phase 0b): the owner node's
+    /// `host:port`. Consumed by the NEXT connection attempt and then cleared —
+    /// that attempt dials this address instead of the configured one and retries
+    /// Resume (the resume state is kept across the redirect).
+    redirect: Option<String>,
+    /// Redirects followed in the current resume cycle; bounds redirect loops.
+    /// Reset on a successful Ready/Resumed.
+    redirects_followed: u32,
     attempt: u32,
     /// One extra TokenProvider round per credential rejection (4001/4002 at
     /// the handshake). Cleared on Ready/Resumed.
@@ -590,7 +640,11 @@ impl Driver {
         };
 
         let plan = self.selector.plan();
-        let Some(mut transport) = self.establish(plan).await else {
+        let transport = self.establish(plan).await;
+        // A redirect (phase 0b) is attempted by exactly one dial, then dropped:
+        // a failed redirect dial falls back to the configured target next cycle.
+        self.redirect = None;
+        let Some(mut transport) = transport else {
             return Flow::Retry { delay: None };
         };
         let transport_kind = transport.kind();
@@ -651,6 +705,7 @@ impl Driver {
                         last_seq: 0,
                     });
                     self.auth_retry_used = false;
+                    self.redirects_followed = 0;
                     let sid = ready.gateway_session_id;
                     if !self.emit(ClientEvent::Ready(Box::new(ready))).await {
                         return Flow::Shutdown;
@@ -659,6 +714,7 @@ impl Driver {
                 }
                 Some(Payload::Resumed(_)) => {
                     self.auth_retry_used = false;
+                    self.redirects_followed = 0;
                     let sid = self
                         .resume
                         .as_ref()
@@ -672,9 +728,25 @@ impl Driver {
                 Some(Payload::Error(error))
                     if resuming && error.code == ErrorCode::InvalidSession as i32 =>
                 {
+                    // Cross-node resume redirect (ADR-0007 phase 0b): the owning
+                    // node lives elsewhere. Abandon this connection and reconnect
+                    // to the advertised address, KEEPING the resume state so
+                    // Resume is retried there (no SessionInvalidated — caches are
+                    // still valid). Bounded so a bad directory can't loop forever.
+                    if self.redirects_followed < MAX_REDIRECTS
+                        && let Some(addr) = redirect_target(&error.redirect_addr)
+                    {
+                        self.redirects_followed += 1;
+                        tracing::info!(addr = %addr, "following cross-node resume redirect");
+                        self.redirect = Some(addr);
+                        return Flow::Retry {
+                            delay: Some(REDIRECT_DELAY),
+                        };
+                    }
                     // Protocol §3: the connection stays open; degrade to a
                     // fresh Identify on the SAME connection.
                     self.resume = None;
+                    self.redirects_followed = 0;
                     resuming = false;
                     if !self.emit(ClientEvent::SessionInvalidated).await {
                         return Flow::Shutdown;
@@ -737,6 +809,7 @@ impl Driver {
                     code: ErrorCode::Unspecified as i32,
                     message: "connection lost before the gateway replied".to_owned(),
                     retry_after_ms: 0,
+                    redirect_addr: String::new(),
                 },
             };
             if !self.emit(lost).await {
@@ -767,11 +840,8 @@ impl Driver {
             },
         };
         // Clone the dial parts out so the connect future borrows no `self`.
-        let Some((target, config)) = self
-            .quic
-            .as_ref()
-            .map(|setup| (setup.target.clone(), setup.config.clone()))
-        else {
+        // A pending redirect (phase 0b) overrides the configured QUIC target.
+        let Some((target, config)) = self.effective_quic() else {
             // Unreachable: QUIC plans require a configured endpoint.
             return self.connect_wss().await;
         };
@@ -795,9 +865,10 @@ impl Driver {
     }
 
     async fn connect_wss(&self) -> Option<AnyTransport> {
+        let url = self.effective_wss_url();
         match tokio::time::timeout(
             CONNECT_TIMEOUT,
-            WssTransport::connect(&self.cfg.wss_url, Arc::clone(&self.tls)),
+            WssTransport::connect(&url, Arc::clone(&self.tls)),
         )
         .await
         {
@@ -811,6 +882,30 @@ impl Driver {
                 None
             }
         }
+    }
+
+    /// The WSS URL for this attempt: the configured one, or — when a cross-node
+    /// resume redirect is pending (phase 0b) — the same URL with the owner's
+    /// `host:port` spliced in (scheme + path preserved). Falls back to the
+    /// configured URL if the redirect authority is unparseable.
+    fn effective_wss_url(&self) -> url::Url {
+        self.redirect
+            .as_deref()
+            .and_then(|authority| redirected_wss_url(&self.cfg.wss_url, authority))
+            .unwrap_or_else(|| self.cfg.wss_url.clone())
+    }
+
+    /// The QUIC dial parts for this attempt: the configured target, or — when a
+    /// redirect is pending (phase 0b) — the owner's address as the target (its
+    /// host becomes the TLS server name). `None` ⇒ no QUIC endpoint configured.
+    fn effective_quic(&self) -> Option<(QuicEndpoint, quinn::ClientConfig)> {
+        let setup = self.quic.as_ref()?;
+        let target = self
+            .redirect
+            .as_deref()
+            .and_then(|authority| QuicEndpoint::from_host_port(authority).ok())
+            .unwrap_or_else(|| setup.target.clone());
+        Some((target, setup.config.clone()))
     }
 
     /// Ready-state pump: commands out, frames in, heartbeats on a timer.
@@ -1031,6 +1126,7 @@ impl Driver {
                 code: ErrorCode::Unspecified as i32,
                 message: "not connected".to_owned(),
                 retry_after_ms: 0,
+                redirect_addr: String::new(),
             },
         })
         .await
@@ -1493,11 +1589,68 @@ mod tests {
             events,
             state,
             resume: None,
+            redirect: None,
+            redirects_followed: 0,
             attempt: 0,
             auth_retry_used: false,
             pending: PendingSends::default(),
             voice_conn: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    /// A redirect authority (phase 0b) is accepted only when it is a dialable
+    /// `host:port`; garbage degrades to a fresh Identify (`None`).
+    #[test]
+    fn redirect_target_accepts_authorities_rejects_garbage() {
+        assert_eq!(
+            redirect_target("203.0.113.4:9443"),
+            Some("203.0.113.4:9443".to_owned())
+        );
+        assert_eq!(
+            redirect_target("node-a.internal:8443"),
+            Some("node-a.internal:8443".to_owned())
+        );
+        assert_eq!(redirect_target("[::1]:8444"), Some("[::1]:8444".to_owned()));
+        for bad in ["", "no-port", ":8443", "host:notaport"] {
+            assert_eq!(redirect_target(bad), None, "{bad:?} must be rejected");
+        }
+    }
+
+    /// The redirect authority is spliced into the WSS URL, preserving scheme and
+    /// path; an unparseable authority yields `None` (caller keeps its URL).
+    #[test]
+    fn redirected_wss_url_splices_authority() {
+        let base = url::Url::parse("wss://lb.example:8443/gateway/v1").unwrap();
+        let named = redirected_wss_url(&base, "node-a.internal:9443").unwrap();
+        assert_eq!(named.scheme(), "wss");
+        assert_eq!(named.host_str(), Some("node-a.internal"));
+        assert_eq!(named.port(), Some(9443));
+        assert_eq!(named.path(), "/gateway/v1");
+
+        let v4 = redirected_wss_url(&base, "198.51.100.7:8443").unwrap();
+        assert_eq!(v4.host_str(), Some("198.51.100.7"));
+        assert_eq!(v4.port(), Some(8443));
+
+        assert!(redirected_wss_url(&base, "garbage").is_none());
+    }
+
+    /// `effective_wss_url` returns the configured URL until a redirect is
+    /// pending, then dials the owner's authority (phase 0b).
+    #[test]
+    fn effective_wss_url_follows_a_pending_redirect() {
+        let mut driver = test_driver();
+        let configured = driver.cfg.wss_url.clone();
+        assert_eq!(
+            driver.effective_wss_url(),
+            configured,
+            "no redirect = as-is"
+        );
+
+        driver.redirect = Some("198.51.100.5:9443".to_owned());
+        let redirected = driver.effective_wss_url();
+        assert_eq!(redirected.host_str(), Some("198.51.100.5"));
+        assert_eq!(redirected.port(), Some(9443));
+        assert_eq!(redirected.path(), configured.path(), "path preserved");
     }
 
     /// `transport_setup` startup validation: quic-only without an endpoint
