@@ -20,6 +20,7 @@
 //! - [`ws`]      — `FramedTransport` adapter over `axum::extract::ws`
 
 mod dispatch;
+mod durable;
 mod handshake;
 mod rest;
 mod resume;
@@ -100,6 +101,9 @@ pub(crate) struct Gateway {
     /// phase 0, ADR-0007): a reconnect that lands on another node can be told
     /// which node still owns the detached session.
     pub(crate) directory: dice_cache::SessionDirectory,
+    /// Durable cross-node resume store (ADR-0007 phase 2b): the snapshot another
+    /// node re-hosts from after this one is gone, + the single-takeover claim.
+    pub(crate) durable: durable::DurableResume,
     pub(crate) node_id: u16,
     /// This node's externally-reachable `host:port` (`DICE_ADVERTISED_ADDR`),
     /// recorded in the directory so another node can redirect a reconnect here
@@ -127,6 +131,35 @@ impl Started {
             .await
             .context("gateway supervisor task panicked")
     }
+}
+
+/// Test-only seam: seed a durable cross-node resume snapshot into `cache` so an
+/// integration test can exercise re-host (ADR-0007 phase 2b) without standing up
+/// a second node whose live lease-refresh would race the test. Hidden from docs;
+/// not part of the supported API.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)] // mirrors the (pub(crate)) snapshot fields
+pub async fn seed_resume_snapshot(
+    cache: Arc<dyn dice_cache::Cache>,
+    session_id: u64,
+    user: u64,
+    auth_session: u64,
+    resume_token: [u8; 32],
+    next_seq: u64,
+    trimmed_to: u64,
+    frames: Vec<dice_protocol::v1::Frame>,
+) {
+    let snapshot = durable::ResumeSnapshot {
+        user,
+        auth_session,
+        resume_token,
+        next_seq,
+        trimmed_to,
+        frames,
+    };
+    let _ = durable::DurableResume::new(cache)
+        .save(session_id, &snapshot, Duration::from_secs(60))
+        .await;
 }
 
 /// Budget for the post-shutdown drain (docs/design §9: 10 s).
@@ -179,6 +212,7 @@ pub async fn start(
         voice_dg: voice_dg::VoiceDatagrams::new(deps.voice.clone()),
         resume: Box::new(resume::LocalResumeRegistry::new()),
         directory: dice_cache::SessionDirectory::new(deps.cache.clone()),
+        durable: durable::DurableResume::new(deps.cache.clone()),
         node_id: deps.ids.node_id(),
         advertised_addr: cfg.advertised_addr,
         heartbeat_interval: Duration::from_millis(u64::from(cfg.heartbeat_interval_ms)),

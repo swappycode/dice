@@ -907,6 +907,144 @@ async fn cross_node_resume_redirects_to_the_owner_address() {
     let _ = std::fs::remove_dir_all(&env.cert_dir);
 }
 
+/// Cross-node resume phase 2b (ADR-0007): a node re-hosts a detached session
+/// FROM its durable snapshot after the origin is gone — replaying the buffered
+/// ring with seq continuity. A snapshot is seeded directly (standing in for the
+/// origin's `persist_snapshot`, whose live lease-refresh would otherwise race
+/// the test), then a raw-QUIC `Resume` lands on a node that never hosted the
+/// session: no local task, no live owner lease → re-host + replay.
+#[tokio::test]
+async fn cross_node_rehost_replays_from_a_snapshot() {
+    let env = spawn_env("rehost", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+    let (name, email) = unique("rh");
+    let auth = api
+        .register(&email, &name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+
+    // The detached session's ring: three buffered messages (seq 1..=3), next 4.
+    let session_id = 9_950_000_123u64;
+    let resume_token = [9u8; 32];
+    let frames: Vec<Frame> = (1..=3)
+        .map(|seq| Frame {
+            seq,
+            nonce: 0,
+            payload: Some(Payload::MessageCreate(v1::MessageCreate {
+                message: Some(v1::Message {
+                    id: seq,
+                    channel_id: 7,
+                    author_id: user.id,
+                    content: format!("m{seq}"),
+                    ..Default::default()
+                }),
+                nonce: 0,
+            })),
+        })
+        .collect();
+    api_gateway::seed_resume_snapshot(
+        env.cache.clone(),
+        session_id,
+        user.id,
+        1,
+        resume_token,
+        4,
+        0,
+        frames,
+    )
+    .await;
+
+    // Raw QUIC Resume (last_seq=0) → the node re-hosts + replays the ring.
+    let target = quic_endpoint(env.quic);
+    let mut quic = QuicTransport::connect(&target, env.tls.quic_client_config().unwrap())
+        .await
+        .unwrap();
+    quic.send(&Frame::control(Payload::Resume(v1::Resume {
+        gateway_session_id: session_id,
+        resume_token: resume_token.to_vec().into(),
+        last_seq: 0,
+    })))
+    .await
+    .unwrap();
+
+    let mut resumed = false;
+    let mut got = Vec::new();
+    while got.len() < 3 {
+        match tokio::time::timeout(RECV_TIMEOUT, quic.recv())
+            .await
+            .expect("timed out waiting for the re-host replay")
+            .expect("transport error")
+        {
+            Some(frame) => match frame.payload {
+                Some(Payload::Resumed(_)) => resumed = true,
+                Some(Payload::MessageCreate(_)) => got.push(frame.seq),
+                _ => {} // Hello and other control frames
+            },
+            None => panic!("connection closed before the replay completed"),
+        }
+    }
+    assert!(resumed, "Resumed must precede the replay");
+    assert_eq!(
+        got,
+        vec![1, 2, 3],
+        "the buffered ring replays in seq order on the re-hosting node"
+    );
+
+    quic.close(1000, "test done").await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
+/// The write side of phase 2b: an abrupt drop detaches the session and persists
+/// a durable snapshot into the shared cache (where a re-hosting node would find
+/// it). Observed in the ~½-second window before the driver's auto-resume clears
+/// it again.
+#[tokio::test]
+async fn detach_persists_a_durable_snapshot() {
+    let env = spawn_env("snap", 30_000, 60_000).await;
+    let api = ApiClient::new(env.base.clone(), &env.tls).unwrap();
+    let (name, email) = unique("sp");
+    let auth = api
+        .register(&email, &name, "correct-horse-battery")
+        .await
+        .unwrap();
+    let user = auth.user.clone().unwrap();
+
+    let mut handle = gw_connect(&env, Arc::new(StaticToken(auth.access_token.clone())));
+    let session_id = expect_ready(&mut handle).await.gateway_session_id;
+
+    // Abrupt drop → the gateway detaches and persists the snapshot.
+    handle.send(Command::ForceReconnect).await.unwrap();
+
+    let key = dice_cache::keys::resume_snapshot(session_id);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if env.cache.get(&key).await.unwrap().is_some() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a durable snapshot must be persisted on detach"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    handle.shutdown().await;
+    env.ct.cancel();
+    tokio::time::timeout(Duration::from_secs(15), env.started.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    cleanup(&env.pool, &[user.id], &[]).await;
+    let _ = std::fs::remove_dir_all(&env.cert_dir);
+}
+
 /// Credential rejection at Identify (close 4001): the driver asks the
 /// TokenProvider once more and recovers if the second token is good — or
 /// lands in `Failed` if the provider keeps producing garbage.

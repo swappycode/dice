@@ -15,9 +15,10 @@ use tokio::time::Instant;
 
 use crate::Gateway;
 use crate::dispatch::TokenBucket;
-use crate::resume::{LocalReplayBuffer, RESUME_TOKEN_LEN};
+use crate::durable::ResumeSnapshot;
+use crate::resume::{LocalReplayBuffer, RESUME_TOKEN_LEN, ReplayBuffer};
 use crate::session::{
-    KillSwitch, OUTBOUND_QUEUE, SessionSender, SessionState, close_with, run_ready,
+    KillSwitch, OUTBOUND_QUEUE, SessionSender, SessionState, close_with, resume_replay, run_ready,
 };
 
 /// Full Identify path. Owns the transport: on success it runs the session to
@@ -212,6 +213,127 @@ pub(crate) async fn identify(
         voice_capable,
         "session ready"
     );
+    run_ready(gw, st, transport).await;
+}
+
+/// Re-host a detached session from its durable snapshot on a DIFFERENT node
+/// after the origin is gone (cross-node resume phase 2b, ADR-0007). Mirrors
+/// [`identify`] — re-derive the user's world, reconnect presence, register
+/// interest — but seeded with the EXISTING `session_id`, `resume_token`, next
+/// seq and the rehydrated replay ring, and sends `Resumed` + replay instead of
+/// `Ready`. The caller has already validated the resume token + ring coverage
+/// and won the single-takeover claim; on success it owns the transport for the
+/// rest of the session's life. `last_seq` is the client's cumulative ack.
+pub(crate) async fn rehost(
+    gw: Arc<Gateway>,
+    mut transport: Box<dyn FramedTransport>,
+    session_id: u64,
+    snapshot: ResumeSnapshot,
+    last_seq: u64,
+) {
+    let user = dice_common::id::UserId::from_raw(snapshot.user);
+    let auth_session = SessionId::from_raw(snapshot.auth_session);
+
+    // Re-derive the user's current subscription set — membership may have moved
+    // since the snapshot; we re-subscribe to the world as it is NOW.
+    let sync = match gw.deps.chat.sync_user_state(user).await {
+        Ok(sync) => sync,
+        Err(error) => {
+            tracing::error!(%error, %user, session_id, "re-host: sync_user_state failed");
+            // Release the takeover claim (won by try_rehost) but KEEP the snapshot
+            // so another node — or a retry — can still re-host this valid session.
+            let _ = gw.durable.release_claim(session_id).await;
+            close_with(&mut *transport, ErrorCode::Internal, "state sync failed").await;
+            return;
+        }
+    };
+    let guild_ids: Vec<GuildId> = sync
+        .guilds
+        .iter()
+        .map(|g| GuildId::from_raw(g.id))
+        .collect();
+    let dm_ids: Vec<ChannelId> = sync
+        .dm_channels
+        .iter()
+        .map(|c| ChannelId::from_raw(c.id))
+        .collect();
+
+    // Reconnect presence on THIS node (the origin's entry TTLs out).
+    if let Err(error) = gw
+        .deps
+        .presence
+        .connect(
+            user,
+            SessionId::from_raw(session_id),
+            &guild_ids,
+            &dm_ids,
+            PresenceStatus::Online,
+        )
+        .await
+    {
+        tracing::error!(%error, %user, session_id, "re-host: presence connect failed");
+        let _ = gw.durable.release_claim(session_id).await; // free the fence, keep the snapshot
+        close_with(
+            &mut *transport,
+            ErrorCode::Internal,
+            "presence connect failed",
+        )
+        .await;
+        return;
+    }
+
+    // Register interest BEFORE Resumed so nothing slips in between.
+    let (tx, outbound) = mpsc::channel(OUTBOUND_QUEUE);
+    let kill = KillSwitch::new();
+    let sender = SessionSender::new(session_id, user, auth_session, tx, kill.clone());
+    if let Err(error) = gw
+        .router
+        .register_session(&sender, &guild_ids, &dm_ids)
+        .await
+    {
+        tracing::error!(%error, %user, session_id, "re-host: interest registration failed");
+        gw.router.unregister_session(session_id);
+        if let Err(error) = gw
+            .deps
+            .presence
+            .disconnect(user, SessionId::from_raw(session_id))
+            .await
+        {
+            tracing::debug!(%error, "presence disconnect after failed re-host registration");
+        }
+        let _ = gw.durable.release_claim(session_id).await; // free the fence, keep the snapshot
+        close_with(&mut *transport, ErrorCode::Internal, "subscription failed").await;
+        return;
+    }
+
+    // Rehydrate the ring (coverage restored via trimmed_to) and continue seq
+    // from the snapshot. `ring_next` guards against a stale next_seq: the highest
+    // buffered seq + 1 is a hard lower bound, so a re-host never reuses a seq the
+    // client already saw.
+    let ring_next = snapshot
+        .frames
+        .last()
+        .map_or(snapshot.next_seq, |f| f.seq + 1);
+    let next_seq = snapshot.next_seq.max(ring_next);
+    let mut replay = LocalReplayBuffer::from_snapshot(snapshot.frames, snapshot.trimmed_to);
+    replay.ack(last_seq); // drop what the client already has, as on the origin
+
+    let mut st = SessionState {
+        user,
+        auth_session,
+        session_id,
+        resume_token: snapshot.resume_token,
+        outbound,
+        kill,
+        next_seq,
+        replay: Box::new(replay),
+        last_heartbeat: Instant::now(),
+        bucket: TokenBucket::default(),
+    };
+
+    tracing::info!(%user, session_id, next_seq, this_node = gw.node_id, "re-hosting session");
+    // `Resumed` + replay of the rehydrated, acked ring (original seqs).
+    resume_replay(&mut st, &mut *transport).await;
     run_ready(gw, st, transport).await;
 }
 

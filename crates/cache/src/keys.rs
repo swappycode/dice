@@ -36,12 +36,29 @@ pub fn rate_limit(scope: &str, principal: &str) -> String {
 
 /// `resume:owner:{session_id}` → little-endian `u16` node id of the gateway that
 /// owns a detached session's replay buffer, optionally followed by that node's
-/// advertised `host:port` (UTF-8), so a reconnect on another node can be routed
-/// back to the owner — via a sticky LB (phase 0) or an actionable redirect
-/// (phase 0b) — within the resume window (see [`crate::SessionDirectory`]). TTL
-/// is the resume window, supplied at write time.
+/// advertised `host:port` (UTF-8). Written as a **lease** (short TTL, refreshed
+/// while the session lives) so a reconnect on another node can both be routed
+/// back to a *live* owner — via a sticky LB (phase 0) or an actionable redirect
+/// (phase 0b) — and detect a *dead* owner (the lease expires) to re-host the
+/// session from its durable snapshot (phase 2b). See [`crate::SessionDirectory`].
 pub fn session_owner(session_id: u64) -> String {
     format!("resume:owner:{session_id}")
+}
+
+/// `resume:snapshot:{session_id}` → the detached session's durable resume state
+/// (identity + next seq + the serialized replay ring), so a *different* gateway
+/// node can re-host the session after the origin is gone (cross-node resume
+/// phase 2b, ADR-0007). TTL is the resume window, supplied at write time.
+pub fn resume_snapshot(session_id: u64) -> String {
+    format!("resume:snapshot:{session_id}")
+}
+
+/// `resume:claim:{session_id}` → single-takeover fence for cross-node re-host
+/// (phase 2b): a counter incremented via [`crate::Cache::incr_expire`] so EXACTLY
+/// ONE node (the one that reads back `1`) re-hosts a given session snapshot, even
+/// if several reconnects race. TTL is the resume window.
+pub fn resume_claim(session_id: u64) -> String {
+    format!("resume:claim:{session_id}")
 }
 
 #[cfg(test)]

@@ -43,6 +43,9 @@ pub(crate) trait ReplayBuffer: Send + Sync {
     fn ack(&mut self, last_seq: u64);
     /// Can a client that has everything up to `last_seq` be fully healed?
     fn covers(&self, last_seq: u64) -> bool;
+    /// Highest seq no longer in the ring (acked/evicted) — persisted into the
+    /// durable snapshot so coverage survives a cross-node re-host (ADR-0007).
+    fn trimmed_to(&self) -> u64;
     /// Buffered frames in seq order (all have seq > the last acked). The `Send`
     /// bound keeps the session future `Send` while it replays across awaits.
     fn iter(&self) -> Box<dyn Iterator<Item = &Frame> + Send + '_>;
@@ -66,6 +69,28 @@ impl LocalReplayBuffer {
             total_bytes: 0,
             trimmed_to: 0,
         }
+    }
+
+    /// Rehydrate a ring from a durable snapshot (frames already in seq order,
+    /// seqs assigned) so a re-hosting node can replay them (ADR-0007 phase 2b).
+    /// Restores the frames + `trimmed_to` EXACTLY as captured — it must NOT
+    /// re-run [`push`](Self::push)'s hot-path eviction, which could drop a frame
+    /// (and bump `trimmed_to`) and so open a seq gap the coverage check, gated on
+    /// the snapshot's `trimmed_to`, already approved. The snapshot frames were
+    /// bound-compliant when captured; `decode` caps the count defensively.
+    pub(crate) fn from_snapshot(frames: Vec<Frame>, trimmed_to: u64) -> Self {
+        let mut buffer = Self::new();
+        buffer.trimmed_to = trimmed_to;
+        for frame in frames {
+            let bytes = frame.encoded_len();
+            buffer.total_bytes += bytes;
+            buffer.frames.push_back(Buffered {
+                seq: frame.seq,
+                bytes,
+                frame,
+            });
+        }
+        buffer
     }
 
     fn evict_front(&mut self) {
@@ -111,6 +136,10 @@ impl ReplayBuffer for LocalReplayBuffer {
 
     fn covers(&self, last_seq: u64) -> bool {
         last_seq >= self.trimmed_to
+    }
+
+    fn trimmed_to(&self) -> u64 {
+        self.trimmed_to
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = &Frame> + Send + '_> {
@@ -284,6 +313,24 @@ mod tests {
         assert_eq!(buf.len(), 1, "newest frame always survives");
         buf.push(msg_frame(2, "small"));
         assert_eq!(buf.iter().next().unwrap().seq, 2);
+    }
+
+    #[test]
+    fn from_snapshot_restores_exactly_without_eviction() {
+        // Two frames that together exceed the byte bound: the hot-path `push`
+        // would evict the first (and bump trimmed_to), opening a seq gap. A
+        // snapshot restore must keep BOTH and preserve the given trimmed_to, so
+        // the coverage the re-host's gate approved still holds.
+        let big = "x".repeat(200 * 1024);
+        let frames = vec![msg_frame(100, &big), msg_frame(101, &big)];
+        let buf = LocalReplayBuffer::from_snapshot(frames, 99);
+        let seqs: Vec<u64> = buf.iter().map(|f| f.seq).collect();
+        assert_eq!(seqs, vec![100, 101], "both frames survive the restore");
+        assert!(buf.covers(99), "trimmed_to preserved (no eviction bump)");
+        assert!(
+            !buf.covers(98),
+            "still cannot heal below the snapshot's trimmed_to"
+        );
     }
 
     #[test]
