@@ -7,6 +7,49 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-19 - M4 CLOSE-OUT: strictly-remaining items + carried follow-ups + test guide
+
+**M4 = Scaling — COMPLETE.** Branch `main`. Per-unit commits, pushed (`30afa33` ADR-0008 /
+`cc49771` infra / `5cc041a` read-markers backend / `3b65110` unread-divider UI). Gates green:
+`just check` + desktop clippy + `host_gate` + frontend `npm run check`/`build`. Cleared the last
+ROADMAP §M4 bullets + the doable carried follow-ups; wrote the full M4 test guide.
+
+**Strictly-remaining ROADMAP §M4 items:**
+- **Guild sharding — DECIDED AGAINST (ADR-0008).** Inapplicable to a user-client model (vs Discord's
+  bot shards); NATS subjects already distribute guild fan-out, and 100k/node + cross-node resume +
+  lazy members cover the envelope. Scaling out = "add gateway nodes behind the LB".
+- **k8s + terraform made real** (`cc49771`, was placeholder READMEs). `infrastructure/docker/Dockerfile`
+  (multi-stage, SQLX_OFFLINE + ring-only, all 4 bins). `infrastructure/kubernetes/`: gateway
+  **StatefulSet** (per-pod `DICE_NODE_ID`=base+ordinal + `DICE_ADVERTISED_ADDR` from the headless-svc
+  DNS — the exact cross-node-resume knobs), `DICE_SPLIT` routing; auth/chat/presence StatefulSets
+  (distinct node-id ranges, NATS queue-group RPC); L4 LoadBalancers for WSS(TCP, ClientIP affinity) +
+  QUIC(UDP); HPA + PDB; ConfigMap + Secret templates; kustomization + README. `infrastructure/terraform/`:
+  namespace + TLS/JWT/DB secrets + NATS/Redis Helm releases (the stateful + credential layer; the app
+  stays kustomize). YAML parse-validated (no kube tooling bundled).
+
+**Carried follow-ups:**
+- **Unread divider** — full vertical. **Backend** (`5cc041a`): `Ready.read_markers` (proto field) +
+  split-RPC `ChatSyncResp.read_markers`; chat `sync_user_state` loads the user's read_markers
+  (tested: `sync_user_state_carries_read_markers`). The HANDOFF flagged "needs server exposure first"
+  — this is it. **UI** (`3b65110`): host `apply_ready` persists them to the cache + `bootstrap_snapshot`
+  reads them back; the unread store tracks last-read per channel (seeded from bootstrap, advanced by
+  ReadMarkerUpdate); `MessageList` freezes the last-read at channel-open (`createMemo`+`on`) and renders
+  a "New messages" accent line before the first newer message; mock seeds a `#general` marker for the
+  browser demo. *(Pre::Frame boxed — Ready grew → large_enum_variant.)* **Visual — user verifies.**
+- (Earlier this run: orphaned-media GC + per-`--profile` WebView2 isolation — see below / their commits.)
+
+**Deferred (documented, with reasons):** TOTP-secret at-rest encryption (key source + migration);
+email-verify login gate (BLOCKED — no SMTP); voice AEC / polyphase resampling / gateway-crash
+roster-TTL (M3 carry-overs); the `<100 MB` RAM stretch (WebView2 floor — an M5 goal).
+
+**M4 TEST GUIDE — `docs/testing-m4.md`** (local-only): end-to-end manual + automated steps for ALL of
+M4 (split mode, observability, lazy members, outbox, cross-node resume 0b/2b, 100k benchmark, media GC,
+WV2 isolation, unread divider, voice device switch, k8s/terraform validation), with exact commands +
+expected results. **NEXT: M5 (Optimization & hardening)** — theme TBD with the user (cargo-deny CI,
+fuzz the codec + REST, perf passes, the RAM goal, release pipeline). Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-19 - M4 follow-up: orphaned-media GC sweep
 
 **M4 theme = Scaling.** Branch `main`. One commit (`c1572aa`), pushed. Gate green: `just check`
