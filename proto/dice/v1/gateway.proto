@@ -4,6 +4,7 @@ package dice.v1;
 
 import "dice/v1/common.proto";
 import "dice/v1/presence.proto";
+import "dice/v1/message.proto";
 
 message Hello {
   uint32 heartbeat_interval_ms = 1;  // 30000; client jitters first beat +/-10%
@@ -38,6 +39,10 @@ message Ready {
   repeated Channel dm_channels = 5;
   repeated PresenceUpdate presences = 6;
   repeated User users = 7;           // deduped dictionary: all members + DM recipients
+  // Per-channel last-read pointers (read_markers table) so the client can render
+  // the unread divider on first open without waiting for a live ReadMarkerUpdate.
+  // Only channels the user has ever marked read appear.
+  repeated ReadMarkerUpdate read_markers = 8;
 }
 
 message Resumed {}

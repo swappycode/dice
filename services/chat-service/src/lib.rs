@@ -56,6 +56,9 @@ pub struct UserSyncState {
     pub dm_channels: Vec<v1::Channel>,
     /// Deduplicated user dictionary: all guild members + DM recipients + self.
     pub users: Vec<v1::User>,
+    /// Per-channel last-read pointers (one per channel the user has read), for
+    /// the client's unread divider on first open.
+    pub read_markers: Vec<v1::ReadMarkerUpdate>,
 }
 
 /// One page of guild members for lazy member loading ([`Chat::request_members`]).

@@ -295,7 +295,7 @@ pub(crate) async fn drive_connection(gw: Arc<Gateway>, mut transport: Box<dyn Fr
     let deadline = Instant::now() + IDENTIFY_DEADLINE;
     loop {
         enum Pre {
-            Frame(Frame),
+            Frame(Box<Frame>),
             CleanClose,
             Error(TransportError),
             Timeout,
@@ -306,7 +306,7 @@ pub(crate) async fn drive_connection(gw: Arc<Gateway>, mut transport: Box<dyn Fr
             () = gw.ct.cancelled() => Pre::Shutdown,
             () = tokio::time::sleep_until(deadline) => Pre::Timeout,
             received = transport.recv() => match received {
-                Ok(Some(frame)) => Pre::Frame(frame),
+                Ok(Some(frame)) => Pre::Frame(Box::new(frame)),
                 Ok(None) => Pre::CleanClose,
                 Err(error) => Pre::Error(error),
             },

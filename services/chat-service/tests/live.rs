@@ -1386,3 +1386,44 @@ async fn friend_request_can_be_declined() {
 
     ctx.finish().await;
 }
+
+/// sync_user_state (→ Ready) carries the user's per-channel last-read pointers,
+/// so the client can place the unread divider on first open (M4 follow-up).
+#[tokio::test]
+async fn sync_user_state_carries_read_markers() {
+    let ctx = Ctx::new(1).await;
+    let a = ctx.users[0];
+    let guild = ctx.svc.create_guild(a, "rm-test".into()).await.unwrap();
+    let general = ChannelId::from_raw(guild.channels[0].id);
+
+    // No marker before the channel is ever read.
+    let before = ctx.svc.sync_user_state(a).await.unwrap();
+    assert!(
+        !before
+            .read_markers
+            .iter()
+            .any(|m| m.channel_id == general.raw()),
+        "no read marker before reading"
+    );
+
+    // Send a message, mark the channel read; the sync now carries the marker.
+    let msg = ctx
+        .svc
+        .send_message(a, general, "hi".into(), None, vec![], 1)
+        .await
+        .unwrap();
+    ctx.svc.mark_read(a, general).await.unwrap();
+
+    let after = ctx.svc.sync_user_state(a).await.unwrap();
+    let marker = after
+        .read_markers
+        .iter()
+        .find(|m| m.channel_id == general.raw())
+        .expect("read marker for the channel is exposed in Ready/sync");
+    assert_eq!(
+        marker.last_read_message_id, msg.id,
+        "marker points at the last read message"
+    );
+
+    ctx.finish().await;
+}

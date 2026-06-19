@@ -1222,6 +1222,7 @@ mod tests {
             guilds: vec![stale_guild],
             dm_channels: vec![],
             presences: vec![],
+            read_markers: vec![],
             users: vec![],
         };
         cache.apply_ready(ready1).await.unwrap();
@@ -1263,6 +1264,7 @@ mod tests {
             guilds: vec![guild],
             dm_channels: vec![dm],
             presences: vec![],
+            read_markers: vec![],
             users: vec![v1::User {
                 id: 2,
                 username: "priya7".into(),
@@ -1331,6 +1333,7 @@ mod tests {
                 guilds: vec![guild],
                 dm_channels: vec![],
                 presences: vec![],
+            read_markers: vec![],
                 users: vec![],
             })
             .await
@@ -1351,6 +1354,7 @@ mod tests {
                 guilds: vec![],
                 dm_channels: vec![],
                 presences: vec![],
+            read_markers: vec![],
                 users: vec![],
             })
             .await
@@ -1403,6 +1407,7 @@ mod tests {
                 guilds: vec![],
                 dm_channels: vec![],
                 presences: vec![],
+            read_markers: vec![],
                 users: vec![],
             })
             .await

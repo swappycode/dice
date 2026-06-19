@@ -38,6 +38,7 @@ impl Chat for MockChat {
                 id: user.raw(),
                 ..Default::default()
             }],
+            read_markers: vec![],
         })
     }
 

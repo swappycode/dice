@@ -8,6 +8,7 @@ package dice.internal.v1;
 
 import "dice/v1/presence.proto";
 import "dice/v1/common.proto";
+import "dice/v1/message.proto";
 
 message PresenceConnectReq {
   fixed64 user = 1;
@@ -97,6 +98,7 @@ message ChatSyncResp {
   repeated dice.v1.Guild guilds = 1;
   repeated dice.v1.Channel dm_channels = 2;
   repeated dice.v1.User users = 3;
+  repeated dice.v1.ReadMarkerUpdate read_markers = 4;
 }
 
 message ChatSendMessageReq {

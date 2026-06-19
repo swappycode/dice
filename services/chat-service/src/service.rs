@@ -225,10 +225,28 @@ impl Chat for ChatService {
         })
         .collect();
 
+        // Per-channel last-read pointers, so the client can place the unread
+        // divider on first open (vs. waiting for a live ReadMarkerUpdate).
+        let read_markers = sqlx::query!(
+            r#"SELECT channel_id, last_read_message_id FROM read_markers
+               WHERE user_id = $1 ORDER BY channel_id"#,
+            user.as_i64()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|r| v1::ReadMarkerUpdate {
+            channel_id: r.channel_id as u64,
+            last_read_message_id: r.last_read_message_id as u64,
+        })
+        .collect();
+
         Ok(UserSyncState {
             guilds,
             dm_channels,
             users,
+            read_markers,
         })
     }
 

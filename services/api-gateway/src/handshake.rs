@@ -172,6 +172,7 @@ pub(crate) async fn identify(
         dm_channels: sync.dm_channels,
         presences,
         users: sync.users,
+        read_markers: sync.read_markers,
     }));
 
     let st = SessionState {
@@ -393,6 +394,7 @@ mod tests {
                     ..Default::default()
                 }, // non-inlined member → trimmed
             ],
+            read_markers: vec![],
         };
         retain_inlined_users(&mut sync, 1);
         let kept: Vec<u64> = sync.users.iter().map(|u| u.id).collect();

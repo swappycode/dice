@@ -135,6 +135,7 @@ pub async fn serve(client: RpcClient, chat: Arc<dyn Chat>) -> Result<(), RpcErro
                             guilds: s.guilds,
                             dm_channels: s.dm_channels,
                             users: s.users,
+                            read_markers: s.read_markers,
                         }
                         .encode_to_vec())
                     }
@@ -392,6 +393,7 @@ impl Chat for ChatNatsClient {
             guilds: r.guilds,
             dm_channels: r.dm_channels,
             users: r.users,
+            read_markers: r.read_markers,
         })
     }
 
