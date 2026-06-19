@@ -7,6 +7,35 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-19 - M4 follow-up: orphaned-media GC sweep
+
+**M4 theme = Scaling.** Branch `main`. One commit (`c1572aa`), pushed. Gate green: `just check`
++ desktop clippy. **M4's scaling ARCHITECTURE is complete** (split + observability + lazy members +
+outbox + resume seam + cross-node resume 0/0b/1/2b + 100k proven); this is the first of the carried
+"safe quick win" follow-ups the HANDOFF parked for after the benchmark — a resource-hygiene item that
+fits the Scaling theme (the store can't grow unbounded).
+
+**What + why.** Reap `media` blobs no message or avatar references any more (deleted attachments,
+replaced avatars, uploads whose send never landed). `media-service/gc.rs`: a poll-based sweep mirroring
+the M4 transactional-outbox relay — a slow interval loop (`POLL_INTERVAL` 5 min) claiming a bounded
+batch `FOR UPDATE SKIP LOCKED` (multi-node-safe). A row is orphaned iff in neither `message_attachments`
+NOR any `users.avatar_media_id`, older than a 1-hour grace (the upload→attach/avatar link lands a beat
+after the row). Deletion is **blob-then-row, both idempotent**, so a crash mid-sweep self-heals (a
+surviving row is re-found, `MediaStore::delete` no-ops on the gone blob). Metric `dice_media_gc_reaped_total`.
+Spawned unconditionally in the monolith (media never splits); the `LocalFsStore` is hoisted to a shared
+`Arc`. `just sqlx-prepare` re-run (new GC queries).
+
+**Verified.** `media-service/tests/gc.rs` (live PG): an orphan is grace-protected, then reaped (blob +
+row) once aged past the grace; re-sweep is a no-op; an avatar-referenced blob survives (message_attachments
+is the symmetric clause). Per-row assertions + the 1-hour grace keep it from colliding with concurrent
+tests' fresh uploads.
+
+**NEXT.** More carried "safe quick wins": per-`--profile` WebView2 data dir (client isolation),
+unread-divider UI (needs `last_read_message_id` exposed — check first). Then close M4 / open M5
+(hardening) with the user. Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-19 - M4 (12/n): Scaling - cross-node resume phase 1+2b (durable snapshot + re-host)
 
 **M4 theme = Scaling.** Branch `main`. Per-unit commits, pushed. Gates green: `just check`
