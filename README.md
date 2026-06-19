@@ -6,12 +6,15 @@ Discord-class features with Telegram-class efficiency: a QUIC + secure-WebSocket
 gateway, async Rust backend services over PostgreSQL / Redis / NATS, and a native **Tauri 2 +
 SolidJS** desktop client wrapped in a funky **Windows XP / Windows 7 retro UI**.
 
-> **Status:** Milestones 1–3 complete — auth, guilds/channels/DMs, real-time messaging, typing,
+> **Status:** Milestones 1–4 complete — auth, guilds/channels/DMs, real-time messaging, typing,
 > presence, resume-after-disconnect, **voice end-to-end** (SFU over QUIC datagrams), themes and
-> friends, all over both QUIC and WSS. M4 (scaling) underway: the backend runs as a monolith **or**
-> split microservices from one codebase, and **one gateway node sustains 30k concurrent connections
-> at ~44 KB each** (≈4.7 GB extrapolated to 100k). 200+ backend tests + a headless client gate, all
-> green. See [WORKLOG.md](WORKLOG.md) for the build log.
+> friends, all over both QUIC and WSS. **M4 (scaling)**: the backend runs as a monolith **or** split
+> microservices from one codebase; **one gateway node sustains 30k concurrent connections at ~44 KB
+> each** (≈4.7 GB extrapolated to 100k); **cross-node resume** survives a gateway node's death
+> (redirect to the live owner, or re-host the session from a durable snapshot elsewhere); + a
+> transactional outbox, lazy member lists, full observability (metrics/traces), and real
+> Kubernetes/Terraform deploy manifests. 200+ backend tests + a headless client gate, all green.
+> See [WORKLOG.md](WORKLOG.md) for the build log. M5 (hardening) is next.
 
 ## Why
 
@@ -81,7 +84,7 @@ two real `client-as` windows for real users.)
 | `services/` | Backend services (auth, chat, presence, api-gateway) as libs + thin bins, plus the `dice-monolith` all-in-one bin |
 | `apps/desktop-client/` | Tauri 2 host (`src-tauri/`) + SolidJS frontend (`src/`) — its own cargo workspace |
 | `proto/` | Protobuf schemas (`dice.v1` client-facing, `dice.internal.v1` bus) |
-| `infrastructure/docker/` | docker-compose for Postgres, Redis, NATS JetStream + the opt-in Prometheus/Grafana stack |
+| `infrastructure/` | `docker/` (compose for Postgres/Redis/NATS + the opt-in Prometheus/Grafana/Tempo stack + the bin Dockerfile), `kubernetes/` (split-fleet manifests: gateway StatefulSet, services, LB), `terraform/` (namespace, secrets, backing stores) |
 | `docs/` | Getting started, normative protocol spec, ADRs, design docs, roadmap |
 
 ## Documentation
