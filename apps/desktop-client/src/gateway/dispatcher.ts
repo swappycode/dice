@@ -37,7 +37,9 @@ import {
   clearUnread,
   markChannelRead,
   resetUnread,
+  setAllReadMarkers,
   setAllUnread,
+  setReadMarker,
 } from "../stores/unread";
 import { currentUser, session, setLoginNotice, setSession } from "../stores/session";
 import { clearTyping, noteTyping } from "../stores/typing";
@@ -97,8 +99,10 @@ function dispatch(ev: DiceEvent): void {
       setPresenceLocal(ev.userId, ev.status);
       break;
     case "readMarkerUpdate":
-      // Another of this user's devices read the channel — clear its badge here.
+      // This device or another read the channel — clear its badge here and
+      // advance the last-read pointer (moves the unread divider).
       clearUnread(ev.channelId);
+      setReadMarker(ev.channelId, ev.lastReadMessageId);
       break;
     case "userUpdate":
       applyUserUpdate(ev.user);
@@ -179,6 +183,7 @@ export async function runBootstrap(): Promise<void> {
   const b = await ipc.getBootstrap();
   applyBootstrap(b);
   loadPresence(b.presence);
+  setAllReadMarkers(b.readMarkers);
   try {
     setAllUnread(await ipc.fetchUnread());
     // The channel you're already viewing isn't unread.

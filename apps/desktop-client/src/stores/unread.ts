@@ -7,8 +7,33 @@ import { directory } from "./guilds";
  *  non-active channels, cleared when a channel is opened. */
 const [unread, setUnread] = createStore<Record<string, number>>({});
 
+/** Per-channel last-read message id (snowflake string), for the unread divider.
+ *  Seeded from the bootstrap (`Ready.read_markers`) and advanced by
+ *  `ReadMarkerUpdate` dispatches (this device or another). */
+const [readMarkers, setReadMarkers] = createStore<Record<string, string>>({});
+
 export function unreadCount(channelId: string): number {
   return unread[channelId] ?? 0;
+}
+
+/** The user's last-read message id in `channelId`, or null if never read. */
+export function lastReadMessageId(channelId: string): string | null {
+  return readMarkers[channelId] ?? null;
+}
+
+/** Replace the whole read-marker map (boot / resync). */
+export function setAllReadMarkers(map: Record<string, string>): void {
+  setReadMarkers(
+    produce((s) => {
+      for (const k of Object.keys(s)) delete s[k];
+      Object.assign(s, map);
+    }),
+  );
+}
+
+/** Advance one channel's last-read pointer (from a ReadMarkerUpdate). */
+export function setReadMarker(channelId: string, messageId: string): void {
+  setReadMarkers(produce((s) => (s[channelId] = messageId)));
 }
 
 /** Replace the whole map (boot / resync). */
@@ -42,6 +67,7 @@ export function guildHasUnread(guildId: string): boolean {
 
 export function resetUnread(): void {
   setUnread(produce((s) => void Object.keys(s).forEach((k) => delete s[k])));
+  setReadMarkers(produce((s) => void Object.keys(s).forEach((k) => delete s[k])));
 }
 
 export { unread };

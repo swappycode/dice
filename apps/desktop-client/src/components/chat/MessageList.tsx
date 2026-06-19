@@ -1,8 +1,10 @@
 import {
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   For,
+  on,
   Show,
   type Component,
 } from "solid-js";
@@ -10,6 +12,7 @@ import { ipc } from "../../lib/ipc";
 import type { Attachment, Message } from "../../lib/types";
 import { crossesDay, dayLabel, formatTime } from "../../lib/time";
 import { displayName, selectedChannelId, unknownUserIds } from "../../stores/guilds";
+import { lastReadMessageId } from "../../stores/unread";
 import {
   messageById,
   messagesFor,
@@ -29,6 +32,16 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Is snowflake `id` newer than the unread `anchor` (both u64 strings)? */
+function afterAnchor(id: string | undefined, anchor: string | null): boolean {
+  if (anchor == null || !id) return false;
+  try {
+    return BigInt(id) > BigInt(anchor);
+  } catch {
+    return false;
+  }
 }
 
 /** One attachment: an inline image, or a download chip for other files. Bytes
@@ -85,6 +98,13 @@ export const MessageList: Component = () => {
 
   const channelId = () => selectedChannelId() ?? "";
   const messages = () => messagesFor(channelId());
+
+  // Freeze the last-read pointer when the channel opens, so the "new messages"
+  // divider holds its position while you read (it only re-anchors on a channel
+  // switch, not when a ReadMarkerUpdate advances the live pointer).
+  const unreadAnchor = createMemo(
+    on(channelId, (ch) => (ch ? lastReadMessageId(ch) : null)),
+  );
 
   const isOwn = (m: Message): boolean => m.authorId === currentUser()?.id;
 
@@ -180,6 +200,16 @@ export const MessageList: Component = () => {
                 <Show when={!prev() || crossesDay(prev()!.createdAtMs, m.createdAtMs)}>
                   <div class={styles.day}>
                     <span class={styles.dayLabel}>{dayLabel(m.createdAtMs)}</span>
+                  </div>
+                </Show>
+                <Show
+                  when={
+                    afterAnchor(m.id, unreadAnchor()) &&
+                    !afterAnchor(prev()?.id, unreadAnchor())
+                  }
+                >
+                  <div class={styles.unread}>
+                    <span class={styles.unreadLabel}>New messages</span>
                   </div>
                 </Show>
                 <div

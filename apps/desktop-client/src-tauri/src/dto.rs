@@ -392,6 +392,8 @@ pub struct BootstrapDto {
     pub users: Vec<UserDto>,
     pub presence: BTreeMap<String, String>,
     pub last_channel_id: Option<String>,
+    /// channel id → last-read message id (for the unread divider).
+    pub read_markers: BTreeMap<String, String>,
 }
 
 /// The `DiceEvent` union of `lib/types.ts` (serde-tagged on `type`).

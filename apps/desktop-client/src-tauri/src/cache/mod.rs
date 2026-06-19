@@ -49,6 +49,8 @@ pub struct BootstrapData {
     pub dms: Vec<ChannelDto>,
     pub users: Vec<UserDto>,
     pub last_channel_id: Option<String>,
+    /// channel id → last-read message id, for the unread divider.
+    pub read_markers: BTreeMap<String, String>,
 }
 
 impl BootstrapData {
@@ -61,6 +63,7 @@ impl BootstrapData {
             users: self.users,
             presence,
             last_channel_id: self.last_channel_id,
+            read_markers: self.read_markers,
         }
     }
 }
@@ -154,6 +157,17 @@ impl Cache {
             }
             for dm in &ready.dm_channels {
                 upsert_channel(&tx, dm)?;
+            }
+            // Seed the per-channel last-read pointers so the unread divider has a
+            // position on first open (same upsert as the live ReadMarkerUpdate).
+            for rm in &ready.read_markers {
+                tx.execute(
+                    "INSERT INTO read_markers(channel_id, last_read_message_id) VALUES (?1, ?2)
+                     ON CONFLICT(channel_id) DO UPDATE SET
+                         last_read_message_id =
+                             max(last_read_message_id, excluded.last_read_message_id)",
+                    params![rm.channel_id as i64, rm.last_read_message_id as i64],
+                )?;
             }
             tx.commit()
         })
@@ -699,6 +713,16 @@ impl Cache {
                 }
             }
 
+            let mut read_markers = BTreeMap::new();
+            let mut stmt = conn
+                .prepare_cached("SELECT channel_id, last_read_message_id FROM read_markers")?;
+            for row in
+                stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+            {
+                let (channel_id, last_read) = row?;
+                read_markers.insert(channel_id.to_string(), last_read.to_string());
+            }
+
             Ok(Some(BootstrapData {
                 user,
                 guilds,
@@ -706,6 +730,7 @@ impl Cache {
                 dms,
                 users,
                 last_channel_id: get_meta(conn, "last_channel_id")?,
+                read_markers,
             }))
         })
         .await

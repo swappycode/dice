@@ -60,6 +60,31 @@
   color: var(--c-text-dim);
 }
 
+/* unread divider — a "New messages" line in the theme accent, marking the first
+   message since the user's last read (frozen at channel open). */
+.unread {
+  display: flex;
+  align-items: center;
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+.unread::before,
+.unread::after {
+  content: "";
+  flex: 1;
+  height: 0;
+  border-top: 1px solid var(--c-accent);
+}
+
+.unreadLabel {
+  padding: 0 var(--sp-3);
+  font-size: var(--font-size-chrome);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+}
+
 .row {
   position: relative;
   padding: var(--sp-1) 0;

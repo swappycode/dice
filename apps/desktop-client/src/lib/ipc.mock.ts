@@ -388,6 +388,9 @@ export function createMockIpc(): DiceIpc {
         users: users.map((u) => ({ ...u })),
         presence: { ...presence },
         lastChannelId: chGeneral.id,
+        // Last read 25 min ago in #general → the "new messages" divider sits
+        // above its three most recent messages (demoes the divider in mock mode).
+        readMarkers: { [chGeneral.id]: genId(now - 25 * min) },
       };
     },
 

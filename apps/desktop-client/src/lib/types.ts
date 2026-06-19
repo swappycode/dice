@@ -130,6 +130,7 @@ export interface Bootstrap {
   users: User[]; // everyone referenced by members/DMs/messages
   presence: Record<string, PresenceStatus>;
   lastChannelId: string | null;
+  readMarkers: Record<string, string>; // channelId → last-read message id (unread divider)
 }
 
 export type ConnState =
