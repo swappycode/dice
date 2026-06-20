@@ -175,7 +175,10 @@ fn map_auth_error(error: AuthError) -> Response {
         | AuthError::TotpNotEnabled => {
             error_response(ErrorCode::InvalidArgument, error.to_string(), 0)
         }
-        AuthError::InvalidCredentials | AuthError::InvalidToken | AuthError::InvalidTotp => {
+        AuthError::InvalidCredentials
+        | AuthError::EmailNotVerified
+        | AuthError::InvalidToken
+        | AuthError::InvalidTotp => {
             error_response(ErrorCode::Unauthenticated, error.to_string(), 0)
         }
         AuthError::RateLimited { retry_after_ms } => {

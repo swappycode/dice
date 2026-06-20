@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, display_name, flags, avatar_media_id, password_hash, totp_enabled FROM users WHERE LOWER(email) = LOWER($1)",
+  "query": "SELECT id, username, display_name, flags, avatar_media_id, password_hash, totp_enabled, email_verified FROM users WHERE LOWER(email) = LOWER($1)",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "totp_enabled",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "email_verified",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       false,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "dee20c8b91081fa5f309df1b12c232d8e39b42a113b206baa2488079fc7e2fad"
+  "hash": "1c9460031a0197b1cdbce19038e18b79c81ccbe6127f81b610fbbdd3b4c0c50b"
 }

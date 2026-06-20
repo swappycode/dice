@@ -26,6 +26,8 @@ pub enum AuthError {
     InvalidArgument(String),
     #[error("invalid credentials")]
     InvalidCredentials,
+    #[error("email address not verified")]
+    EmailNotVerified,
     #[error("invalid or expired token")]
     InvalidToken,
     #[error("invalid two-factor code")]

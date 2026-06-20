@@ -530,6 +530,69 @@ async fn totp_enroll_confirm_login_recovery_disable() {
 }
 
 #[tokio::test]
+async fn login_requires_verified_email_when_gated() {
+    let h = harness().await;
+    // A second service instance with the gate ON, sharing the capture mailer and
+    // pool. A distinct snowflake node id keeps its ids off the node-0 generator.
+    let cache = dice_cache::connect(CacheConfig::Memory).await.unwrap();
+    let ids = Arc::new(SnowflakeGenerator::new(7).unwrap());
+    let gated = AuthService::new(
+        h.pool.clone(),
+        cache,
+        Arc::clone(&h.jwt),
+        ids,
+        Arc::clone(&h.bus),
+    )
+    .with_mailer(Arc::new(h.mailer.clone()))
+    .require_email_verification(true);
+
+    let username = unique("evg");
+    let email = email_for(&username);
+    // Register still mints an initial session (signup grace), even with the gate.
+    let reg = gated
+        .register(&email, &username, PASSWORD, None)
+        .await
+        .unwrap();
+    let uid = UserId::from_raw(reg.user.unwrap().id);
+
+    // But an unverified login is now blocked.
+    assert!(matches!(
+        gated.login(&email, PASSWORD, None).await,
+        Err(AuthError::EmailNotVerified)
+    ));
+
+    // Verify via the mailed token, then login succeeds.
+    let vtoken = h
+        .mailer
+        .last_token("dvt_")
+        .expect("register mails a verify token");
+    gated.verify_email(&vtoken).await.unwrap();
+    assert!(matches!(
+        gated.login(&email, PASSWORD, None).await.unwrap(),
+        LoginOutcome::Success(_)
+    ));
+
+    // The default service (gate OFF) lets an unverified user log in.
+    let username2 = unique("evg");
+    let email2 = email_for(&username2);
+    let reg2 = h
+        .svc
+        .register(&email2, &username2, PASSWORD, None)
+        .await
+        .unwrap();
+    let uid2 = UserId::from_raw(reg2.user.unwrap().id);
+    assert!(
+        matches!(
+            h.svc.login(&email2, PASSWORD, None).await.unwrap(),
+            LoginOutcome::Success(_)
+        ),
+        "gate off by default — an unverified user logs in fine"
+    );
+
+    cleanup(&h.pool, &[uid.raw(), uid2.raw()]).await;
+}
+
+#[tokio::test]
 async fn email_verify_and_password_reset() {
     let h = harness().await;
     let username = unique("ev");

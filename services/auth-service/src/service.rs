@@ -62,6 +62,9 @@ const ORIGIN: &str = "auth-service";
 /// the signing seed). Changing this string re-keys — only do so with a
 /// re-encryption migration; encrypted secrets would otherwise fail to decrypt.
 const TOTP_KEY_INFO: &[u8] = b"dice.totp.secret.v1";
+/// Env flag: when `1`/`true`, login requires a verified email address. Default
+/// OFF so dev (no SMTP — the [`LogMailer`] only logs the link) isn't locked out.
+const REQUIRE_EMAIL_VERIFY_ENV: &str = "DICE_REQUIRE_EMAIL_VERIFICATION";
 
 /// Postgres-backed [`Auth`] implementation.
 pub struct AuthService {
@@ -78,6 +81,9 @@ pub struct AuthService {
     /// auth-service always holds the private half), in which case the secret is
     /// stored/read as legacy plaintext.
     totp_cipher: Option<SecretCipher>,
+    /// When true, [`login`](Self::login) requires a verified email address.
+    /// Defaults from `DICE_REQUIRE_EMAIL_VERIFICATION`; off in dev.
+    require_email_verification: bool,
 }
 
 impl AuthService {
@@ -96,6 +102,9 @@ impl AuthService {
         let totp_cipher = jwt
             .derive_symmetric_key(TOTP_KEY_INFO)
             .map(SecretCipher::from_key);
+        let require_email_verification = std::env::var(REQUIRE_EMAIL_VERIFY_ENV)
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
         Self {
             pool,
             limiter: RateLimiter::new(cache),
@@ -104,7 +113,17 @@ impl AuthService {
             bus,
             mailer: Arc::new(LogMailer),
             totp_cipher,
+            require_email_verification,
         }
+    }
+
+    /// Force the email-verification login gate on or off, overriding the
+    /// `DICE_REQUIRE_EMAIL_VERIFICATION` default. Primarily a test seam;
+    /// production configures it via the env var.
+    #[must_use]
+    pub fn require_email_verification(mut self, required: bool) -> Self {
+        self.require_email_verification = required;
+        self
     }
 
     /// Encrypt a freshly minted TOTP secret for storage (legacy plaintext if no
@@ -415,7 +434,8 @@ impl Auth for AuthService {
         .await?;
 
         let row = sqlx::query!(
-            "SELECT id, username, display_name, flags, avatar_media_id, password_hash, totp_enabled \
+            "SELECT id, username, display_name, flags, avatar_media_id, password_hash, \
+                    totp_enabled, email_verified \
              FROM users WHERE LOWER(email) = LOWER($1)",
             email,
         )
@@ -441,6 +461,14 @@ impl Auth for AuthService {
             .map_err(|e| internal("argon2 verify", e))?;
         if !ok {
             return Err(AuthError::InvalidCredentials);
+        }
+
+        // Email-verification gate (opt-in via DICE_REQUIRE_EMAIL_VERIFICATION).
+        // Checked AFTER the password so it can't be a user-enumeration oracle,
+        // and BEFORE issuing any session or 2FA ticket. Register still mints an
+        // initial session (signup grace) — this gates subsequent logins.
+        if self.require_email_verification && !row.email_verified {
+            return Err(AuthError::EmailNotVerified);
         }
 
         // Password OK. With 2FA on, hand back a short-lived ticket instead of a

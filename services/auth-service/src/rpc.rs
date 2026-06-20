@@ -30,6 +30,7 @@ const CODE_INVALID_TOTP: u32 = 6;
 const CODE_TOTP_ALREADY_ENABLED: u32 = 7;
 const CODE_TOTP_NOT_ENABLED: u32 = 8;
 const CODE_RATE_LIMITED: u32 = 9;
+const CODE_EMAIL_NOT_VERIFIED: u32 = 10;
 
 fn ip_to_str(ip: Option<IpAddr>) -> String {
     ip.map(|i| i.to_string()).unwrap_or_default()
@@ -51,6 +52,7 @@ fn to_fault(e: AuthError) -> RpcFault {
         AuthError::UsernameTaken => CODE_USERNAME_TAKEN,
         AuthError::InvalidArgument(_) => CODE_INVALID_ARGUMENT,
         AuthError::InvalidCredentials => CODE_INVALID_CREDENTIALS,
+        AuthError::EmailNotVerified => CODE_EMAIL_NOT_VERIFIED,
         AuthError::InvalidToken => CODE_INVALID_TOKEN,
         AuthError::InvalidTotp => CODE_INVALID_TOTP,
         AuthError::TotpAlreadyEnabled => CODE_TOTP_ALREADY_ENABLED,
@@ -94,6 +96,10 @@ fn to_err(e: RpcError) -> AuthError {
             code: CODE_INVALID_CREDENTIALS,
             ..
         } => AuthError::InvalidCredentials,
+        RpcError::Fault {
+            code: CODE_EMAIL_NOT_VERIFIED,
+            ..
+        } => AuthError::EmailNotVerified,
         RpcError::Fault {
             code: CODE_INVALID_TOKEN,
             ..
