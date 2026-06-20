@@ -233,6 +233,18 @@ impl DiceEvent {
             users: chunk.users.iter().map(UserDto::from).collect(),
         }
     }
+
+    /// Build a `GuildMemberAdd` event from a live join dispatch. `None` if the
+    /// payload carries no member (malformed); the member's own `guild_id` keys it.
+    #[must_use]
+    pub fn guild_member_add(ma: &v1::GuildMemberAdd) -> Option<Self> {
+        let member = ma.member.as_ref()?;
+        Some(Self::GuildMemberAdd {
+            guild_id: id_str(member.guild_id),
+            member: MemberDto::from(member),
+            user: ma.user.as_ref().map(UserDto::from),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -467,6 +479,15 @@ pub enum DiceEvent {
         users: Vec<UserDto>,
         has_more: bool,
     },
+    /// A user joined a guild we're in (live): append to the roster and warm the
+    /// directory with `user`, so the member sidebar updates without a reconnect.
+    #[serde(rename_all = "camelCase")]
+    GuildMemberAdd {
+        guild_id: String,
+        member: MemberDto,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<UserDto>,
+    },
     /// Resolved user records (on-demand user-fetch reply): merge into the
     /// directory so previously-unknown message authors render.
     #[serde(rename_all = "camelCase")]
@@ -525,6 +546,39 @@ mod tests {
 
         let expired = serde_json::to_value(DiceEvent::SessionExpired).unwrap();
         assert_eq!(expired["type"], "sessionExpired");
+    }
+
+    #[test]
+    fn guild_member_add_carries_roster_and_warms_the_directory() {
+        let ma = v1::GuildMemberAdd {
+            member: Some(v1::Member {
+                user_id: 7,
+                guild_id: 42,
+                joined_at_ms: 0,
+                permissions: 0,
+            }),
+            user: Some(v1::User {
+                id: 7,
+                username: "bob".into(),
+                display_name: String::new(),
+                flags: 0,
+                avatar_id: 0,
+            }),
+        };
+        let ev = DiceEvent::guild_member_add(&ma).expect("member present");
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["type"], "guildMemberAdd");
+        assert_eq!(json["guildId"], "42");
+        assert_eq!(json["member"]["userId"], "7");
+        assert_eq!(json["user"]["username"], "bob");
+        assert_eq!(json["user"]["displayName"], "bob", "empty display falls back to username");
+
+        // A malformed payload with no member yields no event.
+        let empty = v1::GuildMemberAdd {
+            member: None,
+            user: None,
+        };
+        assert!(DiceEvent::guild_member_add(&empty).is_none());
     }
 
     #[test]

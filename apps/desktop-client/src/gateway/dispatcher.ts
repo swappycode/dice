@@ -13,6 +13,7 @@ import {
   addDm,
   addGuild,
   applyBootstrap,
+  applyMemberAdd,
   applyMemberChunk,
   applyUsers,
   applyUserUpdate,
@@ -121,6 +122,15 @@ function dispatch(ev: DiceEvent): void {
       const last = ev.members[ev.members.length - 1];
       if (ev.hasMore && last) {
         void ipc.requestGuildMembers(ev.guildId, last.userId, 100);
+      }
+      break;
+    }
+    case "guildMemberAdd": {
+      applyMemberAdd(ev.guildId, ev.member, ev.user);
+      // The join event should carry the user record; resolve on demand if not.
+      if (!ev.user) {
+        const unknown = unknownUserIds([ev.member.userId]);
+        if (unknown.length) void ipc.requestUsers(unknown);
       }
       break;
     }

@@ -166,6 +166,7 @@ export type DiceEvent =
       users: User[];
       hasMore: boolean;
     }
+  | { type: "guildMemberAdd"; guildId: string; member: Member; user?: User }
   | { type: "users"; users: User[] }
   | { type: "channelCreate"; channel: Channel }
   | { type: "dmChannelCreate"; channel: Channel; users: User[] }

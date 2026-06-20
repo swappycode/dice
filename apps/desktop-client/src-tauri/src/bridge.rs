@@ -570,6 +570,18 @@ impl Bridge {
                     );
                 }
             }
+            Payload::MemberAdd(ma) => {
+                // A user joined a guild we're in: persist the new member, then
+                // push it live (roster + warm user record) so the member sidebar
+                // updates without a reconnect. Previously this fell into the
+                // cache-only arm below, so the join only showed after a resync.
+                if let Err(error) = self.cache.apply_event(payload.clone()).await {
+                    tracing::warn!(%error, "member-add cache write failed");
+                }
+                if let Some(event) = DiceEvent::guild_member_add(ma) {
+                    emit_dice(&self.emitter, &event);
+                }
+            }
             // Cache-only dispatches (no dedicated frontend event in M1).
             _ => {
                 if let Err(error) = self.cache.apply_event(payload).await {

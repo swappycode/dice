@@ -86,6 +86,22 @@ export function applyMemberChunk(guildId: string, members: Member[], users: User
   );
 }
 
+/** A user joined a guild we're in (live `guildMemberAdd`): warm the directory
+ *  with their record and append them to the roster (dedup by userId), so the
+ *  member sidebar + count update live — no reconnect. */
+export function applyMemberAdd(guildId: string, member: Member, user?: User): void {
+  setDirectory(
+    produce((d) => {
+      if (user) {
+        d.usersById[user.id] = d.usersById[user.id] ? { ...d.usersById[user.id], ...user } : user;
+      }
+      const g = d.guilds.find((x) => x.id === guildId);
+      if (!g) return;
+      if (!g.members.some((m) => m.userId === member.userId)) g.members.push(member);
+    }),
+  );
+}
+
 /** Merge resolved user records (on-demand user-fetch reply) into the directory. */
 export function applyUsers(users: User[]): void {
   if (users.length === 0) return;
