@@ -7,6 +7,50 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-20 - M4 test-drive bug fixes + M5 KICKOFF (Optimization & hardening)
+
+**Branch `main`. Per-unit commits, pushed.** Gates green per unit (`just check` for the workspace
+crates; desktop clippy + `host_gate` + frontend `npm run check`/`build` for the client).
+
+**Two bugs found while user-testing M4 with two clients, both fixed:**
+- **Guild joins weren't live** (`5a872eb`) — a `GuildMemberAdd` dispatch was caught by the desktop
+  bridge's *cache-only* arm: the new member was written to the SQLite cache but **no `DiceEvent` was
+  emitted**, so the member sidebar only updated after a reconnect re-ran bootstrap. Wired it end to
+  end (bridge emits `guildMemberAdd` w/ the roster member + warm user record → `applyMemberAdd` store
+  → dispatcher case). Server already populated `GuildMemberAdd{member,user}` — pure client wiring.
+- **Per-profile prefs leaked across instances** (`66604a5`) — two `client-as alice`/`bob` instances
+  shared voice-device selection (and would have shared theme/perf/custom-theme): those live in browser
+  `localStorage`, and the per-profile WebView2 user-data-folder (`f54c4c9`) does **not** reliably
+  isolate `localStorage` for the main window. Fix = namespace every per-account `localStorage` key by
+  profile — host injects the sanitized name before any page script as `window.__DICE_PROFILE__`
+  (lib.rs `initialization_script`), `src/lib/profileScope.ts` `scopedKey(base)→base@<profile>`
+  (default/mock keep bare keys), applied in voiceSettings/theme/perfMode/customTheme + the index.html
+  pre-paint script. (Note: across SEPARATE machines this never happens — it's a same-box artifact.)
+
+**M4 manual testing status (user-driven):** guild/messaging/members/themes ✅, voice end-to-end ✅,
+30k-conn ✅ (100k skipped — 30k is enough, GSO-less Windows host), lazy members covered by the
+automated 150-member test, observability stack started (`just metrics-up`). Cross-node resume left to
+its automated tests (manual two-node dance not worth it); deploy manifests are structure-validated.
+
+**M5 KICKOFF — theme = Optimization & hardening.** Working the deferred backlog (user-chosen order):
+1. **TOTP-secret encryption-at-rest — ✅ DONE (`b0aba32`).** `dice-auth-core::cipher::SecretCipher`
+   (AES-256-GCM, RustCrypto / pure Rust — aws-lc gate clean); stored form `v1.<base64(nonce‖ct)>`,
+   key HKDF-derived from the Ed25519 signing seed (`JwtKeys::derive_symmetric_key` — no separate key
+   to manage, identical monolith/split). Encrypt on enroll, decrypt on confirm/login/disable; an
+   untagged value is legacy plaintext (passthrough) so **no data migration** needed. Tests: cipher
+   units + derivation determinism/domain-separation/verify-only + the live TOTP flow asserts `v1.`
+   ciphertext at rest. (`users.totp_secret` was plaintext since migration 0010 — this closes it.)
+2. **Email-verify login gate** — the verify flow + `LogMailer` (logs the link, no SMTP) already ship;
+   gating login on verified status is next. NEXT.
+3. **Voice AEC / polyphase resampling** — polyphase is pure-Rust DSP (doable); AEC needs a C/C++ APM
+   (deferred for the toolchain reason, M3 carry-over).
+4. **`<100 MB` idle-RAM goal** — measurement + WebView2-arg tuning pass; the host is ~5.5 MB, the
+   rest is the WebView2 floor (the hard part).
+
+**Resume at:** M5 item 2 (email-verify gate). Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-19 - M4 CLOSE-OUT: strictly-remaining items + carried follow-ups + test guide
 
 **M4 = Scaling — COMPLETE.** Branch `main`. Per-unit commits, pushed (`30afa33` ADR-0008 /

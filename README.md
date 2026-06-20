@@ -14,7 +14,8 @@ SolidJS** desktop client wrapped in a funky **Windows XP / Windows 7 retro UI**.
 > (redirect to the live owner, or re-host the session from a durable snapshot elsewhere); + a
 > transactional outbox, lazy member lists, full observability (metrics/traces), and real
 > Kubernetes/Terraform deploy manifests. 200+ backend tests + a headless client gate, all green.
-> See [WORKLOG.md](WORKLOG.md) for the build log. M5 (hardening) is next.
+> See [WORKLOG.md](WORKLOG.md) for the build log. **M5 (optimization & hardening) is in progress** —
+> TOTP-secret encryption-at-rest (AES-256-GCM, key derived from the signing seed) landed first.
 
 ## Why
 
