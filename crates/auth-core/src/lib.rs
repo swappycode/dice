@@ -8,9 +8,13 @@
 //! - [`token`] — EdDSA (Ed25519) access JWTs with `{sub, sid, iat, exp, iss,
 //!   aud}` claims (docs/protocol.md §12) and opaque `drt_`-prefixed refresh
 //!   tokens (server stores SHA-256 only; constant-time comparison).
+//! - [`cipher`] — AES-256-GCM secret-at-rest for credentials that must be
+//!   recovered (not hashed), e.g. the TOTP shared secret. The key is derived
+//!   from the signing seed ([`token::JwtKeys::derive_symmetric_key`]).
 //!
 //! This crate performs no IO and has no async dependencies.
 
+pub mod cipher;
 pub mod password;
 pub mod token;
 pub mod totp;

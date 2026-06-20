@@ -56,9 +56,15 @@ pub enum TokenError {
 ///
 /// Holds a decoding (public) key always, and an encoding (private) key only
 /// when constructed via [`JwtKeys::from_pem`] / [`JwtKeys::generate_ephemeral`].
+/// When the private half is present, the 32-byte signing seed is retained so a
+/// symmetric app-encryption key can be derived from it
+/// ([`JwtKeys::derive_symmetric_key`]) — no separate key store to manage.
 pub struct JwtKeys {
     encoding: Option<EncodingKey>,
     decoding: DecodingKey,
+    /// Ed25519 signing seed, `Some` iff the private half is loaded. Used only
+    /// as HKDF input material — never serialized.
+    seed: Option<[u8; 32]>,
 }
 
 impl std::fmt::Debug for JwtKeys {
@@ -76,6 +82,10 @@ impl JwtKeys {
         Ok(Self {
             encoding: Some(EncodingKey::from_ed_pem(private_pem)?),
             decoding: DecodingKey::from_ed_pem(public_pem)?,
+            // Best-effort: keep the seed for key derivation. A signable key whose
+            // PKCS#8 seed we can't re-parse still signs fine; it just can't
+            // derive a symmetric key (→ derive_symmetric_key returns None).
+            seed: seed_from_pkcs8_pem(private_pem),
         })
     }
 
@@ -85,6 +95,7 @@ impl JwtKeys {
         Ok(Self {
             encoding: None,
             decoding: DecodingKey::from_ed_pem(public_pem)?,
+            seed: None,
         })
     }
 
@@ -127,6 +138,36 @@ impl JwtKeys {
     pub fn can_sign(&self) -> bool {
         self.encoding.is_some()
     }
+
+    /// Derive a 32-byte symmetric key from the private signing seed via
+    /// HKDF-SHA256 with a caller-supplied domain-separation `info` string.
+    ///
+    /// `None` for a verify-only key (no private material) — so only the holder
+    /// of the signing key can derive it. Used for app-level secret-at-rest
+    /// (e.g. the TOTP shared secret) so no separate key needs managing and the
+    /// derivation is identical in monolith and split-service deployments. A
+    /// given `(signing key, info)` pair always yields the same key.
+    #[must_use]
+    pub fn derive_symmetric_key(&self, info: &[u8]) -> Option<[u8; 32]> {
+        let seed = self.seed?;
+        let mut out = [0u8; 32];
+        hkdf::Hkdf::<Sha256>::new(None, &seed)
+            .expand(info, &mut out)
+            .expect("32 bytes is a valid HKDF-SHA256 output length");
+        Some(out)
+    }
+}
+
+/// Extract the 32-byte Ed25519 signing seed from a PKCS#8 private-key PEM, for
+/// key derivation. `None` if the bytes aren't valid UTF-8 / PKCS#8 Ed25519.
+fn seed_from_pkcs8_pem(private_pem: &[u8]) -> Option<[u8; 32]> {
+    use pkcs8::DecodePrivateKey as _;
+    let pem = std::str::from_utf8(private_pem).ok()?;
+    Some(
+        ed25519_dalek::SigningKey::from_pkcs8_pem(pem)
+            .ok()?
+            .to_bytes(),
+    )
 }
 
 /// Access-token claims (docs/protocol.md §12). `sub`/`sid` are decimal
@@ -418,6 +459,31 @@ mod tests {
             sign_totp_ticket(&gateway, user),
             Err(TokenError::VerifyOnly)
         ));
+    }
+
+    #[test]
+    fn derive_symmetric_key_is_stable_private_and_domain_separated() {
+        let (private_pem, public_pem) = JwtKeys::generate_pems();
+        let a = JwtKeys::from_pem(private_pem.as_bytes(), public_pem.as_bytes()).unwrap();
+        let b = JwtKeys::from_pem(private_pem.as_bytes(), public_pem.as_bytes()).unwrap();
+        let ka = a.derive_symmetric_key(b"dice.totp.secret.v1").unwrap();
+        // Same signing key + same info ⇒ same key (deterministic across restarts).
+        assert_eq!(ka, b.derive_symmetric_key(b"dice.totp.secret.v1").unwrap());
+        // Different info ⇒ different key (domain separation).
+        assert_ne!(ka, a.derive_symmetric_key(b"other.context").unwrap());
+        // A different signing key ⇒ a different derived key.
+        let other = JwtKeys::generate_ephemeral();
+        assert_ne!(
+            ka,
+            other.derive_symmetric_key(b"dice.totp.secret.v1").unwrap()
+        );
+        // A verify-only key has no private material to derive from.
+        let gateway = JwtKeys::verify_only(public_pem.as_bytes()).unwrap();
+        assert!(
+            gateway
+                .derive_symmetric_key(b"dice.totp.secret.v1")
+                .is_none()
+        );
     }
 
     #[test]

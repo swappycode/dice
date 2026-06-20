@@ -432,6 +432,21 @@ async fn totp_enroll_confirm_login_recovery_disable() {
     // Enroll: secret + otpauth URI, but 2FA stays INACTIVE until confirmed.
     let enroll = h.svc.totp_enroll(uid).await.unwrap();
     assert!(enroll.otpauth_uri.starts_with("otpauth://totp/"));
+    // At rest the secret is ENCRYPTED — the stored value is tagged ciphertext,
+    // not the base32 plaintext we hand back for the QR code.
+    let stored: String = sqlx::query_scalar("SELECT totp_secret FROM users WHERE id = $1")
+        .bind(uid.as_i64())
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert!(
+        stored.starts_with("v1."),
+        "totp_secret encrypted at rest, got {stored:?}"
+    );
+    assert_ne!(
+        stored, enroll.secret,
+        "ciphertext differs from the plaintext secret"
+    );
     assert!(
         matches!(
             h.svc.login(&email, PASSWORD, None).await.unwrap(),

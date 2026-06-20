@@ -10,6 +10,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use dice_auth_core::cipher::SecretCipher;
 use dice_auth_core::token::{self, ACCESS_TTL_SECS, JwtKeys};
 use dice_auth_core::{password, totp};
 use dice_cache::{Cache, RateLimiter};
@@ -57,6 +58,10 @@ const PURPOSE_RESET: i16 = 2;
 const NO_IP: &str = "noip";
 /// `origin` field on every [`BusEvent`] this service publishes.
 const ORIGIN: &str = "auth-service";
+/// HKDF domain-separation label for the TOTP secret-at-rest key (derived from
+/// the signing seed). Changing this string re-keys — only do so with a
+/// re-encryption migration; encrypted secrets would otherwise fail to decrypt.
+const TOTP_KEY_INFO: &[u8] = b"dice.totp.secret.v1";
 
 /// Postgres-backed [`Auth`] implementation.
 pub struct AuthService {
@@ -68,6 +73,11 @@ pub struct AuthService {
     bus: Arc<dyn EventBus>,
     /// Transactional mail (verify/reset). Defaults to [`LogMailer`].
     mailer: Arc<dyn Mailer>,
+    /// Encrypts the TOTP shared secret at rest, derived from the signing seed.
+    /// `None` only for a verify-only signing key (never the case in practice —
+    /// auth-service always holds the private half), in which case the secret is
+    /// stored/read as legacy plaintext.
+    totp_cipher: Option<SecretCipher>,
 }
 
 impl AuthService {
@@ -81,6 +91,11 @@ impl AuthService {
         ids: Arc<SnowflakeGenerator>,
         bus: Arc<dyn EventBus>,
     ) -> Self {
+        // Derive the TOTP-secret encryption key from the signing seed up front
+        // (no separate key to manage; identical in monolith + split mode).
+        let totp_cipher = jwt
+            .derive_symmetric_key(TOTP_KEY_INFO)
+            .map(SecretCipher::from_key);
         Self {
             pool,
             limiter: RateLimiter::new(cache),
@@ -88,6 +103,27 @@ impl AuthService {
             ids,
             bus,
             mailer: Arc::new(LogMailer),
+            totp_cipher,
+        }
+    }
+
+    /// Encrypt a freshly minted TOTP secret for storage (legacy plaintext if no
+    /// cipher — verify-only key only, never in production).
+    fn encrypt_totp_secret(&self, secret_b32: &str) -> String {
+        match &self.totp_cipher {
+            Some(cipher) => cipher.encrypt(secret_b32),
+            None => secret_b32.to_owned(),
+        }
+    }
+
+    /// Decrypt a stored TOTP secret back to its base32 form. A pre-encryption
+    /// (legacy) plaintext value passes through unchanged.
+    fn decrypt_totp_secret(&self, stored: &str) -> Result<String, AuthError> {
+        match &self.totp_cipher {
+            Some(cipher) => cipher
+                .decrypt(stored)
+                .map_err(|e| internal("decrypt totp secret", e)),
+            None => Ok(stored.to_owned()),
         }
     }
 
@@ -456,6 +492,7 @@ impl Auth for AuthService {
         let secret = row
             .totp_secret
             .ok_or_else(|| internal_msg("totp_enabled row has no secret"))?;
+        let secret = self.decrypt_totp_secret(&secret)?;
 
         let user = UserRow {
             id: row.id,
@@ -505,12 +542,14 @@ impl Auth for AuthService {
         }
 
         let enrollment = totp::enroll(&row.username);
-        // Persist the not-yet-active secret; reset the replay step for a clean
-        // start. Stays inactive until totp_confirm proves a code from it.
+        // Persist the not-yet-active secret ENCRYPTED at rest; reset the replay
+        // step for a clean start. Stays inactive until totp_confirm proves a
+        // code from it. (The plaintext is still returned below for the QR.)
+        let stored_secret = self.encrypt_totp_secret(&enrollment.secret);
         sqlx::query!(
             "UPDATE users SET totp_secret = $2, totp_last_step = NULL WHERE id = $1",
             user.as_i64(),
-            enrollment.secret,
+            stored_secret,
         )
         .execute(&self.pool)
         .await
@@ -536,6 +575,7 @@ impl Auth for AuthService {
         }
         // No secret => enrollment was never begun.
         let secret = row.totp_secret.ok_or(AuthError::TotpNotEnabled)?;
+        let secret = self.decrypt_totp_secret(&secret)?;
 
         let step = totp::verify_code(&secret, code.trim(), now_ms() / 1000)
             .ok_or(AuthError::InvalidTotp)?;
@@ -599,6 +639,7 @@ impl Auth for AuthService {
         let secret = row
             .totp_secret
             .ok_or_else(|| internal_msg("totp_enabled row has no secret"))?;
+        let secret = self.decrypt_totp_secret(&secret)?;
 
         // Tearing down — any currently-valid TOTP code (replay step irrelevant)
         // or an unused recovery code authorizes it.
