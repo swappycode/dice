@@ -1,5 +1,8 @@
 import { createSignal, createEffect } from "solid-js";
 import { customTheme, deriveOverrides, OVERRIDE_KEYS } from "./customTheme";
+import { scopedKey } from "./profileScope";
+
+const THEME_KEY = scopedKey("dice.theme");
 
 export type Theme = "luna" | "aero" | "midnight" | "nocturne" | "vantablack" | "bubble" | "phosphor";
 /** A selectable choice = a built-in theme OR the user's "custom" theme. */
@@ -22,7 +25,7 @@ function isChoice(v: string | null): v is ThemeChoice {
   return v != null && CHOICES.includes(v as ThemeChoice);
 }
 
-const stored = localStorage.getItem("dice.theme");
+const stored = localStorage.getItem(THEME_KEY);
 
 const [theme, setTheme] = createSignal<ThemeChoice>(isChoice(stored) ? stored : "luna");
 
@@ -60,7 +63,7 @@ export function installThemeEffect(): void {
       clearOverrides();
       document.documentElement.dataset.theme = t;
     }
-    localStorage.setItem("dice.theme", t);
+    localStorage.setItem(THEME_KEY, t);
   });
 }
 

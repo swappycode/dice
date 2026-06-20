@@ -7,8 +7,9 @@
 
 import { createSignal } from "solid-js";
 import { ipc } from "../lib/ipc";
+import { scopedKey } from "../lib/profileScope";
 
-const STORAGE_KEY = "dice.voiceSettings";
+const STORAGE_KEY = scopedKey("dice.voiceSettings");
 
 /** Keys the host's PTT binder accepts (must match `ptt.rs` `shortcut_for`). */
 export const PTT_KEYS = ["Backquote", "CapsLock", "Insert", "F8", "F9", "F10"] as const;

@@ -5,13 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dice</title>
     <script>
+      // Namespace per-account keys by the host profile (window.__DICE_PROFILE__,
+      // injected before this script). Must match src/lib/profileScope.ts scopedKey.
+      var prof = typeof window.__DICE_PROFILE__ === "string" ? window.__DICE_PROFILE__ : "";
+      var sk = function (base) { return prof ? base + "@" + prof : base; };
       var themes = ["luna", "aero", "midnight", "nocturne", "vantablack", "bubble", "phosphor"];
       var root = document.documentElement;
-      var t = localStorage.getItem("dice.theme");
+      var t = localStorage.getItem(sk("dice.theme"));
       if (t === "custom") {
         // Apply the saved custom theme (base + inline var overrides) before paint.
         try {
-          var cfg = JSON.parse(localStorage.getItem("dice.customTheme") || "null");
+          var cfg = JSON.parse(localStorage.getItem(sk("dice.customTheme")) || "null");
           root.dataset.theme = cfg && themes.indexOf(cfg.base) >= 0 ? cfg.base : "luna";
           var ov = (cfg && cfg.overrides) || null;
           if (ov) for (var k in ov) if (k.indexOf("--") === 0) root.style.setProperty(k, ov[k]);
@@ -21,7 +25,7 @@
       } else {
         root.dataset.theme = themes.indexOf(t) >= 0 ? t : "luna";
       }
-      if (localStorage.getItem("dice.perfMode") === "1") root.classList.add("perf-mode");
+      if (localStorage.getItem(sk("dice.perfMode")) === "1") root.classList.add("perf-mode");
     </script>
   </head>
   <body>

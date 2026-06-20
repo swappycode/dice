@@ -9,8 +9,10 @@
 //! - ring is the only rustls crypto provider (workspace policy).
 //! - single-instance: a second launch focuses the existing window — UNLESS a
 //!   `--profile <name>` / `DICE_CLIENT_PROFILE` is set, which gives that
-//!   instance its own cache + keyring scope + WebView2 storage (so browser
-//!   `localStorage` is isolated too) and lets it open its own window (run two
+//!   instance its own cache + keyring scope + WebView2 user-data-folder (and we
+//!   also namespace browser `localStorage` keys by the profile, injected as
+//!   `window.__DICE_PROFILE__`, since the user-data-folder alone doesn't
+//!   reliably isolate `localStorage`) and lets it open its own window (run two
 //!   profiles for local two-user testing).
 //! - when the keystore already holds a session the gateway connects in the
 //!   background at startup; otherwise the first `login`/`register` connects.
@@ -124,6 +126,19 @@ pub fn run() {
                 None => "Dice".to_owned(),
             };
 
+            // Inject the active profile name BEFORE any page script runs, so the
+            // webview can namespace its per-account `localStorage` (theme / perf /
+            // voice-device prefs) by it. The WebView2 user-data-folder isolation
+            // below does NOT reliably isolate `localStorage` for the main window,
+            // so two side-by-side `client-as alice` / `bob` instances would
+            // otherwise share those prefs. The name is already sanitized to
+            // `[a-z0-9_-]` (active_profile), so it's safe to embed verbatim in a
+            // JS string literal; the default app injects "" (→ bare keys).
+            let profile_script = format!(
+                "window.__DICE_PROFILE__ = \"{}\";",
+                setup_profile.as_deref().unwrap_or("")
+            );
+
             // Create the main window HERE (not in tauri.conf.json) so the
             // managed `ClientCore` is guaranteed present before the webview's
             // first IPC call, and so the WebView2 browser args are tunable at
@@ -136,6 +151,7 @@ pub fn run() {
                 .decorations(false)
                 .shadow(true)
                 .transparent(false)
+                .initialization_script(&profile_script)
                 .additional_browser_args(&webview_args());
             // A named profile also gets its OWN WebView2 user-data-folder, so two
             // side-by-side instances don't share browser `localStorage` (theme +

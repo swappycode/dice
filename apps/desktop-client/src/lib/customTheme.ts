@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import type { Theme } from "./theme";
+import { scopedKey } from "./profileScope";
 
 /* ============================================================
    Custom theme = a base built-in theme + five high-level COLOR controls.
@@ -26,7 +27,7 @@ export type CustomTheme = {
   controls: CustomControls;
 };
 
-const STORAGE_KEY = "dice.customTheme";
+const STORAGE_KEY = scopedKey("dice.customTheme");
 
 /** Display order + copy for the builder rows. */
 export const CONTROL_FIELDS: ReadonlyArray<{ key: keyof CustomControls; label: string; hint: string }> = [
