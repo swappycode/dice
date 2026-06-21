@@ -857,7 +857,10 @@ async fn gateway_ws(State(gw): State<Arc<Gateway>>, ws: WebSocketUpgrade) -> Res
 /// `?before|after=<id>&limit=1..100` (protocol §10). `before` and `after`
 /// are mutually exclusive; ids are plain decimal snowflakes (never
 /// percent-encoded), so a hand parser keeps serde off the request path.
-fn parse_history_query(query: Option<&str>) -> Result<(HistoryCursor, u8), String> {
+///
+/// `pub` + re-exported (doc-hidden) from the crate root for the fuzz harness
+/// (`fuzz/`); not part of the public API.
+pub fn parse_history_query(query: Option<&str>) -> Result<(HistoryCursor, u8), String> {
     let mut before: Option<u64> = None;
     let mut after: Option<u64> = None;
     let mut limit = DEFAULT_HISTORY_LIMIT;

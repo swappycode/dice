@@ -1,0 +1,42 @@
+# Bounded coverage-guided fuzzing of the untrusted-bytes parsers (M5 hardening).
+# cargo-fuzz needs nightly + libFuzzer (Linux), so this is its own workflow, not
+# part of the stable `ci.yml` gate. Runs weekly, on demand, and on PRs that touch
+# a fuzzed parser. See fuzz/README.md.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/protocol/**"
+      - "crates/voice-core/src/framing.rs"
+      - "services/api-gateway/src/rest.rs"
+      - "fuzz/**"
+
+env:
+  # api-gateway compiles against the committed offline query cache (no DB).
+  SQLX_OFFLINE: "true"
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [frame_decode, voice_frame, history_query]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz ${{ matrix.target }} (bounded)
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=90 -rss_limit_mb=4096

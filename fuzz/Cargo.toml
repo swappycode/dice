@@ -1,0 +1,46 @@
+# cargo-fuzz harness (M5 hardening). Its OWN crate, excluded from the root
+# workspace (it carries the cargo-fuzz metadata + a custom release profile and
+# only builds under nightly + libFuzzer). Targets fuzz the untrusted-bytes
+# parsers: the realtime frame codec, the voice datagram frame, and the hand-
+# rolled REST history-query parser. Run on Linux/macOS (see README.md); CI runs
+# them bounded (.github/workflows/fuzz.yml).
+[package]
+name = "dice-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bytes = "1"
+dice-protocol = { path = "../crates/protocol" }
+dice-voice-core = { path = "../crates/voice-core" }
+api-gateway = { path = "../services/api-gateway" }
+
+[[bin]]
+name = "frame_decode"
+path = "fuzz_targets/frame_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "voice_frame"
+path = "fuzz_targets/voice_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "history_query"
+path = "fuzz_targets/history_query.rs"
+test = false
+doc = false
+bench = false
+
+# cargo-fuzz needs some debug info for nicer crash backtraces.
+[profile.release]
+debug = 1

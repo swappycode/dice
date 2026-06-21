@@ -29,6 +29,11 @@ mod session;
 mod voice_dg;
 mod ws;
 
+/// Hand-rolled REST query parser re-exported ONLY for the fuzz harness
+/// (`fuzz/`); not part of the public API.
+#[doc(hidden)]
+pub use rest::parse_history_query;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
