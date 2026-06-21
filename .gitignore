@@ -30,6 +30,15 @@ apps/desktop-client/dist/
 /docs/git-notes.md
 /docs/testing-*.md
 /docs/design/m2-theme-pack.md
+/docs/PROJECT-BRIEF.md
+
+# Design handoff / brief — local reference only (the prototype + notes the native
+# client was built from); not product source, kept out of the repo.
+/Dice overall brief frontend/
+/Dice overall brief frontend.zip
+
+# Editor
+/.vscode/
 
 # OS noise
 .DS_Store
