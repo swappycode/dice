@@ -1,0 +1,48 @@
+# Dice release pipeline — builds the desktop installer and drafts a GitHub
+# Release. Triggers on a `vX.Y.Z` tag (or manual dispatch). Windows/NSIS is the
+# primary target today; add macOS/Linux matrix rows when those are supported.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build installer (windows)
+    runs-on: windows-latest
+    env:
+      # The desktop host uses rusqlite (not sqlx), but keep builds offline-safe.
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-client/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop-client/package-lock.json
+      - name: Install frontend deps
+        working-directory: apps/desktop-client
+        run: npm ci
+      - name: Build + draft release (Tauri / NSIS)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop-client
+          tagName: ${{ github.ref_name }}
+          releaseName: "Dice ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          # custom-protocol = a production build that serves the embedded UI
+          # (matches `just client-build`).
+          args: --features custom-protocol
