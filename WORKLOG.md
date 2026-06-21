@@ -7,6 +7,68 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-21 - M5: custom pure-Rust AEC + noise suppression, "disconnected" presence, fuzzing
+
+**Branch `main`. Per-unit commits (`4a513d6` voice, `59cfdd1` presence, `8249590` fuzz).** Gates per
+unit: voice-core clippy + 36 unit tests; desktop lib/bins clippy + frontend `npm run check`/`build`;
+presence-service + api-gateway clippy + fmt (the presence integration tests need Postgres → CI).
+
+**(1) AEC + noise suppression — DONE, CUSTOM PURE-RUST (`4a513d6`).** Reversed the `aec-rs`/speexdsp
+plan: it needs LLVM/libclang (bindgen) + a C build — the exact Windows native-build trap the project
+bans (ring-only / no-native-deps). Built our own instead, in `dice-voice-core::preprocess` behind an
+`AudioProcessor` trait, env-gated `DICE_VOICE_AEC` (default OFF → a zero-cost `Passthrough`; OFF path
+byte-identical). One new pure-Rust dep: `rustfft`.
+- AEC = constrained partitioned-block frequency-domain NLMS (overlap-save MDF): B=256 / N=512 FFT, K
+  partitions (128 ms tail), per-bin power-normalised step FLOORED by the current far power (no
+  over-step on a far onset after silence), Geigel double-talk + far-silence freeze, leakage, divergence
+  watchdog (skipped while frozen).
+- NS = STFT decision-directed Wiener: root-Hann COLA, MCRA two-bucket minimum-statistics noise floor
+  (low-seeded, speech-absent-gated), HARD spectral floor (no bin zeroed → no musical noise).
+- Alignment (the crux): the CAPTURE clock is master — `process(near, transmit)` runs every captured
+  frame (even muted) and advances a far_pending→pre_delay line one frame per call, so alignment
+  survives mute + far-silence gaps; 960↔256 AEC blocks ↔128 NS hops bridged with primed accumulators.
+  (Deliberately NOT the panel's "push far every audio-loop iteration" — that over-feeds the far
+  reference ~4× and loses the delay across silence gaps.)
+- Wired into `audio.rs` (the mixed playout frame is the far reference). 36 device-free tests. Designed
+  by a multi-agent panel; hardened by an adversarial review (a rogue review-agent polluted the source
+  with `static mut` probes — reverted; its one real finding, watchdog-firing-while-frozen, was fixed,
+  plus far-onset normalisation + NS NaN guard + low noise-floor seed). **Real-world quality + CPU are
+  USER-verified on echo hardware** (`DICE_VOICE_AEC=1`; optional `DICE_VOICE_AEC_TAIL_MS` / `_DELAY_MS`).
+
+**(2) "Disconnected" presence status — DONE (`59cfdd1`).** User asked for a status blob alongside the
+green/orange/red ones. A user whose gateway connection drops but is still inside the resume window now
+shows DISCONNECTED (a slate-blue FILLED orb, distinct from the hollow offline ring) instead of
+stale-online and then a jump to offline; → ONLINE on resume, → OFFLINE on window expiry.
+- proto `PRESENCE_STATUS_DISCONNECTED = 6` (server-set only). presence-service: aggregate precedence
+  DND>ONLINE>IDLE>DISCONNECTED>OFFLINE (a live second device still outranks it); new `Presence::detach()`
+  (marks the session + refreshes TTL past the window + broadcasts), mirrored over split-mode NATS RPC
+  (reuses the {user,session} disconnect request). gateway `run_ready`: `detach()` on `LoopEnd::Detach`,
+  `set_status(ONLINE)` on resume; window expiry → cleanup → OFFLINE.
+- client: `PresenceStatus` gains "disconnected"; host int↔string map (`dto.rs`); `.orb--disconnected`
+  + `--orb-disconnected` token; member-list + friends sort/label/group; mock demo shows it. Presence
+  detach/restore/multi-session/idempotent tests added (need Postgres → CI).
+
+**(3) Fuzzing — DONE (`8249590`).** cargo-fuzz harness (`fuzz/`, its own crate, excluded from the
+workspace) for the untrusted-bytes parsers: `frame_decode` (the realtime codec — split-chunk decoder +
+announced-length cap), `voice_frame` (`VoiceFrame::decode`), `history_query` (the hand-rolled REST
+query parser, now pub + doc-hidden-re-exported from the gateway root). CI `.github/workflows/fuzz.yml`
+runs each bounded (90 s) weekly / on dispatch / on parser-touching PRs (nightly + libFuzzer on Linux;
+can't run on the Windows host). Runbook in `fuzz/README.md`.
+
+**Already shipped earlier in M5 (carried):** cargo-deny supply-chain CI (`4917ec9`) + GitHub Actions
+gate + NSIS release pipeline (`b3849f7`).
+
+**M5 STATUS:** AEC+NS ✅, disconnected presence ✅, fuzzing ✅, cargo-deny ✅, CI gate ✅, release
+pipeline ✅, idle RAM measured (117 MB, WebView2-floored) ✅. **ONLY remaining M5 item = the NATIVE-UI
+RAM rewrite (Slint/Iced)** — a full frontend rewrite the user chose to do LAST, *pending a UI doc from
+the user*. It is M6-scale and discards the SolidJS UI, so it's a separate explicit decision, not
+auto-started here.
+
+**NEXT:** await the user's UI doc for the native-UI rewrite (the `<100 MB` path), or call M5 done at its
+non-rewrite extent. Next free Frame dispatch # = 121.
+
+---
+
 ## 2026-06-20 - M4 test-drive bug fixes + M5 KICKOFF (Optimization & hardening)
 
 **Branch `main`. Per-unit commits, pushed.** Gates green per unit (`just check` for the workspace
@@ -58,9 +120,22 @@ its automated tests (manual two-node dance not worth it); deploy manifests are s
    architectural spike, deferred). README RAM row corrected to the measured 117 MB.
 
 **M5 first pass (the carried backlog) is COMPLETE:** 3 of 4 shipped as code (TOTP-at-rest,
-email-verify gate, polyphase resampling); RAM measured + documented as platform-floored. Remaining
-M5 (the broader plan): cargo-deny/supply-chain CI, fuzz the codec + REST, release pipeline, AEC (if a
-C-toolchain decision is made). Next free Frame dispatch # = 121.
+email-verify gate, polyphase resampling); RAM measured + documented as platform-floored.
+
+**Direction (2026-06-21) — researched the two "hard" items, user chose paths:**
+- **AEC → `aec-rs` (speexdsp, mature/precompiled).** Empirically tested: `aec-rs` builds here EXCEPT
+  its `-sys` crate runs bindgen → needs **libclang** (not installed). The pure-Rust `aec3` (WebRTC AEC3
+  port) builds clean but is WIP. **User chose the mature path + OK'd installing LLVM** for libclang
+  (`winget install LLVM.LLVM`). Next: install LLVM → integrate `aec-rs` behind an `AudioProcessor`
+  trait (mic = near, mixed playout = far reference). Real-world quality is user-verified (needs echo HW).
+- **`<100 MB` → replace WebView2 with a NATIVE Rust UI (Slint/Iced).** Confirmed it's a full frontend
+  rewrite (the SolidJS UI doesn't carry over; Sciter ~30-60 MB / native ~20-50 MB vs WebView2's 117).
+  **User chose native Rust UI, to be done LAST — the user will supply a UI doc first.** This is the
+  M6-scale pivot; do it at the END of M5, after the items below.
+
+**Remaining M5 order:** (1) AEC via `aec-rs` [LLVM installing], (2) cargo-deny/supply-chain CI,
+(3) fuzz the framing codec + REST parsers, (4) release pipeline (NSIS + Tauri updater), (5) **native UI
+rewrite LAST** (pending the user's UI doc). Next free Frame dispatch # = 121.
 
 ---
 
