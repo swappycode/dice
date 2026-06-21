@@ -27,7 +27,7 @@ self-hostable binary for the whole backend.
 |---|---|
 | Cold start < 2 s | ✅ ~1.5 s |
 | Idle CPU < 1% | ✅ ~0.05% |
-| Idle RAM < 100 MB | ⚠️ ~170 MB (Rust host is ~5.5 MB; the rest is the WebView2 floor — the headline M2 item) |
+| Idle RAM < 100 MB | ⚠️ ~117 MB measured (Rust host just **5.7 MB**; the other ~111 MB is the irreducible WebView2/Chromium process tree — browser-arg tuning beyond `--in-process-gpu` doesn't move it, so <100 MB needs a native shell) |
 | 100k+ connections / gateway node | ✅ 30k held @ ~44 KB/conn (0 fails, 0 shedding, 1 ms hb-RTT) → ~4.7 GB extrapolated to 100k/node |
 
 ## Highlights

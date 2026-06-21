@@ -40,14 +40,27 @@ its automated tests (manual two-node dance not worth it); deploy manifests are s
    untagged value is legacy plaintext (passthrough) so **no data migration** needed. Tests: cipher
    units + derivation determinism/domain-separation/verify-only + the live TOTP flow asserts `v1.`
    ciphertext at rest. (`users.totp_secret` was plaintext since migration 0010 — this closes it.)
-2. **Email-verify login gate** — the verify flow + `LogMailer` (logs the link, no SMTP) already ship;
-   gating login on verified status is next. NEXT.
-3. **Voice AEC / polyphase resampling** — polyphase is pure-Rust DSP (doable); AEC needs a C/C++ APM
-   (deferred for the toolchain reason, M3 carry-over).
-4. **`<100 MB` idle-RAM goal** — measurement + WebView2-arg tuning pass; the host is ~5.5 MB, the
-   rest is the WebView2 floor (the hard part).
+2. **Email-verify login gate — ✅ DONE (`9975af2`).** Opt-in (`DICE_REQUIRE_EMAIL_VERIFICATION`,
+   default off so dev's `LogMailer` doesn't lock anyone out); `AuthError::EmailNotVerified` (→ 401,
+   RPC code 10); `login` rejects an unverified account AFTER the password check (no enumeration
+   oracle) and BEFORE any session/ticket. Register still mints an initial signup-grace session.
+   Tested gated + ungated.
+3. **Voice polyphase resampling — ✅ DONE (`1062da0`).** Replaced the linear device-path resampler
+   with a Blackman-windowed-sinc 512-phase / 32-tap polyphase FIR (shared `SincResampler` core);
+   anti-aliases at the lower Nyquist, unit-DC-gain phases, still bypassed at 48 kHz. New
+   hardware-free alias-rejection test (2 kHz passband survives, 22 kHz stopband attenuated <5%).
+   **AEC still deferred** — needs a C/C++ APM (toolchain constraint, M3 carry-over).
+4. **`<100 MB` idle-RAM — MEASURED + documented (no reliable code win).** Release-client login-screen
+   idle = **117 MB private commit**; the Rust **host is only 5.7 MB** — the other ~111 MB is the
+   irreducible WebView2/Chromium process tree (6 procs). Aggressive browser args
+   (`--renderer-process-limit=1`, `--js-flags=--max-old-space-size`, more `--disable-features`) moved
+   it <1 MB (noise) → not shipped. **<100 MB needs a native shell / lighter webview** (a major
+   architectural spike, deferred). README RAM row corrected to the measured 117 MB.
 
-**Resume at:** M5 item 2 (email-verify gate). Next free Frame dispatch # = 121.
+**M5 first pass (the carried backlog) is COMPLETE:** 3 of 4 shipped as code (TOTP-at-rest,
+email-verify gate, polyphase resampling); RAM measured + documented as platform-floored. Remaining
+M5 (the broader plan): cargo-deny/supply-chain CI, fuzz the codec + REST, release pipeline, AEC (if a
+C-toolchain decision is made). Next free Frame dispatch # = 121.
 
 ---
 
