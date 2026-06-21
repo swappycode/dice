@@ -56,6 +56,11 @@ check:
 gate-aws-lc:
     $out = cargo tree -i aws-lc-sys 2>&1 | Out-String; if ($out -notmatch 'nothing to print|did not match any packages|error: package ID specification') { Write-Error "aws-lc-sys found in dependency tree!`n$out" } else { Write-Host "aws-lc-sys gate: clean" }
 
+# Supply-chain audit (cargo-deny): advisories + permissive licenses + the
+# ring-only ban (config in deny.toml). Install once: `cargo install cargo-deny`.
+deny:
+    cargo deny check advisories licenses bans sources
+
 # ---------- benchmark (100k-connection load gen) ----------
 
 # Terminal 1: the gateway tuned for the benchmark — dev-lite (Postgres only),

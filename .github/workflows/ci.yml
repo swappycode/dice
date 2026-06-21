@@ -1,0 +1,94 @@
+# Dice CI — mirrors the local `just check` gate plus the supply-chain (cargo-deny)
+# and frontend gates. Authored for GitHub Actions; the backend `gate` job brings
+# up Postgres/Redis/NATS as service containers (the live integration tests need
+# them) and compiles offline against the committed `.sqlx` cache.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Compile against the committed offline query cache (no DB needed to build).
+  SQLX_OFFLINE: "true"
+
+jobs:
+  gate:
+    name: fmt + clippy + tests + aws-lc guard
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dice
+          POSTGRES_PASSWORD: dice_dev
+          POSTGRES_DB: dice
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dice"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      nats:
+        image: nats:2
+        ports: ["4222:4222"]
+    env:
+      DATABASE_URL: postgres://dice:dice_dev@localhost:5433/dice
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: aws-lc-sys guard (ring-only TLS policy)
+        run: |
+          if cargo tree -i aws-lc-sys >/dev/null 2>&1; then
+            echo "::error::aws-lc-sys found in the dependency tree (ring-only policy)"
+            cargo tree -i aws-lc-sys
+            exit 1
+          fi
+          echo "aws-lc gate: clean"
+      - name: Run migrations
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres,rustls --locked
+          sqlx migrate run --source crates/database/migrations
+      - name: Test workspace
+        run: cargo test --workspace
+
+  supply-chain:
+    name: cargo-deny (advisories + licenses + bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
+
+  frontend:
+    name: frontend typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop-client/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
