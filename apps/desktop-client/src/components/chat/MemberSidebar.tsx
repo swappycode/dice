@@ -13,7 +13,7 @@ import { Avatar } from "../common/Avatar";
 import { PresenceOrb } from "../common/PresenceOrb";
 import styles from "./MemberSidebar.module.css";
 
-const ORDER = { online: 0, idle: 1, dnd: 2, offline: 3 } as const;
+const ORDER = { online: 0, idle: 1, dnd: 2, disconnected: 3, offline: 4 } as const;
 
 export const MemberSidebar: Component = () => {
   const members = createMemo(() => {

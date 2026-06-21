@@ -78,6 +78,7 @@
   --orb-idle: #f4b400;
   --orb-dnd: #d83b2e;
   --orb-off: #9a9a9a;
+  --orb-disconnected: #6f8099;
 
   /* focus */
   --focus-marquee: 1px dotted #000000; /* Luna keyboard focus (marquee) */

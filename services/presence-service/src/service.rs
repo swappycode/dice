@@ -97,21 +97,26 @@ where
 }
 
 /// Decode the 1-byte session status. Anything unexpected routes to the safe
-/// default (`ONLINE`) — only `{ONLINE, IDLE, DND}` are ever written.
+/// default (`ONLINE`) — only `{ONLINE, IDLE, DND}` are written by clients;
+/// `DISCONNECTED` is written by the gateway on detach.
 fn status_from_byte(b: u8) -> PresenceStatus {
     match b {
         2 => PresenceStatus::Idle,
         3 => PresenceStatus::Dnd,
+        6 => PresenceStatus::Disconnected,
         _ => PresenceStatus::Online,
     }
 }
 
-/// Aggregate precedence: DND > ONLINE > IDLE (OFFLINE/UNSPECIFIED never rank).
+/// Aggregate precedence: DND > ONLINE > IDLE > DISCONNECTED (OFFLINE/UNSPECIFIED
+/// never rank). A dropped-but-resumable session shows DISCONNECTED only when no
+/// live session outranks it — a second device keeps the user online/idle/dnd.
 fn rank(s: PresenceStatus) -> u8 {
     match s {
-        PresenceStatus::Dnd => 3,
-        PresenceStatus::Online => 2,
-        PresenceStatus::Idle => 1,
+        PresenceStatus::Dnd => 4,
+        PresenceStatus::Online => 3,
+        PresenceStatus::Idle => 2,
+        PresenceStatus::Disconnected => 1,
         PresenceStatus::Unspecified | PresenceStatus::Offline => 0,
     }
 }
@@ -130,7 +135,11 @@ fn settable(status: PresenceStatus) -> Result<PresenceStatus, PresenceError> {
     match status {
         PresenceStatus::Unspecified => Ok(PresenceStatus::Online),
         PresenceStatus::Online | PresenceStatus::Idle | PresenceStatus::Dnd => Ok(status),
-        PresenceStatus::Offline => Err(PresenceError::InvisibleNotSupported),
+        // OFFLINE is the reserved masking feature; DISCONNECTED is server-set
+        // only (the gateway marks it on detach). Neither is client-settable.
+        PresenceStatus::Offline | PresenceStatus::Disconnected => {
+            Err(PresenceError::InvisibleNotSupported)
+        }
     }
 }
 
@@ -471,6 +480,38 @@ impl Presence for PresenceService {
         Ok(())
     }
 
+    async fn detach(&self, user: UserId, session: SessionId) -> Result<(), PresenceError> {
+        let mut live = self.load_live(user).await?;
+        // Idempotent: if the session already expired off the live list there is
+        // nothing to mark (it is heading OFFLINE via TTL / disconnect anyway).
+        if !live.iter().any(|(s, _)| *s == session) {
+            return Ok(());
+        }
+        let old_agg = aggregate(&live);
+
+        // Mark this session DISCONNECTED (server-internal; bypasses `settable`)
+        // and refresh the TTL so the entry survives the resume window.
+        self.cache
+            .set(
+                &session_key(user, session),
+                Bytes::copy_from_slice(&[PresenceStatus::Disconnected as u8]),
+                Some(self.ttl),
+            )
+            .await
+            .map_err(internal)?;
+        for entry in live.iter_mut().filter(|(s, _)| *s == session) {
+            entry.1 = PresenceStatus::Disconnected;
+        }
+
+        let new_agg = aggregate(&live);
+        if new_agg != old_agg {
+            let sessions: Vec<SessionId> = live.iter().map(|&(s, _)| s).collect();
+            let (guilds, dms) = self.union_interest(user, &sessions).await?;
+            self.broadcast(user, new_agg, now_ms(), guilds, dms).await?;
+        }
+        Ok(())
+    }
+
     async fn disconnect(&self, user: UserId, session: SessionId) -> Result<(), PresenceError> {
         let live = self.load_live(user).await?;
         let old_agg = aggregate(&live);
@@ -750,6 +791,18 @@ mod tests {
     fn aggregate_precedence_dnd_online_idle_offline() {
         let s = sid;
         assert_eq!(aggregate(&[]), PresenceStatus::Offline);
+        // A lone dropped session shows DISCONNECTED; any live session outranks it.
+        assert_eq!(
+            aggregate(&[(s(), PresenceStatus::Disconnected)]),
+            PresenceStatus::Disconnected
+        );
+        assert_eq!(
+            aggregate(&[
+                (s(), PresenceStatus::Disconnected),
+                (s(), PresenceStatus::Idle),
+            ]),
+            PresenceStatus::Idle
+        );
         assert_eq!(
             aggregate(&[(s(), PresenceStatus::Idle)]),
             PresenceStatus::Idle
@@ -779,6 +832,11 @@ mod tests {
             settable(PresenceStatus::Offline),
             Err(PresenceError::InvisibleNotSupported)
         ));
+        // DISCONNECTED is server-set only; a client may not set it.
+        assert!(matches!(
+            settable(PresenceStatus::Disconnected),
+            Err(PresenceError::InvisibleNotSupported)
+        ));
     }
 
     #[test]
@@ -790,6 +848,11 @@ mod tests {
         ] {
             assert_eq!(status_from_byte(s as u8), s);
         }
+        // DISCONNECTED (gateway-written) round-trips too.
+        assert_eq!(
+            status_from_byte(PresenceStatus::Disconnected as u8),
+            PresenceStatus::Disconnected
+        );
         // Unknown bytes route to the safe default.
         assert_eq!(status_from_byte(0), PresenceStatus::Online);
         assert_eq!(status_from_byte(99), PresenceStatus::Online);
@@ -1102,6 +1165,99 @@ mod tests {
             .unwrap();
         h.svc.disconnect(user, s3).await.unwrap();
         expect_silent(&mut sub).await;
+    }
+
+    // ---- detach (disconnected presence) ----
+
+    #[tokio::test]
+    async fn detach_broadcasts_disconnected_then_disconnect_goes_offline() {
+        let h = harness(PRESENCE_KEY_TTL).await;
+        let (user, session) = (uid(), sid());
+        let g = GuildId::from(idgen().generate());
+        insert_user(&h.pool, user, false).await;
+        let mut sub = h.bus.subscribe(Subject::GuildPresence(g)).await.unwrap();
+
+        h.svc
+            .connect(user, session, &[g], &[], PresenceStatus::Online)
+            .await
+            .unwrap();
+        assert_eq!(
+            presence_of(&recv(&mut sub).await).status,
+            PresenceStatus::Online as i32
+        );
+
+        // Connection dropped (resume window): others see DISCONNECTED.
+        h.svc.detach(user, session).await.unwrap();
+        let p = presence_of(&recv(&mut sub).await);
+        assert_eq!(p.status, PresenceStatus::Disconnected as i32);
+        assert!(p.since_ms > 0);
+
+        // Window expired -> OFFLINE.
+        h.svc.disconnect(user, session).await.unwrap();
+        assert_eq!(
+            presence_of(&recv(&mut sub).await).status,
+            PresenceStatus::Offline as i32
+        );
+
+        delete_user(&h.pool, user).await;
+    }
+
+    #[tokio::test]
+    async fn detach_with_a_live_second_session_stays_online() {
+        let h = harness(PRESENCE_KEY_TTL).await;
+        let (user, s1, s2) = (uid(), sid(), sid());
+        let g = GuildId::from(idgen().generate());
+        let mut sub = h.bus.subscribe(Subject::GuildPresence(g)).await.unwrap();
+
+        h.svc
+            .connect(user, s1, &[g], &[], PresenceStatus::Online)
+            .await
+            .unwrap();
+        recv(&mut sub).await; // ONLINE
+        h.svc
+            .connect(user, s2, &[g], &[], PresenceStatus::Online)
+            .await
+            .unwrap();
+
+        // s1 drops but s2 is still live ONLINE: aggregate unchanged -> silent.
+        h.svc.detach(user, s1).await.unwrap();
+        expect_silent(&mut sub).await;
+    }
+
+    #[tokio::test]
+    async fn resume_set_status_online_restores_after_detach() {
+        let h = harness(PRESENCE_KEY_TTL).await;
+        let (user, session) = (uid(), sid());
+        let g = GuildId::from(idgen().generate());
+        let mut sub = h.bus.subscribe(Subject::GuildPresence(g)).await.unwrap();
+
+        h.svc
+            .connect(user, session, &[g], &[], PresenceStatus::Online)
+            .await
+            .unwrap();
+        recv(&mut sub).await; // ONLINE
+        h.svc.detach(user, session).await.unwrap();
+        assert_eq!(
+            presence_of(&recv(&mut sub).await).status,
+            PresenceStatus::Disconnected as i32
+        );
+
+        // The gateway restores ONLINE on resume (reuses set_status).
+        h.svc
+            .set_status(user, session, PresenceStatus::Online)
+            .await
+            .unwrap();
+        assert_eq!(
+            presence_of(&recv(&mut sub).await).status,
+            PresenceStatus::Online as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn detach_on_expired_session_is_idempotent() {
+        let h = harness(PRESENCE_KEY_TTL).await;
+        // No connect: the session was never live -> detach is a no-op Ok.
+        h.svc.detach(uid(), sid()).await.unwrap();
     }
 
     // ---- add_interest ----

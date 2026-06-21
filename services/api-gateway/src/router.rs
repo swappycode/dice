@@ -352,6 +352,9 @@ mod tests {
         async fn disconnect(&self, _: UserId, _: SessionId) -> Result<(), PresenceError> {
             Ok(())
         }
+        async fn detach(&self, _: UserId, _: SessionId) -> Result<(), PresenceError> {
+            Ok(())
+        }
         async fn add_interest(
             &self,
             user: UserId,

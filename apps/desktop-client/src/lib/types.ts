@@ -8,7 +8,7 @@
  * Shapes mirror docs/protocol.md §10–11 (dice.v1 entities), camelCased.
  */
 
-export type PresenceStatus = "online" | "idle" | "dnd" | "offline";
+export type PresenceStatus = "online" | "idle" | "dnd" | "disconnected" | "offline";
 
 export type ChannelKind = "guild_text" | "dm" | "voice";
 

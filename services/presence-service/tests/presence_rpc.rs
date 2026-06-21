@@ -60,6 +60,10 @@ impl Presence for MockPresence {
         Ok(())
     }
 
+    async fn detach(&self, _user: UserId, _session: SessionId) -> Result<(), PresenceError> {
+        Ok(())
+    }
+
     async fn add_interest(
         &self,
         _user: UserId,

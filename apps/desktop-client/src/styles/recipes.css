@@ -126,6 +126,12 @@
   --orb-c: var(--orb-dnd);
 }
 
+.orb--disconnected {
+  /* dropped-but-resumable: a muted slate-blue FILLED orb, distinct from the
+     hollow offline ring (the user is still inside the resume window) */
+  --orb-c: var(--orb-disconnected, #7c8aa0);
+}
+
 .orb--offline {
   /* hollow ring variant */
   background: transparent;

@@ -48,7 +48,7 @@ export function incomingCount(): number {
   return incomingRequests().length;
 }
 
-const PRESENCE_ORDER: PresenceStatus[] = ["online", "idle", "dnd", "offline"];
+const PRESENCE_ORDER: PresenceStatus[] = ["online", "idle", "dnd", "disconnected", "offline"];
 
 /** Accepted friends grouped Online → Idle → DND → Offline (empty groups dropped). */
 export function acceptedByPresence(): Array<{ status: PresenceStatus; friends: Friend[] }> {

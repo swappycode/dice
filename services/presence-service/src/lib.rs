@@ -54,6 +54,12 @@ pub trait Presence: Send + Sync {
         status: PresenceStatus,
     ) -> Result<(), PresenceError>;
 
+    /// Connection dropped but the session may still resume (the resume window):
+    /// mark this session DISCONNECTED and broadcast if the aggregate changed.
+    /// Restored via `set_status(ONLINE)` on resume, or finalised by `disconnect`
+    /// (OFFLINE) when the window expires. Idempotent if the session has expired.
+    async fn detach(&self, user: UserId, session: SessionId) -> Result<(), PresenceError>;
+
     /// Gateway session ended (socket closed AND resume window expired, or
     /// clean logout). Broadcasts OFFLINE if it was the last live session.
     async fn disconnect(&self, user: UserId, session: SessionId) -> Result<(), PresenceError>;

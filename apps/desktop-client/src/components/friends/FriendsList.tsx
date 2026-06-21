@@ -18,6 +18,7 @@ const GROUP_LABEL: Record<PresenceStatus, string> = {
   online: "Online",
   idle: "Idle",
   dnd: "Do Not Disturb",
+  disconnected: "Disconnected",
   offline: "Offline",
 };
 

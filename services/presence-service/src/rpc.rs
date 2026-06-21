@@ -135,6 +135,16 @@ pub async fn serve(client: RpcClient, presence: Arc<dyn Presence>) -> Result<(),
                             .map(|()| Vec::new())
                             .map_err(to_fault)
                     }
+                    "detach" => {
+                        // Reuses the {user, session} disconnect request shape.
+                        let r = rpc::PresenceDisconnectReq::decode(body.as_slice())
+                            .map_err(decode_fault)?;
+                        presence
+                            .detach(UserId::from_raw(r.user), SessionId::from_raw(r.session))
+                            .await
+                            .map(|()| Vec::new())
+                            .map_err(to_fault)
+                    }
                     "add_interest" => {
                         let r = rpc::PresenceInterestReq::decode(body.as_slice())
                             .map_err(decode_fault)?;
@@ -230,6 +240,14 @@ impl Presence for PresenceNatsClient {
             session: session.raw(),
         };
         self.unit_call("disconnect", req.encode_to_vec()).await
+    }
+
+    async fn detach(&self, user: UserId, session: SessionId) -> Result<(), PresenceError> {
+        let req = rpc::PresenceDisconnectReq {
+            user: user.raw(),
+            session: session.raw(),
+        };
+        self.unit_call("detach", req.encode_to_vec()).await
     }
 
     async fn add_interest(

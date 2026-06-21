@@ -39,6 +39,7 @@ pub fn presence_str(status: i32) -> &'static str {
         Ok(v1::PresenceStatus::Online) => "online",
         Ok(v1::PresenceStatus::Idle) => "idle",
         Ok(v1::PresenceStatus::Dnd) => "dnd",
+        Ok(v1::PresenceStatus::Disconnected) => "disconnected",
         _ => "offline",
     }
 }
@@ -48,6 +49,7 @@ pub fn parse_presence(status: &str) -> i32 {
         "online" => v1::PresenceStatus::Online as i32,
         "idle" => v1::PresenceStatus::Idle as i32,
         "dnd" => v1::PresenceStatus::Dnd as i32,
+        "disconnected" => v1::PresenceStatus::Disconnected as i32,
         _ => v1::PresenceStatus::Offline as i32,
     }
 }
@@ -605,7 +607,7 @@ mod tests {
 
     #[test]
     fn presence_round_trips() {
-        for s in ["online", "idle", "dnd", "offline"] {
+        for s in ["online", "idle", "dnd", "disconnected", "offline"] {
             assert_eq!(presence_str(parse_presence(s)), s);
         }
         assert_eq!(presence_str(0), "offline", "unspecified maps to offline");

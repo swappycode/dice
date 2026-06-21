@@ -49,7 +49,7 @@ const presence: Record<string, PresenceStatus> = {
   [AYAAN.id]: "online",
   [PRIYA.id]: "idle",
   [MOSS.id]: "dnd",
-  [GLITCH.id]: "offline",
+  [GLITCH.id]: "disconnected",
 };
 
 function mkChannel(guildId: string | null, name: string, position: number): Channel {

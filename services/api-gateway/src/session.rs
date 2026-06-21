@@ -488,10 +488,27 @@ pub(crate) async fn run_ready(
                 drop(_voice_attach); // unregister the dead connection promptly
                 drop(_conn); // stop counting this transport while detached
                 drop(transport);
+                // The connection dropped but the session may still resume: show
+                // others DISCONNECTED for the resume window (restored to ONLINE on
+                // resume below, or finalised to OFFLINE by cleanup on expiry).
+                if let Err(error) = gw.deps.presence.detach(st.user, st.gateway_session()).await {
+                    tracing::debug!(%error, user = %st.user, "presence detach failed");
+                }
                 match detached_wait(&gw, &mut st).await {
                     Some(fresh) => {
                         transport = fresh;
                         st.last_heartbeat = Instant::now();
+                        // Resumed: clear the DISCONNECTED state — back ONLINE for
+                        // others. (A client-set idle/dnd is re-asserted by the
+                        // client after resume.)
+                        if let Err(error) = gw
+                            .deps
+                            .presence
+                            .set_status(st.user, st.gateway_session(), v1::PresenceStatus::Online)
+                            .await
+                        {
+                            tracing::debug!(%error, user = %st.user, "presence resume restore failed");
+                        }
                         // Best effort: if the new transport dies mid-replay
                         // the next ready_loop recv errors and we re-detach
                         // (frames stay buffered until acked).

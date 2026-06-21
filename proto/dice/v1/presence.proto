@@ -8,6 +8,11 @@ enum PresenceStatus {
   PRESENCE_STATUS_DND = 3;
   PRESENCE_STATUS_OFFLINE = 4;
   // 5 reserved for INVISIBLE (post-M1; servers reject it in M1).
+  // Connection dropped but the session may still resume (within the resume
+  // window): a transient "lost connection" state, distinct from OFFLINE (gone
+  // for good). Server-set only — the gateway marks it on detach and restores
+  // ONLINE on resume / OFFLINE on window expiry; clients may not set it.
+  PRESENCE_STATUS_DISCONNECTED = 6;
 }
 
 message PresenceUpdate {
