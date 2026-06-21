@@ -549,85 +549,159 @@ fn run_engine(
 
 // ------------------------------------------------------------- resampling
 
-// The pipeline is 48 kHz; if a device runs at another rate we linearly resample
-// to/from 48 kHz. Linear interpolation is basic (a polyphase resampler would be
-// higher quality), but it's bypassed entirely at 48 kHz, so the common path is
+// The pipeline is 48 kHz; a device at another rate is resampled to/from 48 kHz
+// with a windowed-sinc (Blackman) POLYPHASE FIR — a proper band-limited
+// interpolator that rejects the images/aliases a naive linear interpolation
+// would pass through. Bypassed entirely at 48 kHz, so the common path is
 // untouched. Capture pushes arriving blocks through `PushResampler`; playback
-// pulls one device-rate sample at a time through `PullResampler`.
+// pulls one device-rate sample at a time through `PullResampler`. Both wrap one
+// streaming `SincResampler` core.
 
-/// Capture-side resampler (`in_rate` → 48 kHz): feed arriving blocks, append
-/// 48 kHz samples to `out`.
-struct PushResampler {
-    /// Input samples advanced per output sample.
-    step: f64,
-    /// Read position within the stream `[prev, block[0], block[1], …]`.
-    pos: f64,
-    /// Last sample of the previous block (index 0 of the read stream).
-    prev: f32,
+/// Filter taps (input samples spanned per output). Even; half on each side.
+const RS_TAPS: usize = 32;
+/// Half-width in input samples (`RS_TAPS / 2`).
+const RS_HALF: i64 = (RS_TAPS / 2) as i64;
+/// Fractional-position quantization of the polyphase bank. 512 sub-phases keep
+/// the phase error under ~1/512 of a sample (inaudible at voice rates).
+const RS_PHASES: usize = 512;
+
+/// Build the polyphase coefficient bank (`RS_PHASES * RS_TAPS`, phase-major): a
+/// Blackman-windowed sinc low-pass at `fc` (cycles/sample), each phase row
+/// normalized to unit DC gain so a constant passes through unchanged.
+fn build_bank(fc: f64) -> Vec<f32> {
+    use std::f64::consts::PI;
+    let sinc = |x: f64| {
+        if x.abs() < 1e-9 {
+            1.0
+        } else {
+            (PI * x).sin() / (PI * x)
+        }
+    };
+    let half = RS_HALF as f64;
+    let mut bank = vec![0f32; RS_PHASES * RS_TAPS];
+    for p in 0..RS_PHASES {
+        let frac = p as f64 / RS_PHASES as f64;
+        let mut sum = 0.0;
+        for j in 0..RS_TAPS {
+            // Distance (in input samples) from tap j to the output position.
+            let x = frac + (RS_HALF - 1 - j as i64) as f64;
+            let w = if x.abs() >= half {
+                0.0
+            } else {
+                let t = x / half; // [-1, 1]
+                0.42 + 0.5 * (PI * t).cos() + 0.08 * (2.0 * PI * t).cos()
+            };
+            let c = 2.0 * fc * sinc(2.0 * fc * x) * w;
+            bank[p * RS_TAPS + j] = c as f32;
+            sum += c;
+        }
+        // Normalize this phase to unit DC gain (exact constant passthrough).
+        if sum.abs() > 1e-9 {
+            let inv = (1.0 / sum) as f32;
+            for j in 0..RS_TAPS {
+                bank[p * RS_TAPS + j] *= inv;
+            }
+        }
+    }
+    bank
 }
 
-impl PushResampler {
+/// Streaming windowed-sinc resampler core (any in→out ratio). Feed input with
+/// [`Self::push`], take output with [`Self::try_next`]. Linear phase; a fixed
+/// small latency (~`RS_HALF` input samples). Built only when the rates differ.
+struct SincResampler {
+    bank: Vec<f32>,
+    /// Input samples advanced per output sample (`in / out`).
+    step: f64,
+    /// Next output position, in input samples measured from `hist`'s front.
+    pos: f64,
+    /// Input history (front = oldest retained sample).
+    hist: VecDeque<f32>,
+}
+
+impl SincResampler {
     fn new(in_rate: u32, out_rate: u32) -> Self {
+        // Anti-alias at the LOWER Nyquist: cutoff = ½ when upsampling, ½·(out/in)
+        // when downsampling (in input-rate-normalized cycles/sample).
+        let fc = 0.5 * (f64::from(out_rate) / f64::from(in_rate)).min(1.0);
+        // Prime with RS_HALF zeros so the first output is centred at the stream
+        // start (the filter's left half has no real samples yet).
+        let hist: VecDeque<f32> = std::iter::repeat_n(0.0, RS_HALF as usize).collect();
         Self {
+            bank: build_bank(fc),
             step: f64::from(in_rate) / f64::from(out_rate),
-            pos: 1.0,
-            prev: 0.0,
+            pos: RS_HALF as f64,
+            hist,
         }
     }
 
+    fn push(&mut self, s: f32) {
+        self.hist.push_back(s);
+    }
+
+    /// The next output sample, or `None` until `RS_HALF` look-ahead samples are
+    /// buffered. Advances the read position and trims spent input on success.
+    fn try_next(&mut self) -> Option<f32> {
+        let i = self.pos.floor() as i64;
+        if i + RS_HALF > self.hist.len() as i64 - 1 {
+            return None; // need RS_HALF samples of look-ahead
+        }
+        let frac = self.pos - i as f64;
+        let p = ((frac * RS_PHASES as f64).round() as usize).min(RS_PHASES - 1);
+        let base = (i - RS_HALF + 1) as usize; // ≥ 0 by the priming + trim invariant
+        let row = &self.bank[p * RS_TAPS..p * RS_TAPS + RS_TAPS];
+        let mut acc = 0.0f32;
+        for (j, &c) in row.iter().enumerate() {
+            acc += c * self.hist[base + j];
+        }
+        self.pos += self.step;
+        // Drop input no future output can reach, keeping `hist` bounded.
+        let drop = self.pos.floor() as i64 - RS_HALF + 1;
+        if drop > 0 {
+            for _ in 0..drop {
+                self.hist.pop_front();
+            }
+            self.pos -= drop as f64;
+        }
+        Some(acc)
+    }
+}
+
+/// Capture-side resampler (`in_rate` → 48 kHz): feed arriving blocks, append
+/// 48 kHz samples to `out`.
+struct PushResampler(SincResampler);
+
+impl PushResampler {
+    fn new(in_rate: u32, out_rate: u32) -> Self {
+        Self(SincResampler::new(in_rate, out_rate))
+    }
+
     fn process(&mut self, block: &[f32], out: &mut Vec<f32>) {
-        let n = block.len();
-        if n == 0 {
-            return;
+        for &s in block {
+            self.0.push(s);
         }
-        let prev = self.prev;
-        let at = |idx: usize| -> f32 { if idx == 0 { prev } else { block[idx - 1] } };
-        while self.pos < n as f64 {
-            let i = self.pos.floor() as usize;
-            let frac = (self.pos - i as f64) as f32;
-            out.push(at(i) * (1.0 - frac) + at(i + 1) * frac);
-            self.pos += self.step;
+        while let Some(y) = self.0.try_next() {
+            out.push(y);
         }
-        self.prev = block[n - 1];
-        self.pos -= n as f64;
     }
 }
 
 /// Playback-side resampler (48 kHz → `out_rate`): one output sample per `next`,
 /// pulling 48 kHz samples on demand (`pull` returns 0.0 on underrun).
-struct PullResampler {
-    step: f64,
-    pos: f64,
-    cur: f32,
-    nxt: f32,
-    primed: bool,
-}
+struct PullResampler(SincResampler);
 
 impl PullResampler {
     fn new(in_rate: u32, out_rate: u32) -> Self {
-        Self {
-            step: f64::from(in_rate) / f64::from(out_rate),
-            pos: 0.0,
-            cur: 0.0,
-            nxt: 0.0,
-            primed: false,
-        }
+        Self(SincResampler::new(in_rate, out_rate))
     }
 
     fn next_sample(&mut self, pull: &mut impl FnMut() -> f32) -> f32 {
-        if !self.primed {
-            self.cur = pull();
-            self.nxt = pull();
-            self.primed = true;
+        loop {
+            if let Some(y) = self.0.try_next() {
+                return y;
+            }
+            self.0.push(pull());
         }
-        let out = self.cur * (1.0 - self.pos as f32) + self.nxt * self.pos as f32;
-        self.pos += self.step;
-        while self.pos >= 1.0 {
-            self.pos -= 1.0;
-            self.cur = self.nxt;
-            self.nxt = pull();
-        }
-        out
     }
 }
 
@@ -782,13 +856,17 @@ mod tests {
 
     #[test]
     fn resamplers_change_length_by_ratio_and_preserve_a_constant() {
-        // Capture 24k → 48k roughly doubles the sample count.
+        // Capture 24k → 48k roughly doubles the count (minus the FIR edge latency).
         let mut up = PushResampler::new(24_000, 48_000);
         let mut out = Vec::new();
         up.process(&[0.5f32; 2400], &mut out); // 100 ms @ 24k
-        assert!((out.len() as i32 - 4800).abs() <= 4, "got {}", out.len());
+        assert!((out.len() as i32 - 4800).abs() <= 40, "got {}", out.len());
+        // A constant passes unit-DC-gain phases unchanged; skip the start-up ramp
+        // where the window still overlaps the primed zeros.
         assert!(
-            out.iter().all(|&s| (s - 0.5).abs() < 0.01),
+            out[RS_TAPS..out.len() - 1]
+                .iter()
+                .all(|&s| (s - 0.5).abs() < 0.01),
             "constant preserved"
         );
 
@@ -799,9 +877,39 @@ mod tests {
             .map(|_| down.next_sample(&mut || src.pop_front().unwrap_or(0.0)))
             .collect();
         assert!(
-            produced.iter().take(2000).all(|&s| (s - 0.5).abs() < 0.01),
+            produced[RS_TAPS..2000]
+                .iter()
+                .all(|&s| (s - 0.5).abs() < 0.01),
             "constant preserved through downsample"
         );
+    }
+
+    #[test]
+    fn polyphase_downsampler_rejects_above_output_nyquist() {
+        // 48k → 24k: output Nyquist 12 kHz. A 2 kHz tone (passband) survives near
+        // unity; a 22 kHz tone (deep stopband — which a linear interpolator would
+        // alias straight into the audible band) is strongly attenuated. This
+        // band-limiting is the whole point of the windowed-sinc over linear.
+        fn rms(xs: &[f32]) -> f32 {
+            (xs.iter().map(|s| s * s).sum::<f32>() / xs.len() as f32).sqrt()
+        }
+        fn tone(freq: f64, n: usize) -> Vec<f32> {
+            (0..n)
+                .map(|i| ((i as f64 / 48_000.0) * freq * std::f64::consts::TAU).sin() as f32)
+                .collect()
+        }
+        let run = |freq: f64| -> f32 {
+            let mut r = PushResampler::new(48_000, 24_000);
+            let mut out = Vec::new();
+            r.process(&tone(freq, 9600), &mut out); // 200 ms
+            // Measure the steady state, away from the filter's edge transients.
+            rms(&out[RS_TAPS..out.len() - RS_TAPS])
+        };
+        let pass = run(2_000.0);
+        let stop = run(22_000.0);
+        assert!(pass > 0.5, "2 kHz passband tone survives (rms {pass})");
+        assert!(stop < 0.05, "22 kHz stopband tone rejected (rms {stop})");
+        assert!(stop < pass * 0.1, "stopband well below passband");
     }
 
     #[test]
