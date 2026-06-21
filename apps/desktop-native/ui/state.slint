@@ -1,0 +1,121 @@
+// The app's view-state contract — the native equivalent of the prototype's flat
+// `state = {…}` object plus its `renderVals()` derived data. For milestone 1 the
+// list models are populated from Rust with the prototype's seed data; in
+// milestone 2 they'll be driven from `Arc<ClientCore>` instead. Derived per-row
+// flags (grouping, dividers) are precomputed in Rust, exactly like renderVals().
+
+export struct GuildTile {
+    id: string,
+    label: string,
+    tint: color,
+    active: bool,
+}
+
+// A flattened channel-tree row: a group label OR a text/voice channel.
+export struct ChannelRow {
+    group: bool,
+    name: string,
+    icon: string,       // "#" | "♪" | ""
+    voice: bool,
+    badge: string,
+    active: bool,
+}
+
+export struct Reaction {
+    label: string,
+    me: bool,
+}
+
+export struct ChatMsg {
+    id: string,
+    author: string,
+    author-color: color,
+    initials: string,
+    time: string,
+    text: string,
+    edited: bool,
+    show-header: bool,  // first-of-group → show avatar + name + time
+    grouped: bool,      // consecutive same-author → tighten, hide header
+    divider: bool,      // render the NEW unread divider before this row
+    has-reply: bool,
+    reply-name: string,
+    reply-text: string,
+    has-reactions: bool,
+    reactions: [Reaction],
+}
+
+// A flattened member-sidebar row: a group header OR a member.
+export struct MemberRow {
+    header: bool,
+    label: string,      // group label (when header)
+    count: int,
+    name: string,
+    initials: string,
+    tint: color,
+    presence: int,      // 0 online, 1 idle, 2 dnd, 3 offline
+    offline: bool,
+    sub: string,
+    has-sub: bool,
+}
+
+export struct VoicePart {
+    name: string,
+    initials: string,
+    tint: color,
+    speaking: bool,
+    muted: bool,
+}
+
+export struct Friend {
+    name: string,
+    initials: string,
+    tint: color,
+    presence: int,      // 0 online, 1 idle, 2 dnd, 3 offline
+    status-text: string,
+}
+
+export global State {
+    // screen: 0 = login, 1 = app
+    in-out property <int> screen: 1;
+    // view: 0 = chat, 1 = voice, 2 = home
+    in-out property <int> view: 0;
+    in-out property <bool> show-members: true;
+    in-out property <bool> in-voice: false;
+    // dialog: -1 none, 0 theme, 1 guild, 2 security, 3 voice
+    in-out property <int> dialog: -1;
+    in-out property <bool> muted: false;
+    in-out property <bool> deafened: false;
+    in-out property <bool> perf-mode: false;
+
+    in-out property <string> active-guild: "BARE METAL";
+    in-out property <string> active-channel: "general";
+    in-out property <string> active-topic: "all things homelab · be excellent to each other";
+    in-out property <string> header-hash: "#";
+    in-out property <int> online-count: 7;
+
+    in property <[GuildTile]> guilds;
+    in property <[ChannelRow]> channels;
+    in property <[ChatMsg]> messages;
+    in property <[MemberRow]> members;
+    in property <[VoicePart]> voice-parts;
+    in property <[Friend]> friends;
+
+    in-out property <string> draft;
+
+    // intents the UI emits (wired to ClientCore in milestone 2)
+    callback select-channel(string);
+    callback send-message();
+    callback open-dialog(int);
+    // custom window-control intents (the app is frameless — no native chrome)
+    callback win-close();
+    callback win-minimize();
+    callback win-maximize();
+}
+
+// One animation clock for all ambient motion (equalizer, speaking-orb pulse,
+// typing dots). `t` is a 0..1 sawtooth (~2s). Driven by a single gated Timer in
+// the AppWindow — it only runs in-app and with perf-mode off, so the idle login
+// screen (and perf-mode) cost zero animation/CPU.
+export global Anim {
+    in-out property <float> t: 0;
+}

@@ -1,0 +1,50 @@
+import { Theme, Geo } from "theme.slint";
+import { State, Anim, GuildTile, ChannelRow, ChatMsg, Reaction, MemberRow, VoicePart, Friend } from "state.slint";
+import { LoginScreen } from "login.slint";
+import { AppShell } from "shell.slint";
+import { DialogHost } from "dialogs.slint";
+
+// re-export globals so the Rust side can drive them (palette + view state + seed)
+export { Theme, Geo, State }
+
+export component AppWindow inherits Window {
+    title: "Dice";
+    // frameless: the app draws its own title bar — no native OS chrome (which
+    // would otherwise stack a second title bar + close button on top).
+    no-frame: true;
+    default-font-family: "Segoe UI";
+    default-font-size: 14px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.p.desk;
+
+    // ambient desk glow blobs (behind everything; soft radial fills, no blur).
+    // perf-mode drops them entirely (the brief: perf-mode kills glow/overlays).
+    if !State.perf-mode : Rectangle {
+        x: parent.width * 0.62; y: -parent.height * 0.14;
+        width: parent.width * 0.52; height: parent.height * 0.62;
+        border-radius: self.height / 2;
+        background: @radial-gradient(circle, Theme.p.glow, transparent 70%);
+        opacity: 0.5;
+    }
+    if !State.perf-mode : Rectangle {
+        x: -parent.width * 0.1; y: parent.height * 0.5;
+        width: parent.width * 0.46; height: parent.height * 0.56;
+        border-radius: self.height / 2;
+        background: @radial-gradient(circle, Theme.p.accent, transparent 70%);
+        opacity: 0.16;
+    }
+
+    if State.screen == 0 : LoginScreen { width: 100%; height: 100%; }
+    if State.screen == 1 : AppShell { width: 100%; height: 100%; }
+    DialogHost { width: 100%; height: 100%; }
+
+    // single ambient-motion clock, gated for idle/perf-mode (zero cost otherwise)
+    Timer {
+        interval: 50ms;
+        running: State.screen == 1 && !State.perf-mode && State.dialog < 0;
+        triggered => {
+            Anim.t = Anim.t >= 1.0 ? 0 : Anim.t + 0.02;
+        }
+    }
+}

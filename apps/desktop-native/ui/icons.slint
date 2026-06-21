@@ -1,0 +1,49 @@
+// Vector icons via Slint `Path` (SVG command strings) — no raster assets, crisp
+// at any size + theme-colored. 24×24 viewbox to match the prototype's SVGs.
+import { Theme } from "theme.slint";
+
+export component Icon inherits Path {
+    in property <length> size: 16px;
+    in property <brush> stroke-color: Theme.p.muted;
+    in property <brush> fill-color: transparent;
+    in property <length> sw: 1.6px;
+    width: size;
+    height: size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: stroke-color;
+    stroke-width: sw;
+    fill: fill-color;
+}
+
+// stroke icons (outline)
+export component IcoMinimize inherits Icon { commands: "M5 12 L19 12"; }
+export component IcoMaximize inherits Icon { commands: "M4.5 4.5 L19.5 4.5 L19.5 19.5 L4.5 19.5 Z"; }
+export component IcoClose inherits Icon { commands: "M6 6 L18 18 M18 6 L6 18"; }
+export component IcoChevron inherits Icon { commands: "M6 9 L12 15 L18 9"; }
+export component IcoSearch inherits Icon { commands: "M11 18 A7 7 0 1 1 11.001 4 A7 7 0 0 1 11 18 Z M16.5 16.5 L21 21"; }
+export component IcoPlus inherits Icon { commands: "M12 5 L12 19 M5 12 L19 12"; }
+export component IcoGear inherits Icon {
+    commands: "M12 9 A3 3 0 1 1 11.999 15 A3 3 0 0 1 12 9 Z M12 2 L12 5 M12 19 L12 22 M2 12 L5 12 M19 12 L22 12 M5 5 L7 7 M17 17 L19 19 M19 5 L17 7 M7 17 L5 19";
+}
+export component IcoPeople inherits Icon {
+    commands: "M9 5 A3 3 0 1 0 9.001 11 A3 3 0 0 0 9 5 Z M3 19 C3 16 5.5 14 9 14 C12.5 14 15 16 15 19 M16.5 6.6 A2.4 2.4 0 1 0 16.501 11.4 M16.5 13 C18.7 13.4 20 15 20 18";
+}
+export component IcoSpeaker inherits Icon { commands: "M11 5 L6 9 L3 9 L3 15 L6 15 L11 19 Z M16 8 A5 5 0 0 1 16 16"; }
+export component IcoMic inherits Icon {
+    commands: "M12 3 A3 3 0 0 0 9 6 L9 11 A3 3 0 0 0 15 11 L15 6 A3 3 0 0 0 12 3 Z M5 11 A7 7 0 0 0 19 11 M12 18 L12 21";
+}
+export component IcoMicMuted inherits Icon {
+    commands: "M9 9 L9 11 A3 3 0 0 0 13.6 13.6 M15 9.3 L15 5 A3 3 0 0 0 9 5 M5 11 A7 7 0 0 0 13 17.7 M3 3 L21 21 M12 18 L12 21";
+}
+export component IcoHeadphone inherits Icon {
+    commands: "M4 14 L4 12 A8 8 0 0 1 20 12 L20 14 M3 13.5 L7 13.5 L7 20 L3 20 Z M17 13.5 L21 13.5 L21 20 L17 20 Z";
+}
+
+// filled icons
+export component IcoSend inherits Icon { fill-color: Theme.p.text; sw: 0px; commands: "M3 11 L21 3 L13 21 L10.5 13.5 Z"; }
+export component IcoPhone inherits Icon {
+    fill-color: Theme.p.text;
+    sw: 0px;
+    commands: "M6.5 10.8 C7.8 13.4 9.9 15.5 12.5 16.8 L14.5 14.8 C14.8 14.5 15.2 14.4 15.5 14.6 C16.6 15 17.8 15.2 19 15.2 C19.6 15.2 20 15.6 20 16.2 L20 19.5 C20 20.1 19.6 20.5 19 20.5 C10.7 20.5 4 13.8 4 5.5 C4 4.9 4.4 4.5 5 4.5 L8.3 4.5 C8.9 4.5 9.3 4.9 9.3 5.5 C9.3 6.7 9.5 7.9 9.9 9 C10 9.3 9.9 9.7 9.6 10 Z";
+}

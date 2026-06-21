@@ -1,0 +1,291 @@
+// The Dice theme system — the native equivalent of the prototype's 8
+// `[data-theme]` CSS-var blocks. Every value is transcribed verbatim from
+// `Dice.dc.html`. A `Palette` is the 24-token contract; `Theme.p` is the
+// active one, selected by `Theme.id` (0..7) set from Rust.
+//
+// Fidelity/perf note (per the user's "build lean" directive): translucent
+// surface tokens keep their alpha so layered panels read as "glass" over the
+// desk gradient WITHOUT any real backdrop blur. Desk radial gradients are
+// centered (Slint has no off-center radial) — a deliberate, invisible
+// simplification.
+
+// brush  -> may be a gradient (desk / titlebar / accent-grad)
+// color  -> a solid (often translucent) fill or ink
+export struct Palette {
+    desk: brush,
+    win: color,
+    win-solid: color,
+    rail: color,
+    panel: color,
+    panel2: color,
+    titlebar: brush,
+    field: color,
+    border: color,
+    border-lt: color,
+    text: color,
+    muted: color,
+    subtle: color,
+    accent: color,
+    accent2: color,
+    accent-grad: brush,
+    accent-ink: color,
+    sel: color,
+    hover: color,
+    glow: color,
+    online: color,
+    idle: color,
+    dnd: color,
+    offline: color,
+}
+
+export global Theme {
+    in property <int> id: 0;
+
+    property <[Palette]> palettes: [
+        // 0 ── midnight (hero) — deep indigo Aero glass
+        {
+            desk: @radial-gradient(circle, #222e63 0%, #10162f 48%, #070a16 100%),
+            win: #10162f.with-alpha(0.72),
+            win-solid: #0f1430,
+            rail: #090d1e.with-alpha(0.5),
+            panel: #121936.with-alpha(0.46),
+            panel2: #0b1024.with-alpha(0.32),
+            titlebar: @linear-gradient(180deg, #6080e8.with-alpha(0.40) 0%, #263474.with-alpha(0.28) 100%),
+            field: #070a1a.with-alpha(0.62),
+            border: #7a98ff.with-alpha(0.16),
+            border-lt: #ffffff.with-alpha(0.09),
+            text: #eaeeff,
+            muted: #98a4da,
+            subtle: #6b76a8,
+            accent: #5b8cff,
+            accent2: #46e0ff,
+            accent-grad: @linear-gradient(135deg, #5b8cff, #46e0ff),
+            accent-ink: #04122e,
+            sel: #5b8cff.with-alpha(0.18),
+            hover: #ffffff.with-alpha(0.055),
+            glow: #46e0ff.with-alpha(0.30),
+            online: #36ff8e,
+            idle: #ffc24b,
+            dnd: #ff5c7a,
+            offline: #5b6388,
+        },
+        // 1 ── aero — bright Win7 glass
+        {
+            desk: @radial-gradient(circle, #cfe9ff 0%, #79b2e6 45%, #3f78bf 100%),
+            win: #ffffff.with-alpha(0.58),
+            win-solid: #eef4fb,
+            rail: #ffffff.with-alpha(0.42),
+            panel: #ffffff.with-alpha(0.46),
+            panel2: #ffffff.with-alpha(0.34),
+            titlebar: @linear-gradient(180deg, #ffffff.with-alpha(0.9) 0%, #cee4fa.with-alpha(0.6) 100%),
+            field: #ffffff.with-alpha(0.72),
+            border: #366caa.with-alpha(0.26),
+            border-lt: #ffffff.with-alpha(0.75),
+            text: #102438,
+            muted: #3c5e80,
+            subtle: #6f8aa6,
+            accent: #1f7ae0,
+            accent2: #37b8ff,
+            accent-grad: @linear-gradient(135deg, #1f7ae0, #37b8ff),
+            accent-ink: #ffffff,
+            sel: #1f7ae0.with-alpha(0.16),
+            hover: #1f7ae0.with-alpha(0.08),
+            glow: #37b8ff.with-alpha(0.32),
+            online: #1fb866,
+            idle: #e8a01f,
+            dnd: #e0445a,
+            offline: #9fb0c2,
+        },
+        // 2 ── phosphor — green CRT terminal
+        {
+            desk: @radial-gradient(circle, #063015 0%, #021107 55%, #000402 100%),
+            win: #031207.with-alpha(0.74),
+            win-solid: #04140a,
+            rail: #010903.with-alpha(0.6),
+            panel: #021006.with-alpha(0.5),
+            panel2: #010903.with-alpha(0.35),
+            titlebar: @linear-gradient(180deg, #28ff60.with-alpha(0.2) 0%, #083c16.with-alpha(0.24) 100%),
+            field: #000802.with-alpha(0.72),
+            border: #36ff5e.with-alpha(0.24),
+            border-lt: #36ff5e.with-alpha(0.14),
+            text: #8dffa6,
+            muted: #46c463,
+            subtle: #22833a,
+            accent: #36ff5e,
+            accent2: #a6ff36,
+            accent-grad: @linear-gradient(135deg, #36ff5e, #a6ff36),
+            accent-ink: #021004,
+            sel: #36ff5e.with-alpha(0.15),
+            hover: #36ff5e.with-alpha(0.07),
+            glow: #36ff5e.with-alpha(0.34),
+            online: #36ff5e,
+            idle: #d6ff36,
+            dnd: #ff5c4a,
+            offline: #1f7a35,
+        },
+        // 3 ── bubble — pink pastel
+        {
+            desk: @radial-gradient(circle, #ffe3f1 0%, #ffbfdf 50%, #ff93c6 100%),
+            win: #fff4fa.with-alpha(0.64),
+            win-solid: #fff2f8,
+            rail: #ffffff.with-alpha(0.46),
+            panel: #ffffff.with-alpha(0.5),
+            panel2: #ffffff.with-alpha(0.36),
+            titlebar: @linear-gradient(180deg, #ffffff.with-alpha(0.9) 0%, #ffd4eb.with-alpha(0.6) 100%),
+            field: #ffffff.with-alpha(0.78),
+            border: #d63a87.with-alpha(0.24),
+            border-lt: #ffffff.with-alpha(0.85),
+            text: #7a1f4e,
+            muted: #bb5e88,
+            subtle: #cf90ad,
+            accent: #ff4d9d,
+            accent2: #ff97c9,
+            accent-grad: @linear-gradient(135deg, #ff4d9d, #ffa8d4),
+            accent-ink: #ffffff,
+            sel: #ff4d9d.with-alpha(0.16),
+            hover: #ff4d9d.with-alpha(0.08),
+            glow: #ff8ac4.with-alpha(0.34),
+            online: #2bd17e,
+            idle: #ffb43b,
+            dnd: #ff5c7a,
+            offline: #c9a3b5,
+        },
+        // 4 ── luna — classic XP silver/blue
+        {
+            desk: @linear-gradient(180deg, #7aa3e8 0%, #3a6cc4 60%, #27509e 100%),
+            win: #ece9d8.with-alpha(0.92),
+            win-solid: #ece9d8,
+            rail: #d6dff7.with-alpha(0.72),
+            panel: #f5f3e9.with-alpha(0.82),
+            panel2: #ffffff.with-alpha(0.55),
+            titlebar: @linear-gradient(180deg, #ffffff.with-alpha(0.92) 0%, #cee0fa.with-alpha(0.7) 100%),
+            field: #ffffff.with-alpha(0.86),
+            border: #285aaa.with-alpha(0.26),
+            border-lt: #ffffff.with-alpha(0.85),
+            text: #1a2a3f,
+            muted: #4a5e7a,
+            subtle: #7d8aa0,
+            accent: #2a6fdb,
+            accent2: #3f9bea,
+            accent-grad: @linear-gradient(135deg, #2a6fdb, #3f9bea),
+            accent-ink: #ffffff,
+            sel: #2a6fdb.with-alpha(0.16),
+            hover: #2a6fdb.with-alpha(0.08),
+            glow: #3f9bea.with-alpha(0.30),
+            online: #3aa845,
+            idle: #e8a01f,
+            dnd: #d6452f,
+            offline: #9aa6b8,
+        },
+        // 5 ── nocturne — violet night
+        {
+            desk: @radial-gradient(circle, #2a1450 0%, #160a2e 50%, #0a0518 100%),
+            win: #1c1034.with-alpha(0.72),
+            win-solid: #150c2b,
+            rail: #100820.with-alpha(0.55),
+            panel: #22123e.with-alpha(0.46),
+            panel2: #120a26.with-alpha(0.34),
+            titlebar: @linear-gradient(180deg, #a78bfa.with-alpha(0.34) 0%, #50288c.with-alpha(0.26) 100%),
+            field: #0c061a.with-alpha(0.62),
+            border: #b496ff.with-alpha(0.18),
+            border-lt: #ffffff.with-alpha(0.08),
+            text: #efe6ff,
+            muted: #b9a6e6,
+            subtle: #7e6bab,
+            accent: #a78bfa,
+            accent2: #e879f9,
+            accent-grad: @linear-gradient(135deg, #a78bfa, #e879f9),
+            accent-ink: #1a0b2e,
+            sel: #a78bfa.with-alpha(0.18),
+            hover: #ffffff.with-alpha(0.05),
+            glow: #e879f9.with-alpha(0.30),
+            online: #36ff8e,
+            idle: #ffc24b,
+            dnd: #ff5c7a,
+            offline: #6a5b88,
+        },
+        // 6 ── vantablack — OLED minimal
+        {
+            desk: @radial-gradient(circle, #0a0a0a 0%, #000000 70%),
+            win: #080809.with-alpha(0.82),
+            win-solid: #060607,
+            rail: #000000.with-alpha(0.6),
+            panel: #0d0d0f.with-alpha(0.6),
+            panel2: #060607.with-alpha(0.5),
+            titlebar: @linear-gradient(180deg, #28282e.with-alpha(0.5) 0%, #0c0c0e.with-alpha(0.4) 100%),
+            field: #000000.with-alpha(0.7),
+            border: #ffffff.with-alpha(0.1),
+            border-lt: #ffffff.with-alpha(0.06),
+            text: #f0f0f2,
+            muted: #8a8a92,
+            subtle: #56565e,
+            accent: #46e0ff,
+            accent2: #8ad8ff,
+            accent-grad: @linear-gradient(135deg, #46e0ff, #8ad8ff),
+            accent-ink: #001018,
+            sel: #46e0ff.with-alpha(0.12),
+            hover: #ffffff.with-alpha(0.045),
+            glow: #46e0ff.with-alpha(0.2),
+            online: #2bff88,
+            idle: #ffc24b,
+            dnd: #ff5c5c,
+            offline: #4a4a52,
+        },
+        // 7 ── ember — warm dark
+        {
+            desk: @radial-gradient(circle, #3a1808 0%, #1e0d05 50%, #0c0502 100%),
+            win: #28140c.with-alpha(0.72),
+            win-solid: #1c0e07,
+            rail: #180b06.with-alpha(0.55),
+            panel: #30180e.with-alpha(0.46),
+            panel2: #1a0c07.with-alpha(0.34),
+            titlebar: @linear-gradient(180deg, #ff8c3c.with-alpha(0.3) 0%, #8c3c14.with-alpha(0.24) 100%),
+            field: #140904.with-alpha(0.62),
+            border: #ff965a.with-alpha(0.18),
+            border-lt: #ffffff.with-alpha(0.08),
+            text: #ffe8d6,
+            muted: #e0a982,
+            subtle: #a8745a,
+            accent: #ff8a3c,
+            accent2: #ff5c4a,
+            accent-grad: @linear-gradient(135deg, #ff8a3c, #ff5c4a),
+            accent-ink: #2a0f04,
+            sel: #ff8a3c.with-alpha(0.16),
+            hover: #ffffff.with-alpha(0.05),
+            glow: #ff5c4a.with-alpha(0.30),
+            online: #5ad17e,
+            idle: #ffc24b,
+            dnd: #ff5c4a,
+            offline: #8a6a5a,
+        },
+    ];
+
+    out property <Palette> p: palettes[root.id];
+
+    out property <string> name:
+        root.id == 0 ? "midnight" : root.id == 1 ? "aero" :
+        root.id == 2 ? "phosphor" : root.id == 3 ? "bubble" :
+        root.id == 4 ? "luna"     : root.id == 5 ? "nocturne" :
+        root.id == 6 ? "vantablack" : "ember";
+
+    // presence kind (0 online, 1 idle, 2 dnd, 3 offline) → theme color
+    pure public function presence-color(k: int) -> color {
+        return k == 0 ? root.p.online : k == 1 ? root.p.idle : k == 2 ? root.p.dnd : root.p.offline;
+    }
+}
+
+// Geometry tokens — theme-invariant sizes/radii (the prototype's layout px).
+export global Geo {
+    out property <length> titlebar-h: 42px;
+    out property <length> statusbar-h: 26px;
+    out property <length> rail-w: 66px;
+    out property <length> channels-w: 236px;
+    out property <length> members-w: 208px;
+    out property <length> header-h: 48px;
+
+    out property <length> r-window: 16px;
+    out property <length> r-card: 14px;
+    out property <length> r-row: 8px;
+    out property <length> r-input: 9px;
+    out property <length> r-button: 10px;
+}

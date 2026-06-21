@@ -1,0 +1,41 @@
+# Standalone workspace: the native Slint client is deliberately OUTSIDE the root
+# Dice workspace (root Cargo.toml `exclude`s this path) so the GUI dependency
+# tree never taints server builds — mirrors `apps/desktop-client/src-tauri`.
+#
+# Toolkit = Slint with the PURE-RUST SOFTWARE RENDERER (no GPU, no C toolchain).
+# Chosen for the lowest idle RAM/CPU footprint (the <100 MB goal) and to stay
+# clear of native-build traps. DO NOT add `renderer-skia` (pulls a C++ Skia
+# build) — it would violate the no-native-deps policy + the deny.toml gate.
+[workspace]
+
+[package]
+name = "dice-native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+description = "Dice desktop client — native Slint UI (WebView2-free, <100 MB target)"
+
+[dependencies]
+slint = { version = "1", default-features = false, features = [
+  "std",
+  "compat-1-2",
+  "backend-winit",
+  "renderer-software",
+  "unstable-fontique-08", # runtime registration of the bundled OFL fonts
+] }
+# pure-Rust PNG encoder, used only by the headless `--shots` screenshot mode
+# (lets us render every screen to an image without a display, for verification)
+png = "0.17"
+
+[build-dependencies]
+slint-build = "1"
+
+# Release profile tuned for a small binary + low runtime footprint (mirrors the
+# survey's recommendation for the native shell).
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

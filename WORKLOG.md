@@ -7,6 +7,86 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-21 - M5 FINAL: native Rust UI rewrite (Slint) — milestone-1 visual shell
+
+**Branch `main`. NOT yet committed** (held: the 4 prior M5 commits carry a forbidden `Co-Authored-By`
+trailer pending the user's call; not adding more attribution + waiting for the user to say "commit").
+The native-UI rewrite is M5's last item — replace the WebView2/SolidJS renderer with a native Rust UI
+to break the **<100 MB idle-RAM** floor (WebView2 ≈117 MB; Rust host alone ≈5.7 MB).
+
+**Toolkit = Slint + pure-Rust software renderer** (user criterion: "use which puts less load on the
+system"). New crate `apps/desktop-native/` — its own workspace (excluded from root, mirrors `src-tauri`),
+pkg `dice-native`, `slint` default-features=false + `std,compat-1-2,backend-winit,renderer-software`,
+`png` (screenshot mode only), release profile opt-level="s"/lto=thin/strip/panic=abort,
+`#![deny(unsafe_code)]`. **Hermetic: no native-build traps** — `cargo tree` shows only `tiny-skia`
+(pure-Rust rasteriser) + `windows-sys` (pure-Rust Win32), NO aws-lc/openssl/skia-C/nasm. 663 deps.
+
+**Done (milestone 1 = the prototype recreated natively on seed data):**
+- **Theme system** — all **8 palettes** (`ui/theme.slint`) as a `Palette` struct + `[Palette]` array in
+  an `export global Theme`, switched by `Theme.id` from Rust; `presence-color(kind)` fn; `Geo` geometry
+  global. Every token transcribed from the prototype CSS. Theme-reactive throughout.
+- **Screens** (`ui/login.slint`, `ui/shell.slint`): Login glass card; App shell = TitleBar(42) +
+  GuildRail(66, home die + 5 bubbles + active pill + add) + ChannelColumn(236, INFO/LOUNGE/HOMELAB/VOICE
+  groups, badges, user footer) + main pane + MemberSidebar(208, Online/Offline + presence dots) +
+  StatusBar(26, QUIC/RAM 94MB/monolith/theme-chip). Main pane switches Chat / Voice("The Rack", orbs +
+  speaking ring + equalizer + control bar) / Home(Friends). Composer, reactions, reply-ref, unread
+  "NEW" divider, typing dots — all present.
+- **4 dialogs** (`ui/dialogs.slint`): Theme Builder (preset grid + 5-knob), Guild, Security (banner +
+  faux-QR + recovery codes), Voice & Video (devices + mic meter + VAD/PTT + AEC M5-BETA toggle), behind
+  a scrim/modal host driven by `State.dialog`.
+- **State contract** (`ui/state.slint`): `State` global + structs (GuildTile/ChannelRow/ChatMsg/
+  Reaction/MemberRow/VoicePart/Friend); seed data ported from the prototype in `src/seed.rs`. In M2 the
+  models get populated from `Arc<ClientCore>` instead.
+- **Headless screenshot harness** (`--shots <dir> <screen>`, debug-only, in `src/main.rs`): software-
+  renders any screen in all 8 themes to PNG (Rgb565→RGB8 via the `png` crate) — no display needed.
+  Verified login/chat/voice/home + 4 dialogs across themes look faithful. PNGs in `apps/desktop-native/shots/`.
+- Interactions wired in-markup: theme switch, view switch (home/voice/leave), members toggle, mute/
+  deafen, perf-mode toggle, dialog open/close. (channel-select/send are no-op callbacks until M2.)
+
+**Slint gotchas hit:** property names `col` and `row` are reserved (GridLayout attached props) → renamed
+`tint`/`cr`; globals must be re-exported from the entry file for Rust access.
+
+**M1 POLISH — DONE (2026-06-22):**
+- **Fonts** — bundled OFL Chakra Petch (Regular/SemiBold/Bold) + Space Mono (Regular/Bold) in
+  `fonts/`, registered at runtime via the `unstable-fontique-08` feature (`slint::fontique_08::
+  shared_collection().register_fonts`, called AFTER `AppWindow::new`). `Display`/`Mono` text helpers
+  (widgets.slint) + `default-font-family:"Segoe UI"` for body. Wordmark/headers get letter-spacing.
+- **Icons** — `ui/icons.slint`: a `Path`-based `Icon` (24×24 viewbox, themed stroke/fill) + named icons
+  (window controls, search, chevron, plus, gear, people, speaker, mic, mic-muted, headphone, send,
+  phone). SVG arc (`A`) commands render fine in the software renderer. Replaced all text-glyph/emoji
+  placeholders.
+- **Animations** — one `Anim.t` 0..1 sawtooth driven by a single `Timer` (50ms) in AppWindow, gated
+  `running: screen==1 && !perf-mode && dialog<0` (login + perf-mode + open-dialog → zero motion).
+  Applied to the equalizer (per-bar `sin`), speaking-orb expanding pulse rings (2, phase-offset), and
+  typing dots (per-dot `sin` opacity).
+- **Navigation** — voice-channel rows now enter the Voice view; guild bubbles/home-die/hangup switch
+  views; theme chip + presets switch theme; dialogs open/close; mute/deafen/members/perf toggle. (Text
+  channel-select + send remain no-ops → M2.)
+- **RAM MEASURED — GOAL CRUSHED.** Single native process (no WebView2 tree). `scripts/measure-ram.ps1`
+  (`--start <screen>`). Release (5.7 MB exe, opt-level=s/lto=thin/strip): **login 7.3 MB private / 23.1 MB
+  working set · chat (full shell) 8.7 / 25.8 · voice 8.0 / 24.7.** vs the WebView2 client's ~117 MB idle /
+  ~163 MB active → **~78% working-set cut, <100 MB met with ~75 MB headroom.**
+
+**M1 is visually + functionally complete on seed data.** **Then M2:** wire `Arc<ClientCore>` + a native
+`Emitter` of the `DiceEvent` enum + port the 10-store `dispatch()` state layer (survey contract in the
+`dice-native-ui-rewrite` memory). Build lean (perf-mode-as-baseline). Remaining nicety: window-focus
+gate for animations (perf-mode + idle-screen gating already covers the headline-RAM case).
+
+**LIVE-WINDOW FIXES (after running it on real hardware; a 6-agent visual audit grounded the bugs):**
+**double title bar / "two close buttons"** → `no-frame: true` + custom controls wired to `ui.hide()`/
+`set_minimized`/`set_maximized`. **Content bunched-left, empty right** = a real Slint bug: `alignment:
+start` on a HorizontalLayout makes it IGNORE `horizontal-stretch` spacers → removed from titlebar/
+statusbar/home-header (the 3 with right-push spacers). **Flat/washed glass** → shell was opaque
+`win-solid`; now `perf-mode ? win-solid : win` (translucent → desk shows through) + ambient glow blobs
+(gated off in perf-mode). **Gradient buttons rendered SQUARE** (software renderer ignores `border-radius`
+on gradient fills) → new `GradFill` helper draws the gradient as a clipped child of a rounded parent;
+applied to send/attach/Add-Friend/hang-up/welcome-tile. **No scrolling** → channel/message/friends/
+member lists wrapped in `ScrollView`. **Removed the equalizer** (voice) + **the search bar** (no backend)
+per user: only keep UI backed by the real backend. Mono-emoji fallback (NotoEmoji). **RAM = 10.5 MB
+private / 29.5 MB working set.** Known TODO: frameless window not drag-to-move yet (maximize works);
+window corners not rounded (needs DWM round-corner or a transparent-window pass); status-bar 23ms/94MB
+are placeholders.
+
 ## 2026-06-21 - M5: custom pure-Rust AEC + noise suppression, "disconnected" presence, fuzzing
 
 **Branch `main`. Per-unit commits (`4a513d6` voice, `59cfdd1` presence, `8249590` fuzz).** Gates per

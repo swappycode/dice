@@ -1,0 +1,83 @@
+// Reusable vector primitives. All generated — no raster assets (per the brief).
+// Deliberately no drop-shadow-blur (software-renderer + perf): the look comes
+// from fills, gradients and 1px borders.
+import { Theme } from "theme.slint";
+
+// Text presets so the bundled fonts get used without repeating font-family.
+// Display = Chakra Petch (headings, wordmark); Mono = Space Mono (status/codes).
+export component Display inherits Text { font-family: "Chakra Petch"; }
+export component Mono inherits Text { font-family: "Space Mono"; }
+
+// The Dice die mark: rounded square + top gloss + 5 white pips (quincunx).
+// Scales by `size`; pip/gloss positions follow the prototype's 100-unit viewbox.
+export component DieLogo inherits Rectangle {
+    in property <length> size: 60px;
+    in property <color> face: Theme.p.accent;
+    in property <color> pip: #ffffff;
+    in property <bool> gloss: true;
+    property <length> u: size / 100;
+    width: size;
+    height: size;
+
+    Rectangle {
+        x: 8 * u; y: 8 * u; width: 84 * u; height: 84 * u;
+        border-radius: 22 * u;
+        background: face;
+    }
+    if gloss : Rectangle {
+        x: 8 * u; y: 8 * u; width: 84 * u; height: 38 * u;
+        border-radius: 19 * u;
+        background: #ffffff.with-alpha(0.24);
+    }
+    Rectangle { x: 22 * u; y: 22 * u; width: 16 * u; height: 16 * u; border-radius: 8 * u; background: pip; }
+    Rectangle { x: 62 * u; y: 22 * u; width: 16 * u; height: 16 * u; border-radius: 8 * u; background: pip; }
+    Rectangle { x: 42 * u; y: 42 * u; width: 16 * u; height: 16 * u; border-radius: 8 * u; background: pip; }
+    Rectangle { x: 22 * u; y: 62 * u; width: 16 * u; height: 16 * u; border-radius: 8 * u; background: pip; }
+    Rectangle { x: 62 * u; y: 62 * u; width: 16 * u; height: 16 * u; border-radius: 8 * u; background: pip; }
+}
+
+// Generated avatar / guild tile: a per-entity colored rounded square + initials.
+export component Avatar inherits Rectangle {
+    in property <length> size: 38px;
+    in property <color> tint: #5b8cff;
+    in property <string> initials: "FF";
+    in property <color> ink: #0b1020;
+    in property <length> radius: size * 0.31;
+    width: size;
+    height: size;
+    border-radius: radius;
+    background: tint;
+    Text {
+        text: initials;
+        color: ink;
+        font-size: size * 0.34;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+}
+
+// A rounded gradient fill. Gradients do NOT honor border-radius in the software
+// renderer (they fill the full square), so the gradient is drawn as a CLIPPED
+// child of this rounded parent. Set `border-radius` + size + content on the
+// GradFill itself; pass the gradient via `grad`.
+export component GradFill inherits Rectangle {
+    in property <brush> grad: Theme.p.accent-grad;
+    clip: true;
+    Rectangle { width: 100%; height: 100%; background: grad; }
+}
+
+// Presence status dot with the punch-out ring (no blur; the ring reads it out).
+export component PresenceDot inherits Rectangle {
+    in property <color> tint: Theme.p.online;
+    in property <color> ring: Theme.p.win-solid;
+    in property <length> size: 12px;
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: tint;
+    border-width: 2.5px;
+    border-color: ring;
+}

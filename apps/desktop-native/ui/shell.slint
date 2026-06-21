@@ -1,0 +1,655 @@
+import { Theme, Geo } from "theme.slint";
+import { DieLogo, Avatar, PresenceDot, Display, Mono, GradFill } from "widgets.slint";
+import { IcoMinimize, IcoMaximize, IcoClose, IcoChevron, IcoPlus, IcoGear, IcoPeople, IcoSpeaker, IcoMic, IcoMicMuted, IcoHeadphone, IcoSend, IcoPhone } from "icons.slint";
+import { State, Anim, GuildTile, ChannelRow, ChatMsg, Reaction, MemberRow, VoicePart, Friend } from "state.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// ───────────────────────── title bar ─────────────────────────
+component TitleBar inherits Rectangle {
+    background: Theme.p.titlebar;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 8px;
+        spacing: 10px;
+
+        VerticalLayout { alignment: center; DieLogo { size: 22px; } }
+        Display { text: "DICE"; color: Theme.p.text; font-size: 15px; font-weight: 700; letter-spacing: 3px; vertical-alignment: center; }
+        Text { text: "/"; color: Theme.p.subtle; font-size: 12px; vertical-alignment: center; }
+        Display { text: State.active-guild; color: Theme.p.muted; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
+        Text { text: "/"; color: Theme.p.subtle; font-size: 12px; vertical-alignment: center; }
+        Text { text: State.header-hash + State.active-channel; color: Theme.p.text; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // window controls
+        win-ctl := HorizontalLayout {
+            spacing: 4px;
+            Rectangle {
+                width: 26px; height: 26px; border-radius: 7px;
+                background: mn.has-hover ? Theme.p.hover : transparent;
+                IcoMinimize { size: 14px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                mn := TouchArea { clicked => { State.win-minimize(); } }
+            }
+            Rectangle {
+                width: 26px; height: 26px; border-radius: 7px;
+                background: mx.has-hover ? Theme.p.hover : transparent;
+                IcoMaximize { size: 12px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                mx := TouchArea { clicked => { State.win-maximize(); } }
+            }
+            Rectangle {
+                width: 26px; height: 26px; border-radius: 7px;
+                background: cl.has-hover ? Theme.p.dnd : transparent;
+                IcoClose { size: 13px; stroke-color: cl.has-hover ? #ffffff : Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                cl := TouchArea { clicked => { State.win-close(); } }
+            }
+        }
+    }
+    // bottom hairline
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border-lt; }
+}
+
+// ───────────────────────── guild rail ─────────────────────────
+component GuildBubble inherits Rectangle {
+    in property <string> label;
+    in property <color> tint;
+    in property <bool> active;
+    height: 46px;
+
+    // left pill indicator (active)
+    Rectangle {
+        x: 0;
+        y: (parent.height - (active ? 28px : 0px)) / 2;
+        width: 4px;
+        height: active ? 28px : 0px;
+        border-radius: 2px;
+        background: Theme.p.text;
+    }
+    HorizontalLayout {
+        alignment: center;
+        Avatar { size: 46px; tint: tint; initials: label; ink: #ffffff; radius: active ? 15px : 14px; }
+    }
+}
+
+component GuildRail inherits Rectangle {
+    background: Theme.p.rail;
+    VerticalLayout {
+        padding-top: 10px; padding-bottom: 10px; spacing: 8px; alignment: start;
+
+        // home / DM button
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 46px; height: 46px;
+                border-radius: State.view == 2 ? 15px : 14px;
+                background: State.view == 2 ? Theme.p.accent : Theme.p.field;
+                border-width: 1px; border-color: Theme.p.border;
+                DieLogo { size: 30px; face: #ffffff; pip: Theme.p.accent; gloss: false; }
+                TouchArea { clicked => { State.view = 2; } }
+            }
+        }
+        HorizontalLayout { alignment: center; Rectangle { width: 30px; height: 2px; border-radius: 1px; background: Theme.p.border; } }
+
+        for g in State.guilds : GuildBubble {
+            label: g.label; tint: g.tint; active: g.active;
+            TouchArea { clicked => { State.view = 0; } }
+        }
+
+        // add guild
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 46px; height: 46px; border-radius: 14px;
+                background: Theme.p.field; border-width: 1px; border-color: Theme.p.border;
+                Text { text: "+"; color: Theme.p.online; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+            }
+        }
+    }
+    Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Theme.p.border; }
+}
+
+// ───────────────────────── channel column ─────────────────────────
+component ChannelRowView inherits Rectangle {
+    in property <ChannelRow> cr;
+    height: cr.group ? 30px : 32px;
+
+    if cr.group : HorizontalLayout {
+        padding-left: 8px; padding-top: 12px; padding-bottom: 4px;
+        Text { text: cr.name; color: Theme.p.subtle; font-size: 10.5px; font-weight: 700; }
+    }
+    if !cr.group : Rectangle {
+        height: 30px;
+        y: 1px;
+        border-radius: Geo.r-row;
+        background: cr.active ? Theme.p.sel : (ta.has-hover ? Theme.p.hover : transparent);
+        if cr.active : Rectangle { x: 0; width: 2px; height: parent.height; background: Theme.p.accent; }
+        HorizontalLayout {
+            padding-left: 11px; padding-right: 9px; spacing: 8px;
+            Text {
+                text: cr.icon;
+                color: cr.active ? Theme.p.accent : Theme.p.subtle;
+                font-size: cr.voice ? 14px : 17px;
+                width: 16px; horizontal-alignment: center; vertical-alignment: center;
+            }
+            Text {
+                text: cr.name;
+                color: cr.active ? Theme.p.text : Theme.p.muted;
+                font-size: 13.5px;
+                font-weight: cr.active ? 600 : 400;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if cr.badge != "" : Rectangle {
+                width: 18px; height: 17px; border-radius: 9px; background: Theme.p.dnd;
+                Text { text: cr.badge; color: #ffffff; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+            }
+        }
+        ta := TouchArea {
+            clicked => {
+                if (cr.voice) {
+                    State.view = 1;
+                    State.in-voice = true;
+                } else {
+                    State.view = 0;
+                }
+                State.select-channel(cr.name);
+            }
+        }
+    }
+}
+
+component ChannelColumn inherits Rectangle {
+    background: Theme.p.panel;
+    VerticalLayout {
+        // guild header
+        Rectangle {
+            height: Geo.header-h;
+            background: gh.has-hover ? Theme.p.hover : transparent;
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 16px;
+                Display { text: State.active-guild; color: Theme.p.text; font-size: 14px; font-weight: 700; letter-spacing: 1px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout { alignment: center; IcoChevron { size: 14px; stroke-color: Theme.p.muted; } }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
+            gh := TouchArea { clicked => { State.dialog = 1; } }
+        }
+        // channel list
+        ScrollView {
+            vertical-stretch: 1;
+            min-height: 0px;
+            VerticalLayout {
+                padding: 8px; spacing: 0px; alignment: start;
+                for c in State.channels : ChannelRowView { cr: c; }
+            }
+        }
+        // user footer
+        Rectangle {
+            height: 52px;
+            background: #000000.with-alpha(0.14);
+            Rectangle { height: 1px; background: Theme.p.border; }
+            HorizontalLayout {
+                padding-left: 8px; padding-right: 8px; spacing: 9px;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 34px; height: 34px;
+                        Avatar { size: 34px; tint: #5b8cff; initials: "FF"; ink: #ffffff; radius: 11px; }
+                        PresenceDot { x: parent.width - 10px; y: parent.height - 10px; ring: Theme.p.win-solid; }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text { text: "fanless_fred"; color: Theme.p.text; font-size: 12.5px; font-weight: 600; }
+                    Mono { text: "online · #4f2a"; color: Theme.p.subtle; font-size: 10.5px; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 28px; height: 28px; border-radius: 8px;
+                        background: gear.has-hover ? Theme.p.hover : transparent;
+                        IcoGear { size: 16px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                        gear := TouchArea { clicked => { State.dialog = 3; } }
+                    }
+                }
+            }
+        }
+    }
+    Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Theme.p.border; }
+}
+
+// ───────────────────────── chat view ─────────────────────────
+component ReactionChip inherits Rectangle {
+    in property <Reaction> r;
+    height: 24px; border-radius: 8px;
+    background: r.me ? Theme.p.sel : Theme.p.field;
+    border-width: 1px; border-color: r.me ? Theme.p.accent : Theme.p.border;
+    HorizontalLayout {
+        padding-left: 9px; padding-right: 9px;
+        Text { text: r.label; color: Theme.p.text; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+    }
+}
+
+component MessageRow inherits Rectangle {
+    in property <ChatMsg> m;
+    VerticalLayout {
+        if m.divider : HorizontalLayout {
+            padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 6px; spacing: 10px;
+            VerticalLayout { alignment: center; Rectangle { height: 1px; background: Theme.p.dnd; opacity: 0.5; horizontal-stretch: 1; } }
+            Mono { text: "NEW"; color: Theme.p.dnd; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; }
+        }
+        Rectangle {
+            background: row-ta.has-hover ? Theme.p.hover : transparent;
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 16px; padding-top: m.grouped ? 1px : 6px; padding-bottom: 1px; spacing: 2px;
+                // gutter
+                Rectangle {
+                    width: 46px;
+                    if m.show-header : Avatar { size: 38px; tint: m.author-color; initials: m.initials; ink: #0b1020; radius: 12px; }
+                }
+                // body
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 1px;
+                    if m.has-reply : HorizontalLayout {
+                        spacing: 6px; padding-left: 8px;
+                        Text { text: "↳"; color: Theme.p.border; font-size: 11px; }
+                        Text { text: "@" + m.reply-name; color: Theme.p.accent; font-size: 11.5px; font-weight: 600; }
+                        Text { text: m.reply-text; color: Theme.p.muted; font-size: 11.5px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    if m.show-header : HorizontalLayout {
+                        spacing: 8px; alignment: start;
+                        Text { text: m.author; color: m.author-color; font-size: 14px; font-weight: 700; }
+                        Mono { text: "Today at " + m.time; color: Theme.p.subtle; font-size: 10.5px; vertical-alignment: bottom; }
+                    }
+                    Text { text: m.text; color: Theme.p.text; font-size: 14px; wrap: word-wrap; }
+                    if m.has-reactions : HorizontalLayout {
+                        spacing: 6px; padding-top: 6px; alignment: start;
+                        for r in m.reactions : ReactionChip { r: r; }
+                        Rectangle {
+                            width: 26px; height: 24px; border-radius: 8px;
+                            background: Theme.p.field; border-width: 1px; border-color: Theme.p.border;
+                            Text { text: "+"; color: Theme.p.subtle; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+            }
+            row-ta := TouchArea { }
+        }
+    }
+}
+
+component ChatView inherits Rectangle {
+    background: Theme.p.panel2;
+    VerticalLayout {
+        // header
+        Rectangle {
+            height: Geo.header-h;
+            HorizontalLayout {
+                padding-left: 18px; padding-right: 18px; spacing: 10px;
+                Text { text: State.header-hash; color: Theme.p.subtle; font-size: 18px; vertical-alignment: center; }
+                Text { text: State.active-channel; color: Theme.p.text; font-size: 14.5px; font-weight: 700; vertical-alignment: center; }
+                Rectangle { width: 1px; height: 18px; background: Theme.p.border; }
+                Text { text: State.active-topic; color: Theme.p.muted; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Rectangle {
+                    width: 28px; height: 28px; border-radius: 8px;
+                    background: State.show-members ? Theme.p.sel : (mt.has-hover ? Theme.p.hover : transparent);
+                    IcoPeople { size: 15px; stroke-color: State.show-members ? Theme.p.accent : Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    mt := TouchArea { clicked => { State.show-members = !State.show-members; } }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
+        }
+        // messages
+        ScrollView {
+            vertical-stretch: 1;
+            min-height: 0px;
+            VerticalLayout {
+                padding: 8px; alignment: start;
+                // intro card
+                Rectangle {
+                    height: 84px;
+                    border-radius: Geo.r-card;
+                    background: Theme.p.sel;
+                    border-width: 1px; border-color: Theme.p.border;
+                    HorizontalLayout {
+                        padding: 18px; spacing: 12px; alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            GradFill {
+                                width: 46px; height: 46px; border-radius: Geo.r-card;
+                                Text { text: State.header-hash; color: Theme.p.accent-ink; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center; spacing: 2px;
+                            Display { text: "Welcome to " + State.header-hash + State.active-channel; color: Theme.p.text; font-size: 17px; font-weight: 700; }
+                            Text { text: "This is the start of the channel. " + State.active-topic; color: Theme.p.muted; font-size: 12.5px; overflow: elide; }
+                        }
+                    }
+                }
+                Rectangle { height: 10px; }
+                for m in State.messages : MessageRow { m: m; }
+                // typing indicator
+                HorizontalLayout {
+                    padding-left: 22px; padding-top: 6px; spacing: 8px; alignment: start;
+                    HorizontalLayout {
+                        spacing: 3px;
+                        for i in 3 : VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 5px; height: 5px; border-radius: 2.5px; background: Theme.p.muted;
+                                opacity: 0.25 + 0.75 * (0.5 + 0.5 * sin((Anim.t * 360 + i * 120) * 1deg));
+                            }
+                        }
+                    }
+                    Text { text: "sudo_sandra is typing…"; color: Theme.p.muted; font-size: 11.5px; vertical-alignment: center; }
+                }
+            }
+        }
+        // composer
+        Rectangle {
+            height: 76px;
+            HorizontalLayout {
+                padding-left: 18px; padding-right: 18px; padding-bottom: 18px; padding-top: 0px;
+                Rectangle {
+                    border-radius: Geo.r-card;
+                    background: Theme.p.field;
+                    border-width: 1px; border-color: Theme.p.border;
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 8px; spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            GradFill {
+                                width: 30px; height: 30px; border-radius: 10px;
+                                IcoPlus { size: 16px; sw: 2.2px; stroke-color: Theme.p.accent-ink; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                            }
+                        }
+                        TextInput {
+                            text: State.draft;
+                            color: Theme.p.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            single-line: true;
+                            horizontal-stretch: 1;
+                            accepted => { State.send-message(); }
+                            edited => { State.draft = self.text; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            GradFill {
+                                width: 42px; height: 42px; border-radius: 12px;
+                                IcoSend { size: 17px; fill-color: Theme.p.accent-ink; x: (parent.width - self.width) / 2 + 1px; y: (parent.height - self.height) / 2; }
+                                TouchArea { clicked => { State.send-message(); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── voice view ─────────────────────────
+component VoiceOrb inherits Rectangle {
+    in property <VoicePart> p;
+    width: 158px; height: 130px;
+    VerticalLayout {
+        alignment: center; spacing: 12px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 88px; height: 88px;
+                // expanding pulse rings (behind the orb) while speaking
+                if p.speaking : Rectangle {
+                    property <float> f: Anim.t;
+                    width: 80px + 70px * f; height: self.width;
+                    x: 44px - self.width / 2; y: 44px - self.height / 2;
+                    border-radius: self.width / 2;
+                    border-width: 3px; border-color: Theme.p.online;
+                    opacity: 0.55 * (1 - f);
+                }
+                if p.speaking : Rectangle {
+                    property <float> f: Anim.t > 0.5 ? Anim.t - 0.5 : Anim.t + 0.5;
+                    width: 80px + 70px * f; height: self.width;
+                    x: 44px - self.width / 2; y: 44px - self.height / 2;
+                    border-radius: self.width / 2;
+                    border-width: 3px; border-color: Theme.p.online;
+                    opacity: 0.55 * (1 - f);
+                }
+                Rectangle {
+                    width: 80px; height: 80px; x: 4px; y: 4px; border-radius: 40px; background: p.tint;
+                    border-width: p.speaking ? 3px : 0px; border-color: Theme.p.online;
+                    Text { text: p.initials; color: #0b1020; font-size: 26px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center; spacing: 6px;
+            Text { text: p.name; color: Theme.p.text; font-size: 13.5px; font-weight: 600; }
+            if p.muted : VerticalLayout { alignment: center; IcoMicMuted { size: 14px; stroke-color: Theme.p.dnd; } }
+        }
+    }
+}
+
+component VoiceView inherits Rectangle {
+    background: Theme.p.panel2;
+    VerticalLayout {
+        Rectangle {
+            height: Geo.header-h;
+            HorizontalLayout {
+                padding-left: 18px; spacing: 10px; alignment: start;
+                VerticalLayout { alignment: center; IcoSpeaker { size: 17px; stroke-color: Theme.p.online; } }
+                Display { text: "The Rack"; color: Theme.p.text; font-size: 14.5px; font-weight: 700; vertical-alignment: center; }
+                Mono { text: "QUIC voice · 48kHz · 14ms"; color: Theme.p.online; font-size: 11px; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: center; spacing: 34px;
+                HorizontalLayout {
+                    alignment: center; spacing: 30px;
+                    for p in State.voice-parts : VoiceOrb { p: p; }
+                }
+            }
+        }
+        // control bar
+        Rectangle {
+            height: 86px;
+            background: #000000.with-alpha(0.16);
+            Rectangle { height: 1px; background: Theme.p.border; }
+            HorizontalLayout {
+                alignment: center; spacing: 10px; padding: 18px;
+                Rectangle {
+                    width: 50px; height: 50px; border-radius: 15px;
+                    background: State.muted ? Theme.p.dnd : Theme.p.field;
+                    border-width: 1px; border-color: Theme.p.border;
+                    IcoMic { size: 20px; sw: 1.8px; stroke-color: State.muted ? #ffffff : Theme.p.text; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    TouchArea { clicked => { State.muted = !State.muted; } }
+                }
+                Rectangle {
+                    width: 50px; height: 50px; border-radius: 15px;
+                    background: State.deafened ? Theme.p.dnd : Theme.p.field;
+                    border-width: 1px; border-color: Theme.p.border;
+                    IcoHeadphone { size: 20px; sw: 1.8px; stroke-color: State.deafened ? #ffffff : Theme.p.text; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    TouchArea { clicked => { State.deafened = !State.deafened; } }
+                }
+                Rectangle {
+                    width: 50px; height: 50px; border-radius: 15px; background: Theme.p.field;
+                    border-width: 1px; border-color: Theme.p.border;
+                    IcoGear { size: 20px; sw: 1.8px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    TouchArea { clicked => { State.dialog = 3; } }
+                }
+                GradFill {
+                    width: 62px; height: 50px; border-radius: 15px;
+                    grad: @linear-gradient(180deg, #ff6b82, #e0344f);
+                    IcoPhone { size: 22px; fill-color: #ffffff; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    TouchArea { clicked => { State.view = 0; State.in-voice = false; } }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── home / friends view ─────────────────────────
+component HomeView inherits Rectangle {
+    background: Theme.p.panel2;
+    VerticalLayout {
+        Rectangle {
+            height: Geo.header-h;
+            HorizontalLayout {
+                padding-left: 18px; padding-right: 18px; spacing: 14px;
+                VerticalLayout { alignment: center; IcoPeople { size: 17px; stroke-color: Theme.p.text; } }
+                Display { text: "Friends"; color: Theme.p.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                Rectangle {
+                    width: 70px; border-radius: 8px; background: Theme.p.sel;
+                    Text { text: "Online"; color: Theme.p.accent; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                }
+                Rectangle {
+                    width: 50px;
+                    Text { text: "All"; color: Theme.p.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    GradFill {
+                        width: 92px; height: 30px; border-radius: 9px;
+                        Text { text: "Add Friend"; color: Theme.p.accent-ink; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                    }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            min-height: 0px;
+            VerticalLayout {
+                padding-left: 18px; padding-right: 18px; padding-top: 14px; alignment: start; spacing: 0px;
+                Text { text: "ONLINE — " + State.online-count; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+                Rectangle { height: 8px; }
+                for f in State.friends : Rectangle {
+                    height: 56px;
+                    background: fa.has-hover ? Theme.p.hover : transparent;
+                    border-radius: 11px;
+                    Rectangle { height: 1px; background: Theme.p.border; }
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 12px; spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 40px; height: 40px;
+                                Avatar { size: 40px; tint: f.tint; initials: f.initials; ink: #0b1020; radius: 13px; }
+                                PresenceDot { x: parent.width - 10px; y: parent.height - 10px; tint: Theme.presence-color(f.presence); ring: Theme.p.panel; }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: f.name; color: Theme.p.text; font-size: 13.5px; font-weight: 600; }
+                            Mono { text: f.status-text; color: Theme.p.muted; font-size: 11.5px; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    fa := TouchArea { }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── member sidebar ─────────────────────────
+component MemberSidebar inherits Rectangle {
+    background: Theme.p.panel;
+    Rectangle { x: 0; width: 1px; height: parent.height; background: Theme.p.border; }
+    ScrollView {
+        width: 100%; height: 100%;
+        VerticalLayout {
+            padding: 10px; alignment: start; spacing: 0px;
+            for mem in State.members : Rectangle {
+            height: mem.header ? 32px : 40px;
+            opacity: mem.offline ? 0.45 : 1.0;
+            if mem.header : HorizontalLayout {
+                padding-left: 8px; padding-top: 10px; padding-bottom: 6px;
+                Text { text: mem.label + " — " + mem.count; color: Theme.p.subtle; font-size: 10.5px; font-weight: 700; }
+            }
+            if !mem.header : Rectangle {
+                background: ma.has-hover ? Theme.p.hover : transparent;
+                border-radius: 9px;
+                HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px; spacing: 9px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 32px; height: 32px;
+                            Avatar { size: 32px; tint: mem.tint; initials: mem.initials; ink: #0b1020; radius: 10px; }
+                            PresenceDot { x: parent.width - 9px; y: parent.height - 9px; size: 11px; tint: Theme.presence-color(mem.presence); ring: Theme.p.panel; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: mem.name; color: Theme.p.text; font-size: 13px; font-weight: 600; overflow: elide; }
+                        if mem.has-sub : Text { text: mem.sub; color: Theme.p.subtle; font-size: 10.5px; overflow: elide; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                ma := TouchArea { }
+            }
+        }
+        }
+    }
+}
+
+// ───────────────────────── status bar ─────────────────────────
+component StatusBar inherits Rectangle {
+    background: Theme.p.titlebar;
+    Rectangle { height: 1px; background: Theme.p.border-lt; }
+    HorizontalLayout {
+        padding-left: 14px; padding-right: 14px; spacing: 14px;
+        VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: Theme.p.online; } }
+        Mono { text: "QUIC :8444"; color: Theme.p.online; font-size: 10.5px; vertical-alignment: center; }
+        Mono { text: "ALPN dice/1"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
+        Mono { text: "23ms"; color: Theme.p.text; font-size: 10.5px; vertical-alignment: center; }
+        Mono { text: "· RAM"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
+        Mono { text: "94MB"; color: Theme.p.online; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        Mono { text: "DICE_SPLIT=0"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
+        Mono { text: "monolith"; color: Theme.p.accent; font-size: 10.5px; vertical-alignment: center; }
+        Mono { text: "· node 7"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        Rectangle {
+            width: 110px;
+            HorizontalLayout {
+                alignment: end; spacing: 6px;
+                VerticalLayout { alignment: center; Rectangle { width: 9px; height: 9px; border-radius: 3px; background: Theme.p.accent-grad; } }
+                Mono { text: Theme.name; color: tc.has-hover ? Theme.p.accent : Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
+            }
+            tc := TouchArea { clicked => { State.dialog = 0; } }
+        }
+    }
+}
+
+// ───────────────────────── app shell ─────────────────────────
+export component AppShell inherits Rectangle {
+    // translucent window layer so the desk wallpaper shows through as glass
+    // (panels/titlebar/borders then composite over it with real contrast).
+    // perf-mode → opaque solid fill = no alpha blending for low-end boxes.
+    background: State.perf-mode ? Theme.p.win-solid : Theme.p.win;
+    VerticalLayout {
+        TitleBar { height: Geo.titlebar-h; }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            GuildRail { width: Geo.rail-w; }
+            ChannelColumn { width: Geo.channels-w; }
+            Rectangle {
+                horizontal-stretch: 1;
+                if State.view == 0 : ChatView { width: 100%; height: 100%; }
+                if State.view == 1 : VoiceView { width: 100%; height: 100%; }
+                if State.view == 2 : HomeView { width: 100%; height: 100%; }
+            }
+            if State.show-members && State.view == 0 : MemberSidebar { width: Geo.members-w; }
+        }
+        StatusBar { height: Geo.statusbar-h; }
+    }
+}

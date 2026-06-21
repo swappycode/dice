@@ -1,0 +1,393 @@
+import { Theme, Geo } from "theme.slint";
+import { DieLogo, Display, Mono } from "widgets.slint";
+import { IcoClose } from "icons.slint";
+import { State } from "state.slint";
+
+// ── Theme Builder (presets + the 5-knob custom theme) ──
+component ThemeBuilderBody inherits VerticalLayout {
+    spacing: 14px;
+    property <[{name: string, c1: color, c2: color, c3: color, id: int}]> presets: [
+        { name: "midnight",   c1: #10162f, c2: #5b8cff, c3: #46e0ff, id: 0 },
+        { name: "aero",       c1: #cfe9ff, c2: #1f7ae0, c3: #37b8ff, id: 1 },
+        { name: "phosphor",   c1: #021107, c2: #36ff5e, c3: #a6ff36, id: 2 },
+        { name: "bubble",     c1: #ffe3f1, c2: #ff4d9d, c3: #ffa8d4, id: 3 },
+        { name: "luna",       c1: #dfe7f7, c2: #2a6fdb, c3: #3f9bea, id: 4 },
+        { name: "nocturne",   c1: #160a2e, c2: #a78bfa, c3: #e879f9, id: 5 },
+        { name: "vantablack", c1: #060607, c2: #46e0ff, c3: #8ad8ff, id: 6 },
+        { name: "ember",      c1: #1e0d05, c2: #ff8a3c, c3: #ff5c4a, id: 7 },
+    ];
+    property <[color]> hues: [#5b8cff, #1f7ae0, #36ff5e, #ff4d9d, #2a6fdb, #a78bfa, #46e0ff, #ff8a3c];
+
+    Text { text: "PRESETS"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+    // 2-col grid of preset cards
+    for r in 4 : HorizontalLayout {
+        spacing: 10px;
+        for c in 2 : Rectangle {
+            property <int> idx: r * 2 + c;
+            height: 64px;
+            border-radius: 12px;
+            background: Theme.p.field;
+            border-width: Theme.id == presets[idx].id ? 2px : 1px;
+            border-color: Theme.id == presets[idx].id ? Theme.p.accent : Theme.p.border;
+            VerticalLayout {
+                padding: 13px; spacing: 9px; alignment: start;
+                HorizontalLayout {
+                    spacing: 5px; alignment: start;
+                    Rectangle { width: 22px; height: 22px; border-radius: 7px; background: presets[idx].c1; }
+                    Rectangle { width: 22px; height: 22px; border-radius: 7px; background: presets[idx].c2; }
+                    Rectangle { width: 22px; height: 22px; border-radius: 7px; background: presets[idx].c3; }
+                }
+                Text { text: presets[idx].name; color: Theme.p.text; font-size: 13px; font-weight: 600; }
+            }
+            TouchArea { clicked => { Theme.id = presets[idx].id; } }
+        }
+    }
+
+    Rectangle { height: 8px; }
+    Text { text: "5-KNOB CUSTOM"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+
+    Text { text: "Accent hue"; color: Theme.p.muted; font-size: 12px; }
+    HorizontalLayout {
+        spacing: 8px;
+        for i in 8 : Rectangle {
+            height: 42px;
+            border-radius: 11px;
+            background: hues[i];
+            border-width: Theme.id == i ? 2px : 1px;
+            border-color: Theme.id == i ? Theme.p.accent : Theme.p.border;
+            TouchArea { clicked => { Theme.id = i; } }
+        }
+    }
+
+    // corner radius slider (static visual)
+    VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout {
+            Text { text: "Corner radius"; color: Theme.p.muted; font-size: 12px; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "14px"; color: Theme.p.accent; font-size: 12px; }
+        }
+        Rectangle {
+            height: 6px; border-radius: 3px; background: Theme.p.field;
+            Rectangle { x: 0; width: parent.width * 0.62; height: 6px; border-radius: 3px; background: Theme.p.accent-grad; }
+            Rectangle { x: parent.width * 0.62 - 8px; y: -5px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff; }
+        }
+    }
+
+    // glow intensity slider (static visual)
+    VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout {
+            Text { text: "Glow intensity"; color: Theme.p.muted; font-size: 12px; }
+            Rectangle { horizontal-stretch: 1; }
+            Mono { text: "0.55"; color: Theme.p.accent; font-size: 12px; }
+        }
+        Rectangle {
+            height: 6px; border-radius: 3px; background: Theme.p.field;
+            Rectangle { x: 0; width: parent.width * 0.55; height: 6px; border-radius: 3px; background: Theme.p.accent-grad; }
+            Rectangle { x: parent.width * 0.55 - 8px; y: -5px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff; }
+        }
+    }
+
+    // glass blur toggle → perf-mode
+    Rectangle {
+        height: 56px; border-radius: 11px; background: Theme.p.field;
+        border-width: 1px; border-color: Theme.p.border;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 14px; spacing: 10px;
+            VerticalLayout {
+                alignment: center; spacing: 2px;
+                Text { text: "Glass blur"; color: Theme.p.text; font-size: 13px; font-weight: 600; }
+                Text { text: "perf-mode disables it for low-end boxes"; color: Theme.p.subtle; font-size: 11px; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 42px; height: 23px; border-radius: 12px;
+                    background: State.perf-mode ? Theme.p.field : Theme.p.accent-grad;
+                    border-width: 1px; border-color: Theme.p.border;
+                    Rectangle {
+                        x: State.perf-mode ? 2px : 21px; y: 2px;
+                        width: 17px; height: 17px; border-radius: 9px; background: #ffffff;
+                    }
+                    TouchArea { clicked => { State.perf-mode = !State.perf-mode; } }
+                }
+            }
+        }
+    }
+}
+
+// ── Guild Settings ──
+component GuildBody inherits VerticalLayout {
+    spacing: 16px;
+    HorizontalLayout {
+        spacing: 16px; alignment: start;
+        Rectangle {
+            width: 70px; height: 70px; border-radius: 20px; background: Theme.p.accent-grad;
+            DieLogo { size: 50px; face: transparent; pip: #ffffff; gloss: true; }
+        }
+        VerticalLayout {
+            alignment: center; spacing: 4px;
+            Display { text: "BARE METAL"; color: Theme.p.text; font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+            Text { text: "7 members · 9 channels · since 2026"; color: Theme.p.muted; font-size: 12px; }
+        }
+    }
+    Text { text: "Invite link"; color: Theme.p.muted; font-size: 12px; }
+    HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            horizontal-stretch: 1; height: 40px; border-radius: 9px; background: Theme.p.field;
+            border-width: 1px; border-color: Theme.p.border;
+            HorizontalLayout { padding-left: 13px;
+                Mono { text: "dice://rack.local/invite/q7Xk2"; color: Theme.p.text; font-size: 12px; vertical-alignment: center; }
+            }
+        }
+        Rectangle {
+            width: 72px; height: 40px; border-radius: 9px; background: Theme.p.accent-grad;
+            Text { text: "Copy"; color: Theme.p.accent-ink; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+        }
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            horizontal-stretch: 1; height: 44px; border-radius: 10px; background: Theme.p.field;
+            border-width: 1px; border-color: Theme.p.border;
+            Text { text: "Create guild"; color: Theme.p.text; font-size: 13px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+        }
+        Rectangle {
+            horizontal-stretch: 1; height: 44px; border-radius: 10px; background: Theme.p.field;
+            border-width: 1px; border-color: Theme.p.border;
+            Text { text: "Join with link"; color: Theme.p.text; font-size: 13px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+        }
+    }
+}
+
+// ── Account Security ──
+component QrFinder inherits Rectangle {
+    in property <length> p;
+    x: p; y: p;
+    width: 26px; height: 26px; background: #0b0e1a;
+    Rectangle { x: 4px; y: 4px; width: 18px; height: 18px; background: #ffffff;
+        Rectangle { x: 4px; y: 4px; width: 10px; height: 10px; background: #0b0e1a; }
+    }
+}
+component SecurityBody inherits VerticalLayout {
+    spacing: 16px;
+    // email-not-verified banner
+    Rectangle {
+        height: 58px; border-radius: 12px; background: Theme.p.idle.with-alpha(0.10);
+        border-width: 1px; border-color: Theme.p.idle;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 14px; spacing: 12px;
+            VerticalLayout { alignment: center; Rectangle { width: 9px; height: 9px; border-radius: 4.5px; background: Theme.p.idle; } }
+            VerticalLayout {
+                alignment: center; spacing: 2px; horizontal-stretch: 1;
+                Text { text: "Email not verified"; color: Theme.p.text; font-size: 13px; font-weight: 600; }
+                Text { text: "dev build runs a LogMailer — check the server log for your link"; color: Theme.p.muted; font-size: 11.5px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 64px; height: 30px; border-radius: 8px; background: Theme.p.idle;
+                    Text { text: "Resend"; color: #1a1205; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                }
+            }
+        }
+    }
+    // TOTP card
+    Rectangle {
+        height: 132px; border-radius: 12px; background: Theme.p.field;
+        border-width: 1px; border-color: Theme.p.border;
+        HorizontalLayout {
+            padding: 16px; spacing: 16px; alignment: start;
+            // faux QR
+            Rectangle {
+                width: 96px; height: 96px; border-radius: 12px; background: #ffffff;
+                QrFinder { p: 8px; }
+                QrFinder { p: 62px; }
+                Rectangle { x: 62px; y: 8px; width: 26px; height: 26px; background: #0b0e1a;
+                    Rectangle { x: 4px; y: 4px; width: 18px; height: 18px; background: #ffffff;
+                        Rectangle { x: 4px; y: 4px; width: 10px; height: 10px; background: #0b0e1a; } } }
+                Rectangle { x: 40px; y: 42px; width: 8px; height: 8px; background: #0b0e1a; }
+                Rectangle { x: 52px; y: 54px; width: 8px; height: 8px; background: #0b0e1a; }
+                Rectangle { x: 40px; y: 66px; width: 8px; height: 8px; background: #0b0e1a; }
+                Rectangle { x: 66px; y: 44px; width: 8px; height: 8px; background: #0b0e1a; }
+            }
+            VerticalLayout {
+                alignment: start; spacing: 6px; horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 8px; alignment: start;
+                    Text { text: "Two-factor (TOTP)"; color: Theme.p.text; font-size: 14px; font-weight: 700; }
+                    Rectangle {
+                        width: 34px; height: 18px; border-radius: 6px; background: Theme.p.online;
+                        Text { text: "ON"; color: #04140a; font-size: 9.5px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                    }
+                }
+                Text { text: "Encrypted at rest with AES-256-GCM. Scan with any authenticator."; color: Theme.p.muted; font-size: 12px; wrap: word-wrap; }
+                Text { text: "Recovery codes"; color: Theme.p.subtle; font-size: 11px; }
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        Mono { text: "a7f2-9k1"; color: Theme.p.text; font-size: 11.5px; }
+                        Mono { text: "7gt3-vb9"; color: Theme.p.text; font-size: 11.5px; }
+                        Mono { text: "p9c0-8wr"; color: Theme.p.text; font-size: 11.5px; }
+                    }
+                    VerticalLayout {
+                        Mono { text: "x4m8-2qp"; color: Theme.p.text; font-size: 11.5px; }
+                        Mono { text: "m1z6-4ne"; color: Theme.p.text; font-size: 11.5px; }
+                        Mono { text: "k2j5-1xa"; color: Theme.p.text; font-size: 11.5px; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Voice & Video ──
+component DeviceRow inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 7px;
+    Text { text: label; color: Theme.p.muted; font-size: 12px; }
+    Rectangle {
+        height: 44px; border-radius: 10px; background: Theme.p.field;
+        border-width: 1px; border-color: Theme.p.border;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 14px;
+            Text { text: value; color: Theme.p.text; font-size: 13px; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "▾"; color: Theme.p.muted; font-size: 13px; vertical-alignment: center; }
+        }
+    }
+}
+component VoiceBody inherits VerticalLayout {
+    spacing: 16px;
+    DeviceRow { label: "Input device"; value: "Yeti Nano (USB)"; }
+    VerticalLayout {
+        spacing: 7px;
+        Text { text: "Mic test"; color: Theme.p.muted; font-size: 12px; }
+        Rectangle {
+            height: 10px; border-radius: 5px; background: Theme.p.field; clip: true;
+            Rectangle { x: 0; width: parent.width * 0.64; height: 10px; border-radius: 5px; background: Theme.p.accent-grad; }
+        }
+    }
+    DeviceRow { label: "Output device"; value: "DT 770 Pro"; }
+    // VAD/PTT segmented
+    Rectangle {
+        height: 52px; border-radius: 11px; background: Theme.p.field;
+        border-width: 1px; border-color: Theme.p.border;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 14px; spacing: 10px;
+            VerticalLayout {
+                alignment: center; spacing: 2px; horizontal-stretch: 1;
+                Text { text: "Voice activity"; color: Theme.p.text; font-size: 13px; font-weight: 600; }
+                Text { text: "auto-detect vs push-to-talk"; color: Theme.p.subtle; font-size: 11px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 96px; height: 28px; border-radius: 8px; background: #000000.with-alpha(0.25);
+                    HorizontalLayout {
+                        padding: 2px; spacing: 2px;
+                        Rectangle {
+                            horizontal-stretch: 1; border-radius: 7px; background: Theme.p.accent-grad;
+                            Text { text: "VAD"; color: Theme.p.accent-ink; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            Text { text: "PTT"; color: Theme.p.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // AEC + NS row
+    Rectangle {
+        height: 56px; border-radius: 11px; background: Theme.p.field;
+        border-width: 1px; border-color: Theme.p.border;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 14px; spacing: 8px;
+            VerticalLayout {
+                alignment: center; spacing: 2px; horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 8px; alignment: start;
+                    Text { text: "Echo cancel + noise suppression"; color: Theme.p.text; font-size: 13px; font-weight: 600; }
+                    Rectangle {
+                        width: 56px; height: 17px; border-radius: 6px; background: Theme.p.idle;
+                        Text { text: "M5 BETA"; color: #1a1205; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                    }
+                }
+                Mono { text: "pure-Rust AudioProcessor · DICE_VOICE_AEC"; color: Theme.p.subtle; font-size: 11px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 42px; height: 23px; border-radius: 12px; background: Theme.p.accent-grad;
+                    Rectangle { x: 21px; y: 2px; width: 19px; height: 19px; border-radius: 10px; background: #ffffff; }
+                }
+            }
+        }
+    }
+}
+
+// ── modal host (scrim + framed dialog) ──
+export component DialogHost inherits Rectangle {
+    visible: State.dialog >= 0;
+    // scrim
+    Rectangle {
+        background: #04060e.with-alpha(0.6);
+        TouchArea { clicked => { State.dialog = -1; } }
+    }
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: State.dialog == 0 ? 460px : 440px;
+                background: Theme.p.win-solid;
+                border-radius: Geo.r-window;
+                border-width: 1px;
+                border-color: Theme.p.border-lt;
+                clip: true;
+                // consume clicks so the scrim behind doesn't close
+                TouchArea {}
+                VerticalLayout {
+                    // header
+                    Rectangle {
+                        height: 54px; background: Theme.p.titlebar;
+                        HorizontalLayout {
+                            padding-left: 20px; padding-right: 14px;
+                            Display {
+                                text: State.dialog == 0 ? "Theme Builder" : State.dialog == 1 ? "Guild Settings" : State.dialog == 2 ? "Account Security" : "Voice & Video";
+                                color: Theme.p.text; font-size: 16px; font-weight: 700; letter-spacing: 1px; vertical-alignment: center; horizontal-stretch: 1;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 28px; height: 28px; border-radius: 8px;
+                                    background: xb.has-hover ? Theme.p.dnd : transparent;
+                                    IcoClose { size: 14px; stroke-color: xb.has-hover ? #ffffff : Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                    xb := TouchArea { clicked => { State.dialog = -1; } }
+                                }
+                            }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border-lt; }
+                    }
+                    // body
+                    Rectangle {
+                        clip: true;
+                        VerticalLayout {
+                            padding: 22px;
+                            if State.dialog == 0 : ThemeBuilderBody {}
+                            if State.dialog == 1 : GuildBody {}
+                            if State.dialog == 2 : SecurityBody {}
+                            if State.dialog == 3 : VoiceBody {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,148 @@
+import { Theme, Geo } from "theme.slint";
+import { DieLogo, Display, Mono } from "widgets.slint";
+import { State } from "state.slint";
+
+component LoginField inherits Rectangle {
+    in property <string> value;
+    in property <bool> password: false;
+    height: 42px;
+    border-radius: Geo.r-input;
+    background: Theme.p.field;
+    border-width: 1px;
+    border-color: Theme.p.border;
+    HorizontalLayout {
+        padding-left: 13px;
+        padding-right: 13px;
+        TextInput {
+            text: value;
+            color: Theme.p.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            single-line: true;
+            input-type: password ? InputType.password : InputType.text;
+        }
+    }
+}
+
+// The login surface — a centered glass card over the desk wallpaper.
+export component LoginScreen inherits Rectangle {
+    background: transparent;
+
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 380px;
+                border-radius: Geo.r-window;
+                background: Theme.p.win;
+                border-width: 1px;
+                border-color: Theme.p.border-lt;
+                clip: true;
+
+                VerticalLayout {
+                    Rectangle {
+                        height: 7px;
+                        background: Theme.p.accent-grad;
+                    }
+
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-bottom: 30px;
+                        spacing: 10px;
+
+                        HorizontalLayout {
+                            alignment: center;
+                            DieLogo { size: 60px; }
+                        }
+                        Display {
+                            text: "DICE";
+                            color: Theme.p.text;
+                            font-size: 34px;
+                            font-weight: 700;
+                            letter-spacing: 7px;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "self-hosted chat & voice that never phones home";
+                            color: Theme.p.muted;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                        }
+
+                        Rectangle { height: 6px; }
+
+                        LoginField { value: "fanless_fred"; }
+                        LoginField { value: "supersecret"; password: true; }
+
+                        Rectangle {
+                            height: 38px;
+                            border-radius: Geo.r-input;
+                            background: Theme.p.online.with-alpha(0.07);
+                            border-width: 1px;
+                            border-color: Theme.p.border;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 8px;
+                                alignment: start;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 7px;
+                                        height: 7px;
+                                        border-radius: 3.5px;
+                                        background: Theme.p.online;
+                                    }
+                                }
+                                Mono {
+                                    text: "dice://rack.local:8443 · reachable";
+                                    color: Theme.p.muted;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 44px;
+                            border-radius: Geo.r-button;
+                            background: Theme.p.accent-grad;
+                            Display {
+                                text: "SIGN IN";
+                                color: Theme.p.accent-ink;
+                                font-size: 14px;
+                                font-weight: 700;
+                                letter-spacing: 1px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: 100%;
+                                height: 100%;
+                            }
+                            TouchArea {
+                                clicked => {
+                                    State.screen = 1;
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            Text {
+                                text: "Create account";
+                                color: Theme.p.subtle;
+                                font-size: 11.5px;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text {
+                                text: "Lost your TOTP?";
+                                color: Theme.p.subtle;
+                                font-size: 11.5px;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
