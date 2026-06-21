@@ -22,10 +22,12 @@
 pub mod framing;
 pub mod jitter;
 pub mod plc;
+pub mod preprocess;
 
 pub use framing::{HEADER_LEN, MAX_FRAME_BYTES, VoiceFrame, VoiceFrameError};
 pub use jitter::{JitterBuffer, JitterConfig, Playout, PushOutcome};
 pub use plc::{Conceal, ConcealmentLimiter, LossStats};
+pub use preprocess::{AudioProcessor, EchoNoiseProcessor, FRAME, Passthrough, PreprocConfig};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

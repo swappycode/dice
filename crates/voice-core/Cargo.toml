@@ -9,6 +9,9 @@ license.workspace = true
 [dependencies]
 bytes = { workspace = true }
 thiserror = { workspace = true }
+# Optional near-end voice pre-processor (AEC + noise suppression). Pure Rust;
+# only instantiated when the client sets DICE_VOICE_AEC, but compiled always.
+rustfft = { workspace = true }
 
 [lints]
 workspace = true

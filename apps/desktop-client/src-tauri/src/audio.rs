@@ -21,7 +21,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SizedSample};
 use dice_network_core::client::VoiceSender;
 use dice_protocol::bytes::Bytes;
-use dice_voice_core::{JitterBuffer, JitterConfig, Playout, VoiceFrame};
+use dice_voice_core::{
+    AudioProcessor, EchoNoiseProcessor, JitterBuffer, JitterConfig, Passthrough, Playout,
+    PreprocConfig, VoiceFrame,
+};
 
 /// Voice sample rate (Hz). Opus-native; the whole pipeline runs at this rate.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -425,6 +428,39 @@ fn run_engine(
     // Keep ~2 frames (40 ms) queued for the output device.
     let target_backlog = FRAME_SAMPLES * 2;
 
+    // Optional near-end pre-processor: echo cancellation + noise suppression,
+    // gated behind DICE_VOICE_AEC (default OFF -> a zero-cost Passthrough). When
+    // on it cleans the mic frame BEFORE the VAD + Opus encode; the far-end echo
+    // reference is the mixed playout frame (fed via push_far in step 3). A fresh
+    // engine (device switch / rejoin) builds a fresh processor, so the adaptive
+    // state resets implicitly.
+    let aec_on = std::env::var("DICE_VOICE_AEC")
+        .ok()
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")
+        })
+        .unwrap_or(false);
+    let mut pre: Box<dyn AudioProcessor> = if aec_on {
+        let mut cfg = PreprocConfig::default();
+        if let Some(ms) = std::env::var("DICE_VOICE_AEC_DELAY_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+        {
+            cfg.pre_delay_ms = ms;
+        }
+        if let Some(ms) = std::env::var("DICE_VOICE_AEC_TAIL_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+        {
+            cfg.tail_ms = ms;
+        }
+        tracing::info!("DICE_VOICE_AEC active: echo cancellation + noise suppression on the mic");
+        Box::new(EchoNoiseProcessor::new(cfg))
+    } else {
+        Box::new(Passthrough)
+    };
+
     while !stop.load(Ordering::Relaxed) {
         // `transmitting` folds in mute AND push-to-talk (open mic, or PTT held).
         let transmitting = control.transmitting();
@@ -448,11 +484,31 @@ fn run_engine(
                 }
                 _ => break,
             };
+            // The AEC/NS pre-processor (when DICE_VOICE_AEC is set) runs on EVERY
+            // captured frame — its far reference must advance even while muted —
+            // cleaning `near` in place only when transmitting.
+            let cleaned: Option<[f32; FRAME_SAMPLES]> = if aec_on {
+                let mut near: [f32; FRAME_SAMPLES] =
+                    chunk.as_slice().try_into().expect("drained exactly one frame");
+                pre.process(&mut near, transmitting);
+                Some(near)
+            } else {
+                None
+            };
             if !transmitting {
                 continue;
             }
-            for (dst, &s) in frame.iter_mut().zip(chunk.iter()) {
-                *dst = f32_to_i16(s);
+            match &cleaned {
+                Some(near) => {
+                    for (dst, &s) in frame.iter_mut().zip(near.iter()) {
+                        *dst = f32_to_i16(s);
+                    }
+                }
+                None => {
+                    for (dst, &s) in frame.iter_mut().zip(chunk.iter()) {
+                        *dst = f32_to_i16(s);
+                    }
+                }
             }
             // Voice activity → speaking orb (publish only on a transition).
             if rms_i16(&frame) >= VAD_RMS_THRESHOLD {
@@ -533,9 +589,22 @@ fn run_engine(
                     produced = true;
                 }
             }
-            if produced && let Ok(mut pb) = playback.lock() {
-                for &m in &mixed {
-                    pb.push_back(i16_to_f32(mix_clip(m)));
+            // Feed the produced playout frame to the speaker AND (when AEC is on)
+            // to the pre-processor as the far-end echo reference.
+            if produced {
+                if aec_on {
+                    let far: [f32; FRAME_SAMPLES] =
+                        std::array::from_fn(|i| i16_to_f32(mix_clip(mixed[i])));
+                    pre.push_far(&far);
+                    if let Ok(mut pb) = playback.lock() {
+                        for &s in &far {
+                            pb.push_back(s);
+                        }
+                    }
+                } else if let Ok(mut pb) = playback.lock() {
+                    for &m in &mixed {
+                        pb.push_back(i16_to_f32(mix_clip(m)));
+                    }
                 }
             }
         }

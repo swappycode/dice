@@ -90,6 +90,13 @@ protoc-bin-vendored = "3"
 # Header-only image dimension probe (pure Rust; no aws-lc, no image decode).
 imagesize = "0.14"
 
+# ---- voice dsp ----
+# Pure-Rust FFT for the optional voice pre-processor (echo cancel + noise
+# suppress, behind DICE_VOICE_AEC). MIT OR Apache-2.0, no C / build.rs native
+# toolchain / bindgen — so the openssl/aws-lc Windows build trap does not apply
+# (gated by `just gate-aws-lc` + cargo-deny).
+rustfft = "6"
+
 # ---- data ----
 sqlx  = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "macros", "migrate", "time"] }
 redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
