@@ -7,6 +7,71 @@ whenever direction changes; keep git commits small and per-logical-unit so `git 
 
 ---
 
+## 2026-06-24 — M5 FINAL: native UI rewrite — M1 visual shell COMPLETE (live-polish rounds 2–5)
+
+**Branch `main`. STILL NOT committed** (attribution hold — see the buttons/scroll note below; the user
+has been reviewing the live release build and will say "commit"). After the M1 shell + first live-window
+fixes (entry below), five more rounds of polish driven by the user running the release on real hardware
+and sending screenshots. The native-UI **M1 (visual shell on seed data) is now visually + functionally
+complete and polished across all 8 themes**, verified by two adversarial 8-agent theme-audit Workflows
+(7–8/8 clean; the only flags were one false positive + one real luna greyness, both resolved + the
+finding independently re-verified). **RAM still tiny: 10.6 MB private / 29.7 MB working set** (the added
+winit/windows-sys/DPI-manifest/custom-scrollbar cost ≈0). Slint **1.16.1**.
+
+**THE load-bearing renderer finding:** the Slint **software renderer rounds ONLY solid-colour fills**
+(uniform AND per-corner `border-radius`) — NOT gradients, NOT `clip:true`. So the original `GradFill`
+(gradient-in-a-clipped-parent) had been rendering EVERY accent button square. Fix: `GradFill` redefined
+to a solid `fill` colour; all `accent-grad` control fills → solid `Theme.p.accent`; rounded **top-only**
+corners (card/dialog headers) use a solid base + a per-corner-radius body-cover.
+
+**Window chrome:** frameless `no-frame:true` — taskbar icon + Win11 rounded corners were applied too
+early (`with_winit_window` returns None before the window is realised) → moved to a
+`slint::Timer::single_shot(80ms)` after the loop starts. Taskbar/Explorer/Alt-Tab icon = a real
+multi-size **`assets/dice.ico`** embedded via `winresource` (build.rs); rounded corners =
+`DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)`; **drag-to-move** = title-bar/
+login-strip TouchArea → `winit drag_window`; **resize** = 8 perimeter `ResizeEdge` handles →
+`winit drag_resize_window`. New deps — all pure-Rust, unify with Slint's tree, NO C trap:
+`i-slint-backend-winit` (WinitWindowAccessor), `winit` (rwh_06), `windows-sys` (Dwm), `winresource` (build).
+**DPI: a Per-Monitor-V2 manifest** embedded in build.rs fixes blurry text on displays scaled >100%
+(Windows was bitmap-upscaling a logical-size window; user confirmed it sharpened). Residual softness at
+100% = the software renderer's grayscale AA (the RAM trade-off; a femtovg GPU renderer is the offered-but-
+deferred alternative).
+
+**Login flow:** default screen is now Login (was app); Login→app on SIGN IN; new **Create-account
+screen**; "Forgot password?"; login chrome = drag strip + a theme-cycler pill + shared window controls.
+Card = solid `win-solid` base + per-corner body-cover (rounds + matches the dialogs; the old translucent
+`win` bled the blue desk to grey on luna — caught by the audit).
+
+**Shell / chrome:** status bar gutted to just **"DICE v0.1.0" + a round theme dot** (the QUIC/ALPN/RAM/
+node specs moved to Settings→About); breadcrumb is view-aware (guild / The Rack / Friends); voice header
+trimmed to "The Rack"; removed the stray centred 1px lines (a Slint quirk — a bare `Rectangle{height:1px}`
+with no `y` renders vertically CENTRED) from footer/status-bar/voice-bar/friend rows; light-theme
+**grey-surface** fix (footer/voice-bar/segmented used hardcoded `#000`-alpha → theme tokens).
+**Home/Friends** left column now shows Direct Messages + a friends list (not guild channels); Online/All
+are short pills. The **scrollbar** (was black in every theme) → custom themed one (below).
+
+**Dialogs:** all top corners rounded (solid header + per-corner radius); content-driven heights so the
+TOTP recovery codes + theme-preset names can't clip out; `alignment:start` on every settings body (a
+stretched VerticalLayout opened a gap under "Mic test"). **Unified tabbed Settings dialog** (My Account /
+Voice & Video / Appearance / About) from the user-gear — consolidates the old Theme/Security/Voice
+dialogs + an About tab carrying all the specs. **Add Friend** dialog (was a dead button). **Server dialogs
+SPLIT**: rail **"+"** → "Add a Server" (create/join); guild-name **dropdown** → "Server Settings" with
+**admin vs member variants** (gated on `State.is-admin` — admin edits server name + Delete; member edits
+nickname + Leave). Real roles = native-M2.
+
+**Solid buttons** (user: no hollow/outlined) — reusable `Btn` (primary/secondary/danger, solid fills).
+**Custom themed scrollbar `VScroll`** (Flickable + accent-colour thumb, invisible track, draggable +
+wheel) replacing all 5 std `ScrollView`s. **Text vertical-centring** — the default UI font renders glyphs
+~2px low in its line box (Space Mono doesn't); measured via PIL pixel-centroid analysis; pill labels
+corrected with a `y:(h-self.h)/2 - 2px` nudge; the guild-rail "+" switched from a text glyph to the
+vector `IcoPlus`. The ~2px offset is **systemic to the default font** — a global centred-label component
+or bundling a good-metrics UI font (Inter) is the clean fix if more pills get flagged (offered, deferred).
+
+**Native-UI M1 is DONE.** **NEXT = native-M2:** wire `Arc<ClientCore>` (real login/guilds/channels/
+messages/voice + `--profile` dual-client). The survey/wiring contract is in the `dice-native-ui-rewrite`
+memory. Then the <100 MB goal is met with REAL data and M5 closes. Uncommitted pending the user's
+"commit" (no attribution per the solo-portfolio rule).
+
 ## 2026-06-21 - M5 FINAL: native Rust UI rewrite (Slint) — milestone-1 visual shell
 
 **Branch `main`. NOT yet committed** (held: the 4 prior M5 commits carry a forbidden `Co-Authored-By`
