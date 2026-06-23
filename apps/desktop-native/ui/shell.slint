@@ -1,12 +1,26 @@
 import { Theme, Geo } from "theme.slint";
-import { DieLogo, Avatar, PresenceDot, Display, Mono, GradFill } from "widgets.slint";
+import { DieLogo, Avatar, PresenceDot, Display, Mono, GradFill, VScroll } from "widgets.slint";
 import { IcoMinimize, IcoMaximize, IcoClose, IcoChevron, IcoPlus, IcoGear, IcoPeople, IcoSpeaker, IcoMic, IcoMicMuted, IcoHeadphone, IcoSend, IcoPhone } from "icons.slint";
 import { State, Anim, GuildTile, ChannelRow, ChatMsg, Reaction, MemberRow, VoicePart, Friend } from "state.slint";
-import { ScrollView } from "std-widgets.slint";
+import { WinControls } from "login.slint";
 
 // ───────────────────────── title bar ─────────────────────────
 component TitleBar inherits Rectangle {
     background: Theme.p.titlebar;
+
+    // Drag-to-move: a full-bleed TouchArea BEHIND the controls. Declared first so
+    // it sits below the window-control buttons (which keep their own clicks); a
+    // press anywhere else on the bar hands off to the OS move-loop via win-drag().
+    // The breadcrumb Text/Display above are non-interactive, so presses fall
+    // through to here.
+    TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                State.win-drag();
+            }
+        }
+    }
+
     HorizontalLayout {
         padding-left: 14px;
         padding-right: 8px;
@@ -15,34 +29,17 @@ component TitleBar inherits Rectangle {
         VerticalLayout { alignment: center; DieLogo { size: 22px; } }
         Display { text: "DICE"; color: Theme.p.text; font-size: 15px; font-weight: 700; letter-spacing: 3px; vertical-alignment: center; }
         Text { text: "/"; color: Theme.p.subtle; font-size: 12px; vertical-alignment: center; }
-        Display { text: State.active-guild; color: Theme.p.muted; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
-        Text { text: "/"; color: Theme.p.subtle; font-size: 12px; vertical-alignment: center; }
-        Text { text: State.header-hash + State.active-channel; color: Theme.p.text; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
+        // breadcrumb tail reflects the active view
+        if State.view == 2 : Text { text: "Friends"; color: Theme.p.text; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
+        if State.view == 1 : Text { text: "The Rack"; color: Theme.p.text; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
+        if State.view == 0 : Display { text: State.active-guild; color: Theme.p.muted; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
+        if State.view == 0 : Text { text: "/"; color: Theme.p.subtle; font-size: 12px; vertical-alignment: center; }
+        if State.view == 0 : Text { text: State.header-hash + State.active-channel; color: Theme.p.text; font-size: 12.5px; font-weight: 600; vertical-alignment: center; }
 
         Rectangle { horizontal-stretch: 1; }
 
-        // window controls
-        win-ctl := HorizontalLayout {
-            spacing: 4px;
-            Rectangle {
-                width: 26px; height: 26px; border-radius: 7px;
-                background: mn.has-hover ? Theme.p.hover : transparent;
-                IcoMinimize { size: 14px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                mn := TouchArea { clicked => { State.win-minimize(); } }
-            }
-            Rectangle {
-                width: 26px; height: 26px; border-radius: 7px;
-                background: mx.has-hover ? Theme.p.hover : transparent;
-                IcoMaximize { size: 12px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                mx := TouchArea { clicked => { State.win-maximize(); } }
-            }
-            Rectangle {
-                width: 26px; height: 26px; border-radius: 7px;
-                background: cl.has-hover ? Theme.p.dnd : transparent;
-                IcoClose { size: 13px; stroke-color: cl.has-hover ? #ffffff : Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                cl := TouchArea { clicked => { State.win-close(); } }
-            }
-        }
+        // window controls (shared with the login/register chrome)
+        VerticalLayout { alignment: center; WinControls { } }
     }
     // bottom hairline
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border-lt; }
@@ -94,13 +91,15 @@ component GuildRail inherits Rectangle {
             TouchArea { clicked => { State.view = 0; } }
         }
 
-        // add guild
+        // add guild → create / join / invite (the "+" is the add-a-server action)
         HorizontalLayout {
             alignment: center;
             Rectangle {
-                width: 46px; height: 46px; border-radius: 14px;
-                background: Theme.p.field; border-width: 1px; border-color: Theme.p.border;
-                Text { text: "+"; color: Theme.p.online; font-size: 22px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                width: 46px; height: 46px; border-radius: addg.has-hover ? 15px : 14px;
+                background: addg.has-hover ? Theme.p.accent.with-alpha(0.18) : Theme.p.field;
+                border-width: 1px; border-color: addg.has-hover ? Theme.p.accent : Theme.p.border;
+                IcoPlus { size: 20px; sw: 2.4px; stroke-color: Theme.p.online; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                addg := TouchArea { clicked => { State.dialog = 6; } }
             }
         }
     }
@@ -138,9 +137,12 @@ component ChannelRowView inherits Rectangle {
                 vertical-alignment: center;
                 horizontal-stretch: 1;
             }
-            if cr.badge != "" : Rectangle {
-                width: 18px; height: 17px; border-radius: 9px; background: Theme.p.dnd;
-                Text { text: cr.badge; color: #ffffff; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+            if cr.badge != "" : VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 18px; height: 18px; border-radius: 9px; background: Theme.p.dnd;
+                    Mono { text: cr.badge; color: #ffffff; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                }
             }
         }
         ta := TouchArea {
@@ -157,11 +159,32 @@ component ChannelRowView inherits Rectangle {
     }
 }
 
+// One direct-message row on the home view (avatar + name + presence dot).
+component DmRow inherits Rectangle {
+    in property <Friend> f;
+    height: 42px;
+    border-radius: Geo.r-row;
+    background: dm.has-hover ? Theme.p.hover : transparent;
+    HorizontalLayout {
+        padding-left: 8px; padding-right: 8px; spacing: 9px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 30px; height: 30px;
+                Avatar { size: 30px; tint: f.tint; initials: f.initials; ink: #0b1020; radius: 10px; }
+                PresenceDot { x: parent.width - 9px; y: parent.height - 9px; size: 11px; tint: Theme.presence-color(f.presence); ring: Theme.p.panel; }
+            }
+        }
+        Text { text: f.name; color: Theme.p.muted; font-size: 13px; font-weight: 500; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+    }
+    dm := TouchArea { }
+}
+
 component ChannelColumn inherits Rectangle {
     background: Theme.p.panel;
     VerticalLayout {
-        // guild header
-        Rectangle {
+        // ── header: guild name (server views) OR "Direct Messages" (home) ──
+        if State.view != 2 : Rectangle {
             height: Geo.header-h;
             background: gh.has-hover ? Theme.p.hover : transparent;
             HorizontalLayout {
@@ -171,22 +194,52 @@ component ChannelColumn inherits Rectangle {
                 VerticalLayout { alignment: center; IcoChevron { size: 14px; stroke-color: Theme.p.muted; } }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
+            // server settings (invite, info) — the rail "+" is add-a-server
             gh := TouchArea { clicked => { State.dialog = 1; } }
         }
-        // channel list
-        ScrollView {
+        if State.view == 2 : Rectangle {
+            height: Geo.header-h;
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 16px;
+                Display { text: "Direct Messages"; color: Theme.p.text; font-size: 14px; font-weight: 700; letter-spacing: 0.5px; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
+        }
+        // ── list: guild channels (server views) OR friends/DMs (home) ──
+        VScroll {
             vertical-stretch: 1;
             min-height: 0px;
             VerticalLayout {
                 padding: 8px; spacing: 0px; alignment: start;
-                for c in State.channels : ChannelRowView { cr: c; }
+                if State.view != 2 : VerticalLayout {
+                    spacing: 0px;
+                    for c in State.channels : ChannelRowView { cr: c; }
+                }
+                if State.view == 2 : VerticalLayout {
+                    spacing: 0px;
+                    // Friends nav (the home view itself)
+                    Rectangle {
+                        height: 36px; border-radius: Geo.r-row; background: Theme.p.sel;
+                        HorizontalLayout {
+                            padding-left: 11px; spacing: 9px;
+                            VerticalLayout { alignment: center; IcoPeople { size: 16px; stroke-color: Theme.p.accent; } }
+                            Text { text: "Friends"; color: Theme.p.text; font-size: 13.5px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                        }
+                        TouchArea { clicked => { State.view = 2; } }
+                    }
+                    Rectangle { height: 12px; }
+                    HorizontalLayout {
+                        padding-left: 8px; padding-bottom: 4px;
+                        Text { text: "DIRECT MESSAGES"; color: Theme.p.subtle; font-size: 10.5px; font-weight: 700; }
+                    }
+                    for f in State.friends : DmRow { f: f; }
+                }
             }
         }
-        // user footer
+        // ── user footer ──
         Rectangle {
             height: 52px;
-            background: #000000.with-alpha(0.14);
-            Rectangle { height: 1px; background: Theme.p.border; }
+            background: Theme.p.panel2;
             HorizontalLayout {
                 padding-left: 8px; padding-right: 8px; spacing: 9px;
                 VerticalLayout {
@@ -209,7 +262,8 @@ component ChannelColumn inherits Rectangle {
                         width: 28px; height: 28px; border-radius: 8px;
                         background: gear.has-hover ? Theme.p.hover : transparent;
                         IcoGear { size: 16px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                        gear := TouchArea { clicked => { State.dialog = 3; } }
+                        // user settings (Account / Voice / Appearance / About; Log out lives in Account)
+                        gear := TouchArea { clicked => { State.settings-tab = 0; State.dialog = 4; } }
                     }
                 }
             }
@@ -290,19 +344,22 @@ component ChatView inherits Rectangle {
                 padding-left: 18px; padding-right: 18px; spacing: 10px;
                 Text { text: State.header-hash; color: Theme.p.subtle; font-size: 18px; vertical-alignment: center; }
                 Text { text: State.active-channel; color: Theme.p.text; font-size: 14.5px; font-weight: 700; vertical-alignment: center; }
-                Rectangle { width: 1px; height: 18px; background: Theme.p.border; }
+                VerticalLayout { alignment: center; Rectangle { width: 1px; height: 16px; background: Theme.p.border; } }
                 Text { text: State.active-topic; color: Theme.p.muted; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                Rectangle {
-                    width: 28px; height: 28px; border-radius: 8px;
-                    background: State.show-members ? Theme.p.sel : (mt.has-hover ? Theme.p.hover : transparent);
-                    IcoPeople { size: 15px; stroke-color: State.show-members ? Theme.p.accent : Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                    mt := TouchArea { clicked => { State.show-members = !State.show-members; } }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 28px; height: 28px; border-radius: 8px;
+                        background: State.show-members ? Theme.p.sel : (mt.has-hover ? Theme.p.hover : transparent);
+                        IcoPeople { size: 15px; stroke-color: State.show-members ? Theme.p.accent : Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                        mt := TouchArea { clicked => { State.show-members = !State.show-members; } }
+                    }
                 }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
         }
         // messages
-        ScrollView {
+        VScroll {
             vertical-stretch: 1;
             min-height: 0px;
             VerticalLayout {
@@ -442,7 +499,6 @@ component VoiceView inherits Rectangle {
                 padding-left: 18px; spacing: 10px; alignment: start;
                 VerticalLayout { alignment: center; IcoSpeaker { size: 17px; stroke-color: Theme.p.online; } }
                 Display { text: "The Rack"; color: Theme.p.text; font-size: 14.5px; font-weight: 700; vertical-alignment: center; }
-                Mono { text: "QUIC voice · 48kHz · 14ms"; color: Theme.p.online; font-size: 11px; vertical-alignment: center; }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
         }
@@ -459,8 +515,8 @@ component VoiceView inherits Rectangle {
         // control bar
         Rectangle {
             height: 86px;
-            background: #000000.with-alpha(0.16);
-            Rectangle { height: 1px; background: Theme.p.border; }
+            background: Theme.p.panel2;
+            Rectangle { y: 0; height: 1px; background: Theme.p.border; }
             HorizontalLayout {
                 alignment: center; spacing: 10px; padding: 18px;
                 Rectangle {
@@ -481,11 +537,11 @@ component VoiceView inherits Rectangle {
                     width: 50px; height: 50px; border-radius: 15px; background: Theme.p.field;
                     border-width: 1px; border-color: Theme.p.border;
                     IcoGear { size: 20px; sw: 1.8px; stroke-color: Theme.p.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                    TouchArea { clicked => { State.dialog = 3; } }
+                    TouchArea { clicked => { State.settings-tab = 1; State.dialog = 4; } }
                 }
                 GradFill {
                     width: 62px; height: 50px; border-radius: 15px;
-                    grad: @linear-gradient(180deg, #ff6b82, #e0344f);
+                    fill: #e0445a;
                     IcoPhone { size: 22px; fill-color: #ffffff; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                     TouchArea { clicked => { State.view = 0; State.in-voice = false; } }
                 }
@@ -504,13 +560,21 @@ component HomeView inherits Rectangle {
                 padding-left: 18px; padding-right: 18px; spacing: 14px;
                 VerticalLayout { alignment: center; IcoPeople { size: 17px; stroke-color: Theme.p.text; } }
                 Display { text: "Friends"; color: Theme.p.text; font-size: 14px; font-weight: 700; vertical-alignment: center; }
-                Rectangle {
-                    width: 70px; border-radius: 8px; background: Theme.p.sel;
-                    Text { text: "Online"; color: Theme.p.accent; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 66px; height: 28px; border-radius: 8px; background: Theme.p.accent.with-alpha(0.18);
+                        Text { text: "Online"; color: Theme.p.accent; font-size: 12px; font-weight: 600; horizontal-alignment: center; width: 100%; y: (parent.height - self.height) / 2 - 2px; }
+                    }
                 }
-                Rectangle {
-                    width: 50px;
-                    Text { text: "All"; color: Theme.p.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 46px; height: 28px; border-radius: 8px;
+                        background: allt.has-hover ? Theme.p.accent.with-alpha(0.18) : Theme.p.accent.with-alpha(0.07);
+                        Text { text: "All"; color: Theme.p.muted; font-size: 12px; horizontal-alignment: center; width: 100%; y: (parent.height - self.height) / 2 - 2px; }
+                        allt := TouchArea { }
+                    }
                 }
                 Rectangle { horizontal-stretch: 1; }
                 VerticalLayout {
@@ -518,12 +582,13 @@ component HomeView inherits Rectangle {
                     GradFill {
                         width: 92px; height: 30px; border-radius: 9px;
                         Text { text: "Add Friend"; color: Theme.p.accent-ink; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                        TouchArea { clicked => { State.dialog = 5; } }
                     }
                 }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.p.border; }
         }
-        ScrollView {
+        VScroll {
             vertical-stretch: 1;
             min-height: 0px;
             VerticalLayout {
@@ -534,7 +599,6 @@ component HomeView inherits Rectangle {
                     height: 56px;
                     background: fa.has-hover ? Theme.p.hover : transparent;
                     border-radius: 11px;
-                    Rectangle { height: 1px; background: Theme.p.border; }
                     HorizontalLayout {
                         padding-left: 12px; padding-right: 12px; spacing: 12px;
                         VerticalLayout {
@@ -563,7 +627,7 @@ component HomeView inherits Rectangle {
 component MemberSidebar inherits Rectangle {
     background: Theme.p.panel;
     Rectangle { x: 0; width: 1px; height: parent.height; background: Theme.p.border; }
-    ScrollView {
+    VScroll {
         width: 100%; height: 100%;
         VerticalLayout {
             padding: 10px; alignment: start; spacing: 0px;
@@ -604,28 +668,21 @@ component MemberSidebar inherits Rectangle {
 // ───────────────────────── status bar ─────────────────────────
 component StatusBar inherits Rectangle {
     background: Theme.p.titlebar;
-    Rectangle { height: 1px; background: Theme.p.border-lt; }
     HorizontalLayout {
-        padding-left: 14px; padding-right: 14px; spacing: 14px;
-        VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: Theme.p.online; } }
-        Mono { text: "QUIC :8444"; color: Theme.p.online; font-size: 10.5px; vertical-alignment: center; }
-        Mono { text: "ALPN dice/1"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
-        Mono { text: "23ms"; color: Theme.p.text; font-size: 10.5px; vertical-alignment: center; }
-        Mono { text: "· RAM"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
-        Mono { text: "94MB"; color: Theme.p.online; font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+        padding-left: 14px; padding-right: 14px; spacing: 7px;
+        // app name + version
+        Display { text: "DICE"; color: Theme.p.muted; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; vertical-alignment: center; }
+        Mono { text: "v0.1.0"; color: Theme.p.subtle; font-size: 10.5px; vertical-alignment: center; }
         Rectangle { horizontal-stretch: 1; }
-        Mono { text: "DICE_SPLIT=0"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
-        Mono { text: "monolith"; color: Theme.p.accent; font-size: 10.5px; vertical-alignment: center; }
-        Mono { text: "· node 7"; color: Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
-        Rectangle { horizontal-stretch: 1; }
+        // theme indicator — round solid swatch (matches the login pill) + name; opens Theme dialog
         Rectangle {
-            width: 110px;
-            HorizontalLayout {
+            width: til.preferred-width;
+            til := HorizontalLayout {
                 alignment: end; spacing: 6px;
-                VerticalLayout { alignment: center; Rectangle { width: 9px; height: 9px; border-radius: 3px; background: Theme.p.accent-grad; } }
+                VerticalLayout { alignment: center; Rectangle { width: 9px; height: 9px; border-radius: 4.5px; background: Theme.p.accent; border-width: 1px; border-color: Theme.p.border-lt; } }
                 Mono { text: Theme.name; color: tc.has-hover ? Theme.p.accent : Theme.p.muted; font-size: 10.5px; vertical-alignment: center; }
             }
-            tc := TouchArea { clicked => { State.dialog = 0; } }
+            tc := TouchArea { clicked => { State.settings-tab = 2; State.dialog = 4; } }
         }
     }
 }

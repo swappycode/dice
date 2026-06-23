@@ -75,17 +75,22 @@ export struct Friend {
 }
 
 export global State {
-    // screen: 0 = login, 1 = app
-    in-out property <int> screen: 1;
+    // screen: 0 = login, 1 = app, 2 = register (create account)
+    in-out property <int> screen: 0;
     // view: 0 = chat, 1 = voice, 2 = home
     in-out property <int> view: 0;
     in-out property <bool> show-members: true;
     in-out property <bool> in-voice: false;
-    // dialog: -1 none, 0 theme, 1 guild, 2 security, 3 voice
+    // dialog: -1 none, 1 guild/server settings, 4 user settings, 5 add friend
     in-out property <int> dialog: -1;
+    // active tab inside the unified Settings dialog: 0 account, 1 voice, 2 appearance, 3 about
+    in-out property <int> settings-tab: 0;
     in-out property <bool> muted: false;
     in-out property <bool> deafened: false;
     in-out property <bool> perf-mode: false;
+    // role in the active server — drives the Server Settings variant (admin edits
+    // the server; a member edits their own nickname). Real roles come with M2.
+    in-out property <bool> is-admin: true;
 
     in-out property <string> active-guild: "BARE METAL";
     in-out property <string> active-channel: "general";
@@ -110,6 +115,11 @@ export global State {
     callback win-close();
     callback win-minimize();
     callback win-maximize();
+    // title-bar drag → hands off to the OS window move-loop (frameless: no native
+    // drag handle, so the title bar drives it).
+    callback win-drag();
+    // edge/corner resize → OS resize-loop (dir: 0 W, 1 E, 2 N, 3 S, 4 NW, 5 NE, 6 SW, 7 SE)
+    callback win-resize(int);
 }
 
 // One animation clock for all ambient motion (equalizer, speaking-orb pulse,

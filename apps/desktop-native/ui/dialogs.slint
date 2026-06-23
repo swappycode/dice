@@ -1,10 +1,11 @@
 import { Theme, Geo } from "theme.slint";
-import { DieLogo, Display, Mono } from "widgets.slint";
+import { DieLogo, Display, Mono, Btn, VScroll } from "widgets.slint";
 import { IcoClose } from "icons.slint";
 import { State } from "state.slint";
 
 // ── Theme Builder (presets + the 5-knob custom theme) ──
 component ThemeBuilderBody inherits VerticalLayout {
+    alignment: start;
     spacing: 14px;
     property <[{name: string, c1: color, c2: color, c3: color, id: int}]> presets: [
         { name: "midnight",   c1: #10162f, c2: #5b8cff, c3: #46e0ff, id: 0 },
@@ -24,12 +25,12 @@ component ThemeBuilderBody inherits VerticalLayout {
         spacing: 10px;
         for c in 2 : Rectangle {
             property <int> idx: r * 2 + c;
-            height: 64px;
+            height: pv.preferred-height;
             border-radius: 12px;
             background: Theme.p.field;
             border-width: Theme.id == presets[idx].id ? 2px : 1px;
             border-color: Theme.id == presets[idx].id ? Theme.p.accent : Theme.p.border;
-            VerticalLayout {
+            pv := VerticalLayout {
                 padding: 13px; spacing: 9px; alignment: start;
                 HorizontalLayout {
                     spacing: 5px; alignment: start;
@@ -69,7 +70,7 @@ component ThemeBuilderBody inherits VerticalLayout {
         }
         Rectangle {
             height: 6px; border-radius: 3px; background: Theme.p.field;
-            Rectangle { x: 0; width: parent.width * 0.62; height: 6px; border-radius: 3px; background: Theme.p.accent-grad; }
+            Rectangle { x: 0; width: parent.width * 0.62; height: 6px; border-radius: 3px; background: Theme.p.accent; }
             Rectangle { x: parent.width * 0.62 - 8px; y: -5px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff; }
         }
     }
@@ -84,7 +85,7 @@ component ThemeBuilderBody inherits VerticalLayout {
         }
         Rectangle {
             height: 6px; border-radius: 3px; background: Theme.p.field;
-            Rectangle { x: 0; width: parent.width * 0.55; height: 6px; border-radius: 3px; background: Theme.p.accent-grad; }
+            Rectangle { x: 0; width: parent.width * 0.55; height: 6px; border-radius: 3px; background: Theme.p.accent; }
             Rectangle { x: parent.width * 0.55 - 8px; y: -5px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff; }
         }
     }
@@ -105,7 +106,7 @@ component ThemeBuilderBody inherits VerticalLayout {
                 alignment: center;
                 Rectangle {
                     width: 42px; height: 23px; border-radius: 12px;
-                    background: State.perf-mode ? Theme.p.field : Theme.p.accent-grad;
+                    background: State.perf-mode ? Theme.p.field : Theme.p.accent;
                     border-width: 1px; border-color: Theme.p.border;
                     Rectangle {
                         x: State.perf-mode ? 2px : 21px; y: 2px;
@@ -118,49 +119,74 @@ component ThemeBuilderBody inherits VerticalLayout {
     }
 }
 
-// ── Guild Settings ──
-component GuildBody inherits VerticalLayout {
+// ── reusable text field ──
+component TextField inherits Rectangle {
+    in property <string> value;
+    height: 44px;
+    border-radius: 10px;
+    background: Theme.p.field;
+    border-width: 1px;
+    border-color: Theme.p.border;
+    HorizontalLayout {
+        padding-left: 14px; padding-right: 14px;
+        TextInput { text: value; color: Theme.p.text; font-size: 13px; vertical-alignment: center; single-line: true; }
+    }
+}
+
+// ── Server Settings (from the guild-name dropdown) — admin vs member variant ──
+component ServerSettingsBody inherits VerticalLayout {
+    alignment: start;
     spacing: 16px;
     HorizontalLayout {
         spacing: 16px; alignment: start;
         Rectangle {
-            width: 70px; height: 70px; border-radius: 20px; background: Theme.p.accent-grad;
-            DieLogo { size: 50px; face: transparent; pip: #ffffff; gloss: true; }
+            width: 70px; height: 70px; border-radius: 20px; background: Theme.p.accent;
+            DieLogo { size: 50px; face: transparent; pip: #ffffff; gloss: true; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
         }
         VerticalLayout {
             alignment: center; spacing: 4px;
             Display { text: "BARE METAL"; color: Theme.p.text; font-size: 20px; font-weight: 700; letter-spacing: 1px; }
-            Text { text: "7 members · 9 channels · since 2026"; color: Theme.p.muted; font-size: 12px; }
+            Text { text: State.is-admin ? "7 members · 9 channels · you're an admin" : "7 members · 9 channels · since 2026"; color: Theme.p.muted; font-size: 12px; }
         }
     }
-    Text { text: "Invite link"; color: Theme.p.muted; font-size: 12px; }
-    HorizontalLayout {
-        spacing: 8px;
-        Rectangle {
-            horizontal-stretch: 1; height: 40px; border-radius: 9px; background: Theme.p.field;
-            border-width: 1px; border-color: Theme.p.border;
-            HorizontalLayout { padding-left: 13px;
-                Mono { text: "dice://rack.local/invite/q7Xk2"; color: Theme.p.text; font-size: 12px; vertical-alignment: center; }
+    // admin edits the server name; a member edits their own nickname
+    VerticalLayout {
+        spacing: 7px;
+        Text { text: State.is-admin ? "SERVER NAME" : "YOUR NICKNAME"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+        TextField { value: State.is-admin ? "BARE METAL" : "fanless_fred"; }
+    }
+    VerticalLayout {
+        spacing: 7px;
+        Text { text: "Invite link"; color: Theme.p.muted; font-size: 12px; }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1; height: 44px; border-radius: 10px; background: Theme.p.field;
+                border-width: 1px; border-color: Theme.p.border;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    Mono { text: "dice://rack.local/invite/q7Xk2"; color: Theme.p.text; font-size: 12px; vertical-alignment: center; }
+                }
             }
-        }
-        Rectangle {
-            width: 72px; height: 40px; border-radius: 9px; background: Theme.p.accent-grad;
-            Text { text: "Copy"; color: Theme.p.accent-ink; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+            Btn { width: 78px; height: 44px; variant: "primary"; label: "Copy"; }
         }
     }
-    HorizontalLayout {
-        spacing: 10px;
-        Rectangle {
-            horizontal-stretch: 1; height: 44px; border-radius: 10px; background: Theme.p.field;
-            border-width: 1px; border-color: Theme.p.border;
-            Text { text: "Create guild"; color: Theme.p.text; font-size: 13px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
-        }
-        Rectangle {
-            horizontal-stretch: 1; height: 44px; border-radius: 10px; background: Theme.p.field;
-            border-width: 1px; border-color: Theme.p.border;
-            Text { text: "Join with link"; color: Theme.p.text; font-size: 13px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
-        }
-    }
+    // destructive action differs by role
+    Btn { variant: "danger"; height: 44px; label: State.is-admin ? "Delete server" : "Leave server"; }
+}
+
+// ── Add a Server (from the rail "+") — create or join ──
+component AddServerBody inherits VerticalLayout {
+    alignment: start;
+    spacing: 14px;
+    Text { text: "Create your own server, or join an existing one with an invite link."; color: Theme.p.muted; font-size: 12.5px; wrap: word-wrap; }
+    Text { text: "CREATE A SERVER"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+    TextField { value: "My Homelab"; }
+    Btn { variant: "primary"; height: 44px; label: "Create server"; }
+    Rectangle { height: 1px; background: Theme.p.border; }
+    Text { text: "JOIN WITH INVITE"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+    TextField { value: "dice://rack.local/invite/…"; }
+    Btn { variant: "secondary"; height: 44px; label: "Join server"; }
 }
 
 // ── Account Security ──
@@ -173,6 +199,7 @@ component QrFinder inherits Rectangle {
     }
 }
 component SecurityBody inherits VerticalLayout {
+    alignment: start;
     spacing: 16px;
     // email-not-verified banner
     Rectangle {
@@ -184,7 +211,7 @@ component SecurityBody inherits VerticalLayout {
             VerticalLayout {
                 alignment: center; spacing: 2px; horizontal-stretch: 1;
                 Text { text: "Email not verified"; color: Theme.p.text; font-size: 13px; font-weight: 600; }
-                Text { text: "dev build runs a LogMailer — check the server log for your link"; color: Theme.p.muted; font-size: 11.5px; }
+                Text { text: "check the server log for the verification link"; color: Theme.p.muted; font-size: 11.5px; wrap: word-wrap; }
             }
             VerticalLayout {
                 alignment: center;
@@ -195,11 +222,12 @@ component SecurityBody inherits VerticalLayout {
             }
         }
     }
-    // TOTP card
+    // TOTP card — height follows its content so the recovery codes can't clip out
     Rectangle {
-        height: 132px; border-radius: 12px; background: Theme.p.field;
+        height: totp.preferred-height;
+        border-radius: 12px; background: Theme.p.field;
         border-width: 1px; border-color: Theme.p.border;
-        HorizontalLayout {
+        totp := HorizontalLayout {
             padding: 16px; spacing: 16px; alignment: start;
             // faux QR
             Rectangle {
@@ -242,6 +270,8 @@ component SecurityBody inherits VerticalLayout {
             }
         }
     }
+    // Log out → ends the session, back to the login screen
+    Btn { variant: "danger"; height: 44px; label: "Log out"; clicked => { State.dialog = -1; State.screen = 0; } }
 }
 
 // ── Voice & Video ──
@@ -262,14 +292,15 @@ component DeviceRow inherits VerticalLayout {
     }
 }
 component VoiceBody inherits VerticalLayout {
+    alignment: start;
     spacing: 16px;
     DeviceRow { label: "Input device"; value: "Yeti Nano (USB)"; }
     VerticalLayout {
         spacing: 7px;
         Text { text: "Mic test"; color: Theme.p.muted; font-size: 12px; }
         Rectangle {
-            height: 10px; border-radius: 5px; background: Theme.p.field; clip: true;
-            Rectangle { x: 0; width: parent.width * 0.64; height: 10px; border-radius: 5px; background: Theme.p.accent-grad; }
+            height: 10px; border-radius: 5px; background: Theme.p.field;
+            Rectangle { x: 0; width: parent.width * 0.64; height: 10px; border-radius: 5px; background: Theme.p.accent; }
         }
     }
     DeviceRow { label: "Output device"; value: "DT 770 Pro"; }
@@ -287,11 +318,12 @@ component VoiceBody inherits VerticalLayout {
             VerticalLayout {
                 alignment: center;
                 Rectangle {
-                    width: 96px; height: 28px; border-radius: 8px; background: #000000.with-alpha(0.25);
+                    width: 96px; height: 28px; border-radius: 8px; background: Theme.p.field;
+                    border-width: 1px; border-color: Theme.p.border;
                     HorizontalLayout {
                         padding: 2px; spacing: 2px;
                         Rectangle {
-                            horizontal-stretch: 1; border-radius: 7px; background: Theme.p.accent-grad;
+                            horizontal-stretch: 1; border-radius: 7px; background: Theme.p.accent;
                             Text { text: "VAD"; color: Theme.p.accent-ink; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
                         }
                         Rectangle {
@@ -324,10 +356,115 @@ component VoiceBody inherits VerticalLayout {
             VerticalLayout {
                 alignment: center;
                 Rectangle {
-                    width: 42px; height: 23px; border-radius: 12px; background: Theme.p.accent-grad;
+                    width: 42px; height: 23px; border-radius: 12px; background: Theme.p.accent;
                     Rectangle { x: 21px; y: 2px; width: 19px; height: 19px; border-radius: 10px; background: #ffffff; }
                 }
             }
+        }
+    }
+}
+
+// ── Settings: About / Connection / Runtime (the specs moved out of the chrome) ──
+component SpecRow inherits HorizontalLayout {
+    in property <string> k;
+    in property <string> v;
+    height: 32px;
+    Text { text: k; color: Theme.p.muted; font-size: 12.5px; vertical-alignment: center; }
+    Rectangle { horizontal-stretch: 1; }
+    Mono { text: v; color: Theme.p.text; font-size: 12px; vertical-alignment: center; }
+}
+component AboutBody inherits VerticalLayout {
+    alignment: start;
+    spacing: 14px;
+    HorizontalLayout {
+        spacing: 14px; alignment: start;
+        Rectangle {
+            width: 58px; height: 58px; border-radius: 17px; background: Theme.p.accent;
+            DieLogo { size: 42px; face: transparent; pip: #ffffff; gloss: true; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+        }
+        VerticalLayout {
+            alignment: center; spacing: 3px;
+            Display { text: "DICE"; color: Theme.p.text; font-size: 22px; font-weight: 700; letter-spacing: 3px; }
+            Mono { text: "v0.1.0 · native Slint client"; color: Theme.p.muted; font-size: 12px; }
+        }
+    }
+    Text { text: "CONNECTION"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+    Rectangle {
+        border-radius: 11px; background: Theme.p.field; border-width: 1px; border-color: Theme.p.border;
+        VerticalLayout {
+            padding-left: 14px; padding-right: 14px; padding-top: 4px; padding-bottom: 4px;
+            SpecRow { k: "Transport"; v: "QUIC :8444"; }
+            SpecRow { k: "ALPN"; v: "dice/1"; }
+            SpecRow { k: "Voice codec"; v: "Opus · 48 kHz"; }
+            SpecRow { k: "Latency"; v: "14 ms"; }
+        }
+    }
+    Text { text: "RUNTIME"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+    Rectangle {
+        border-radius: 11px; background: Theme.p.field; border-width: 1px; border-color: Theme.p.border;
+        VerticalLayout {
+            padding-left: 14px; padding-right: 14px; padding-top: 4px; padding-bottom: 4px;
+            SpecRow { k: "Mode"; v: "monolith (DICE_SPLIT=0)"; }
+            SpecRow { k: "Node"; v: "node 7"; }
+            SpecRow { k: "Memory"; v: "94 MB"; }
+            SpecRow { k: "Idle CPU"; v: "~0%"; }
+        }
+    }
+}
+
+// ── unified user Settings — tabbed (Account / Voice / Appearance / About) ──
+component SettingsBody inherits VerticalLayout {
+    spacing: 14px;
+    HorizontalLayout {
+        spacing: 8px;
+        for t[i] in ["My Account", "Voice & Video", "Appearance", "About"] : Rectangle {
+            height: 34px; border-radius: 9px;
+            width: lbl.preferred-width + 28px;
+            background: State.settings-tab == i ? Theme.p.accent : (tb.has-hover ? Theme.p.accent.with-alpha(0.22) : Theme.p.accent.with-alpha(0.10));
+            lbl := Text {
+                text: t;
+                color: State.settings-tab == i ? Theme.p.accent-ink : Theme.p.text;
+                font-size: 12.5px; font-weight: 600;
+                horizontal-alignment: center;
+                width: 100%;
+                y: (parent.height - self.height) / 2 - 2px;
+            }
+            tb := TouchArea { clicked => { State.settings-tab = i; } }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+    Rectangle {
+        height: 430px;
+        VScroll {
+            VerticalLayout {
+                if State.settings-tab == 0 : SecurityBody { }
+                if State.settings-tab == 1 : VoiceBody { }
+                if State.settings-tab == 2 : ThemeBuilderBody { }
+                if State.settings-tab == 3 : AboutBody { }
+            }
+        }
+    }
+}
+
+// ── Add Friend ──
+component AddFriendBody inherits VerticalLayout {
+    spacing: 14px;
+    Text { text: "Add a friend by their username — they'll get a friend request."; color: Theme.p.muted; font-size: 12.5px; wrap: word-wrap; }
+    Text { text: "USERNAME"; color: Theme.p.subtle; font-size: 11px; font-weight: 700; }
+    Rectangle {
+        height: 46px; border-radius: 10px; background: Theme.p.field;
+        border-width: 1px; border-color: Theme.p.border;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 14px;
+            TextInput { text: "kernelpanic#4f2a"; color: Theme.p.text; font-size: 13px; vertical-alignment: center; single-line: true; }
+        }
+    }
+    HorizontalLayout {
+        Rectangle { horizontal-stretch: 1; }
+        Rectangle {
+            width: 150px; height: 42px; border-radius: 10px; background: Theme.p.accent;
+            Text { text: "Send Request"; color: Theme.p.accent-ink; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+            TouchArea { clicked => { State.dialog = -1; } }
         }
     }
 }
@@ -345,22 +482,25 @@ export component DialogHost inherits Rectangle {
         HorizontalLayout {
             alignment: center;
             Rectangle {
-                width: State.dialog == 0 ? 460px : 440px;
+                width: State.dialog == 4 ? 660px : 440px;
                 background: Theme.p.win-solid;
                 border-radius: Geo.r-window;
                 border-width: 1px;
                 border-color: Theme.p.border-lt;
-                clip: true;
                 // consume clicks so the scrim behind doesn't close
                 TouchArea {}
                 VerticalLayout {
-                    // header
+                    // header — solid accent tint with per-corner top rounding so the
+                    // top corners follow the dialog (a gradient header renders square)
                     Rectangle {
-                        height: 54px; background: Theme.p.titlebar;
+                        height: 54px;
+                        background: Theme.p.sel;
+                        border-top-left-radius: Geo.r-window;
+                        border-top-right-radius: Geo.r-window;
                         HorizontalLayout {
                             padding-left: 20px; padding-right: 14px;
                             Display {
-                                text: State.dialog == 0 ? "Theme Builder" : State.dialog == 1 ? "Guild Settings" : State.dialog == 2 ? "Account Security" : "Voice & Video";
+                                text: State.dialog == 1 ? "Server Settings" : State.dialog == 4 ? "Settings" : State.dialog == 5 ? "Add Friend" : State.dialog == 6 ? "Add a Server" : "";
                                 color: Theme.p.text; font-size: 16px; font-weight: 700; letter-spacing: 1px; vertical-alignment: center; horizontal-stretch: 1;
                             }
                             VerticalLayout {
@@ -380,10 +520,10 @@ export component DialogHost inherits Rectangle {
                         clip: true;
                         VerticalLayout {
                             padding: 22px;
-                            if State.dialog == 0 : ThemeBuilderBody {}
-                            if State.dialog == 1 : GuildBody {}
-                            if State.dialog == 2 : SecurityBody {}
-                            if State.dialog == 3 : VoiceBody {}
+                            if State.dialog == 1 : ServerSettingsBody {}
+                            if State.dialog == 4 : SettingsBody {}
+                            if State.dialog == 5 : AddFriendBody {}
+                            if State.dialog == 6 : AddServerBody {}
                         }
                     }
                 }

@@ -59,14 +59,71 @@ export component Avatar inherits Rectangle {
     }
 }
 
-// A rounded gradient fill. Gradients do NOT honor border-radius in the software
-// renderer (they fill the full square), so the gradient is drawn as a CLIPPED
-// child of this rounded parent. Set `border-radius` + size + content on the
-// GradFill itself; pass the gradient via `grad`.
+// A rounded accent fill for buttons/badges. IMPORTANT: the software renderer
+// rounds SOLID color fills but NOT gradients OR clipped children — both render
+// as hard squares. So accent surfaces use a solid color; set `border-radius` +
+// size + content on the GradFill itself, and override `fill` for non-accent
+// tints (e.g. the red hang-up button). The brief's gradients are reserved for
+// large non-rounded areas (the desk, the login top strip).
 export component GradFill inherits Rectangle {
-    in property <brush> grad: Theme.p.accent-grad;
+    in property <color> fill: Theme.p.accent;
+    background: fill;
+}
+
+// Vertical scroll area with a THEME-COLORED thumb and NO visible track (the std
+// ScrollView's scrollbar ignores our palette and draws a track). Wheel + drag-on-
+// content scroll via Flickable; the thumb/track is also draggable to scrub.
+export component VScroll inherits Rectangle {
     clip: true;
-    Rectangle { width: 100%; height: 100%; background: grad; }
+    fl := Flickable {
+        viewport-width: self.width;
+        @children
+    }
+    track := Rectangle {
+        property <length> trk: root.height;
+        property <length> vp: max(fl.viewport-height, 1px);
+        visible: fl.viewport-height > root.height + 2px;
+        x: root.width - self.width - 2px;
+        width: 8px;
+        thumb := Rectangle {
+            width: 5px;
+            x: (parent.width - self.width) / 2;
+            height: max(32px, track.trk * track.trk / track.vp);
+            y: (track.trk - self.height) * (-fl.viewport-y / max(track.vp - track.trk, 1px));
+            border-radius: self.width / 2;
+            background: ta.has-hover || ta.pressed ? Theme.p.accent : Theme.p.accent.with-alpha(0.6);
+        }
+        ta := TouchArea {
+            moved => {
+                fl.viewport-y = -clamp((self.mouse-y - thumb.height / 2) / max(track.trk - thumb.height, 1px), 0, 1) * (track.vp - track.trk);
+            }
+        }
+    }
+}
+
+// Solid push-button — filled, never hollow/outlined. variant: "primary" (accent
+// fill + ink text), "secondary" (tonal accent-tint fill + text), "danger" (red).
+export component Btn inherits Rectangle {
+    in property <string> label;
+    in property <string> variant: "secondary";
+    callback clicked;
+    height: 42px;
+    border-radius: 10px;
+    background:
+        root.variant == "primary" ? (ta.has-hover ? Theme.p.accent.darker(0.12) : Theme.p.accent) :
+        root.variant == "danger" ? (ta.has-hover ? Theme.p.dnd.darker(0.10) : Theme.p.dnd) :
+        (ta.has-hover ? Theme.p.accent.with-alpha(0.30) : Theme.p.accent.with-alpha(0.16));
+    Text {
+        text: root.label;
+        color: root.variant == "primary" ? Theme.p.accent-ink : root.variant == "danger" ? #ffffff : Theme.p.text;
+        font-size: 13px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
 }
 
 // Presence status dot with the punch-out ring (no blur; the ring reads it out).

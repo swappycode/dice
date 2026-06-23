@@ -27,9 +27,29 @@ slint = { version = "1", default-features = false, features = [
 # pure-Rust PNG encoder, used only by the headless `--shots` screenshot mode
 # (lets us render every screen to an image without a display, for verification)
 png = "0.17"
+# Direct handle to the winit window beneath Slint's backend — used ONLY to start
+# the OS move-loop on title-bar drag (the window is frameless, so there is no
+# native drag handle). Same version Slint's `backend-winit` already resolves, so
+# it adds no new deps and stays pure-Rust (winit, no C toolchain).
+i-slint-backend-winit = { version = "=1.16.1", default-features = false }
+# winit itself — to set the taskbar/window icon and reach the raw window handle.
+# Same 0.30 line Slint's backend already resolves, so it unifies (no new deps).
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+
+# Windows-only: opt the frameless window into Windows 11 rounded corners via a
+# single DWM attribute call (no native build — windows-sys is pure bindings).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [build-dependencies]
 slint-build = "1"
+
+# Windows-only: compile the app icon into the .exe as a resource so the taskbar,
+# Explorer, Alt-Tab and pinned shortcuts show the Dice die (the runtime winit
+# icon only affects the live window and is unreliable for the taskbar). Pure-Rust
+# wrapper that drives the SDK resource compiler; build-time only, no runtime dep.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 # Release profile tuned for a small binary + low runtime footprint (mirrors the
 # survey's recommendation for the native shell).

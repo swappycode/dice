@@ -29,7 +29,7 @@ $wsMB   = [math]::Round($proc.WorkingSet64 / 1MB, 1)
 Write-Host ""
 Write-Host "  screen        : $Screen"
 Write-Host "  PID           : $($p.Id)"
-Write-Host "  Private bytes : $privMB MB   <-- the <100 MB target metric"
+Write-Host "  Private bytes : $privMB MB   (the under-100 MB target metric)"
 Write-Host "  Working set   : $wsMB MB"
 Write-Host ""
 

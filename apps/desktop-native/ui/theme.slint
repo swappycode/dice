@@ -39,7 +39,9 @@ export struct Palette {
 }
 
 export global Theme {
-    in property <int> id: 0;
+    // in-out so the on-screen theme cycler (login + dialog) can advance it, and
+    // Rust can still set it.
+    in-out property <int> id: 0;
 
     property <[Palette]> palettes: [
         // 0 ── midnight (hero) — deep indigo Aero glass
@@ -267,6 +269,10 @@ export global Theme {
         root.id == 2 ? "phosphor" : root.id == 3 ? "bubble" :
         root.id == 4 ? "luna"     : root.id == 5 ? "nocturne" :
         root.id == 6 ? "vantablack" : "ember";
+
+    // aero / bubble / luna are the light themes — drives the std-widget palette
+    // (scrollbars etc.) so they don't render dark on a light theme.
+    out property <bool> is-light: root.id == 1 || root.id == 3 || root.id == 4;
 
     // presence kind (0 online, 1 idle, 2 dnd, 3 offline) → theme color
     pure public function presence-color(k: int) -> color {

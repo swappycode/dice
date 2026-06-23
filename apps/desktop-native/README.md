@@ -11,10 +11,18 @@ toolchain, hermetic (no `aws-lc`/`openssl`/native-build traps).
 
 ## Status
 
-**Milestone 1 — the UI shell on seed data.** All screens (login, app shell, chat,
-voice, home/friends) + the 4 dialogs across 8 themes, driven by demo data. The
-backend wiring (real login/guilds/messages/voice via the existing `ClientCore`
-host) is **milestone 2** — until then the data on screen is placeholder.
+**Milestone 1 — the UI shell on seed data — COMPLETE + polished** across all 8 themes
+(login, register, app shell, chat, voice, home/friends, and the Settings / Add-Friend /
+Add-a-Server / Server-Settings dialogs). The frameless window drags, resizes, has Windows 11
+rounded corners + an embedded taskbar icon, and a Per-Monitor-V2 DPI manifest for crisp text.
+RAM: **~10.6 MB private / ~29.7 MB working set** (vs WebView2 ≈117 MB).
+
+The backend wiring (real login / guilds / messages / voice via the existing `ClientCore`
+host) is **milestone 2** — until then the data on screen is placeholder seed data.
+
+Rendering note: the Slint software renderer rounds **only solid-colour fills** (not gradients
+or `clip`), so every accent surface uses a solid fill; top-only rounding (card / dialog
+headers) is a solid base + a per-corner-radius body-cover.
 
 ## Run
 

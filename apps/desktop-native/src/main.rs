@@ -6,6 +6,7 @@ slint::include_modules!();
 
 mod seed;
 
+use i_slint_backend_winit::WinitWindowAccessor;
 use slint::ComponentHandle;
 
 /// Register the bundled OFL fonts (Chakra Petch display, Space Mono mono) so the
@@ -92,8 +93,138 @@ fn main() -> Result<(), slint::PlatformError> {
             win.set_maximized(!win.is_maximized());
         }
     });
+    // Title-bar drag: frameless windows have no OS move handle, so reach the winit
+    // window under Slint's backend and start the OS move-loop. Ignored if the
+    // platform can't drag (returns Err) — no-op rather than a panic.
+    let w = ui.as_weak();
+    ui.global::<State>().on_win_drag(move || {
+        if let Some(ui) = w.upgrade() {
+            ui.window().with_winit_window(|win| {
+                let _ = win.drag_window();
+            });
+        }
+    });
+    // edge/corner resize for the frameless window → OS resize-loop
+    let w = ui.as_weak();
+    ui.global::<State>().on_win_resize(move |dir| {
+        if let Some(ui) = w.upgrade() {
+            use winit::window::ResizeDirection::*;
+            let d = match dir {
+                0 => West,
+                1 => East,
+                2 => North,
+                3 => South,
+                4 => NorthWest,
+                5 => NorthEast,
+                6 => SouthWest,
+                _ => SouthEast,
+            };
+            ui.window().with_winit_window(|win| {
+                let _ = win.drag_resize_window(d);
+            });
+        }
+    });
 
+    // Apply native window chrome (taskbar icon + Windows 11 rounded corners) once
+    // the loop is running and the winit window is realized. Doing it before run()
+    // (or right after show()) is too early — `with_winit_window` returns None and
+    // the icon/corners silently never apply. A single-shot timer fires on the
+    // first tick, when the window exists.
+    let w = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(80), move || {
+        if let Some(ui) = w.upgrade() {
+            apply_native_window_chrome(&ui);
+        }
+    });
     ui.run()
+}
+
+/// Apply native window decoration the Slint markup can't: the taskbar/window
+/// icon and, on Windows 11, rounded corners (the window is frameless, so DWM
+/// won't round it by default).
+fn apply_native_window_chrome(ui: &AppWindow) {
+    let applied = ui.window().with_winit_window(|win| {
+        win.set_window_icon(die_icon());
+        #[cfg(windows)]
+        round_window_corners(win);
+        true
+    });
+    if applied.is_none() {
+        eprintln!("dice-native: winit window not ready — chrome not applied");
+    }
+}
+
+/// The Dice die mark rasterized to a 64×64 RGBA icon (rounded blue face + the
+/// 5-pip quincunx), so the taskbar/Alt-Tab show the app logo instead of a
+/// generic window icon. Generated — no raster asset on disk.
+fn die_icon() -> Option<winit::window::Icon> {
+    const S: i32 = 64;
+    let mut px = vec![0u8; (S * S * 4) as usize];
+    let mut put = |x: i32, y: i32, c: [u8; 4]| {
+        if x < 0 || y < 0 || x >= S || y >= S {
+            return;
+        }
+        let i = ((y * S + x) * 4) as usize;
+        let a = c[3] as u32;
+        for k in 0..3 {
+            let dst = px[i + k] as u32;
+            px[i + k] = ((c[k] as u32 * a + dst * (255 - a)) / 255) as u8;
+        }
+        px[i + 3] = px[i + 3].max(c[3]);
+    };
+    // rounded-square face (accent blue, matching the midnight palette)
+    let (x0, y0, x1, y1, r) = (5, 5, 59, 59, 14);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let nx = x.clamp(x0 + r, x1 - 1 - r);
+            let ny = y.clamp(y0 + r, y1 - 1 - r);
+            let (dx, dy) = ((x - nx) as f32, (y - ny) as f32);
+            if dx * dx + dy * dy <= (r * r) as f32 {
+                put(x, y, [0x5b, 0x8c, 0xff, 0xff]);
+            }
+        }
+    }
+    // 5 white pips (quincunx), centers scaled from the logo's 100-unit viewbox
+    for (cx, cy) in [(19, 19), (45, 19), (32, 32), (19, 45), (45, 45)] {
+        let pr = 5;
+        for y in cy - pr..=cy + pr {
+            for x in cx - pr..=cx + pr {
+                let (dx, dy) = ((x - cx) as f32, (y - cy) as f32);
+                if dx * dx + dy * dy <= (pr * pr) as f32 {
+                    put(x, y, [0xf4, 0xf6, 0xff, 0xff]);
+                }
+            }
+        }
+    }
+    winit::window::Icon::from_rgba(px, S as u32, S as u32).ok()
+}
+
+/// Opt the borderless window into Windows 11's rounded-corner DWM policy (a
+/// frameless window otherwise gets square corners).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn round_window_corners(win: &winit::window::Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    let Ok(handle) = win.window_handle() else {
+        return;
+    };
+    if let RawWindowHandle::Win32(h) = handle.as_raw() {
+        let hwnd = h.hwnd.get() as *mut core::ffi::c_void;
+        let pref: i32 = DWMWCP_ROUND;
+        // SAFETY: hwnd is a live top-level window owned by this process; the
+        // attribute id and value size match the DWM corner-preference contract.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &pref as *const i32 as *const core::ffi::c_void,
+                core::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
 }
 
 /// Apply screen/view selection used by both the live app and screenshots.
@@ -101,6 +232,7 @@ fn select_screen(ui: &AppWindow, screen: &str) {
     let st = ui.global::<State>();
     match screen {
         "login" => st.set_screen(0),
+        "register" => st.set_screen(2),
         "voice" => {
             st.set_screen(1);
             st.set_view(1);
@@ -111,10 +243,44 @@ fn select_screen(ui: &AppWindow, screen: &str) {
             st.set_view(2);
         }
         // dialogs (over the chat shell)
-        "d-theme" => st.set_dialog(0),
-        "d-guild" => st.set_dialog(1),
-        "d-security" => st.set_dialog(2),
-        "d-voice" => st.set_dialog(3),
+        "d-guild" => {
+            st.set_screen(1);
+            st.set_is_admin(true);
+            st.set_dialog(1);
+        }
+        "d-server-member" => {
+            st.set_screen(1);
+            st.set_is_admin(false);
+            st.set_dialog(1);
+        }
+        "d-addserver" => {
+            st.set_screen(1);
+            st.set_dialog(6);
+        }
+        "d-settings" | "d-security" => {
+            st.set_screen(1);
+            st.set_settings_tab(0);
+            st.set_dialog(4);
+        }
+        "d-voice" => {
+            st.set_screen(1);
+            st.set_settings_tab(1);
+            st.set_dialog(4);
+        }
+        "d-theme" => {
+            st.set_screen(1);
+            st.set_settings_tab(2);
+            st.set_dialog(4);
+        }
+        "d-about" => {
+            st.set_screen(1);
+            st.set_settings_tab(3);
+            st.set_dialog(4);
+        }
+        "d-friend" => {
+            st.set_screen(1);
+            st.set_dialog(5);
+        }
         _ => {
             st.set_screen(1);
             st.set_view(0);

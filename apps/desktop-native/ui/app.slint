@@ -1,11 +1,23 @@
 import { Theme, Geo } from "theme.slint";
 import { State, Anim, GuildTile, ChannelRow, ChatMsg, Reaction, MemberRow, VoicePart, Friend } from "state.slint";
-import { LoginScreen } from "login.slint";
+import { LoginScreen, RegisterScreen } from "login.slint";
 import { AppShell } from "shell.slint";
 import { DialogHost } from "dialogs.slint";
+import { Palette } from "std-widgets.slint";
 
 // re-export globals so the Rust side can drive them (palette + view state + seed)
 export { Theme, Geo, State }
+
+// A perimeter resize handle: a transparent TouchArea that hands a press off to the
+// OS resize-loop via State.win-resize(dir). Set mouse-cursor + dir on each.
+component ResizeEdge inherits TouchArea {
+    in property <int> dir;
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+            State.win-resize(dir);
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     title: "Dice";
@@ -17,6 +29,12 @@ export component AppWindow inherits Window {
     preferred-width: 1280px;
     preferred-height: 800px;
     background: Theme.p.desk;
+
+    // keep the std-widget palette (scrollbars) in sync with the theme's light/dark
+    // so the scrollbar doesn't render dark on the light themes.
+    property <int> theme-id: Theme.id;
+    init => { Palette.color-scheme = Theme.is-light ? ColorScheme.light : ColorScheme.dark; }
+    changed theme-id => { Palette.color-scheme = Theme.is-light ? ColorScheme.light : ColorScheme.dark; }
 
     // ambient desk glow blobs (behind everything; soft radial fills, no blur).
     // perf-mode drops them entirely (the brief: perf-mode kills glow/overlays).
@@ -36,8 +54,20 @@ export component AppWindow inherits Window {
     }
 
     if State.screen == 0 : LoginScreen { width: 100%; height: 100%; }
+    if State.screen == 2 : RegisterScreen { width: 100%; height: 100%; }
     if State.screen == 1 : AppShell { width: 100%; height: 100%; }
     DialogHost { width: 100%; height: 100%; }
+
+    // resize handles for the frameless window — thin perimeter strips + corner
+    // squares, on top so they catch edge presses (winit drag_resize_window)
+    ResizeEdge { x: 0; y: 12px; width: 5px; height: parent.height - 24px; mouse-cursor: ew-resize; dir: 0; }
+    ResizeEdge { x: parent.width - 5px; y: 12px; width: 5px; height: parent.height - 24px; mouse-cursor: ew-resize; dir: 1; }
+    ResizeEdge { x: 12px; y: 0; width: parent.width - 24px; height: 5px; mouse-cursor: ns-resize; dir: 2; }
+    ResizeEdge { x: 12px; y: parent.height - 5px; width: parent.width - 24px; height: 5px; mouse-cursor: ns-resize; dir: 3; }
+    ResizeEdge { x: 0; y: 0; width: 12px; height: 12px; mouse-cursor: nwse-resize; dir: 4; }
+    ResizeEdge { x: parent.width - 12px; y: 0; width: 12px; height: 12px; mouse-cursor: nesw-resize; dir: 5; }
+    ResizeEdge { x: 0; y: parent.height - 12px; width: 12px; height: 12px; mouse-cursor: nesw-resize; dir: 6; }
+    ResizeEdge { x: parent.width - 12px; y: parent.height - 12px; width: 12px; height: 12px; mouse-cursor: nwse-resize; dir: 7; }
 
     // single ambient-motion clock, gated for idle/perf-mode (zero cost otherwise)
     Timer {
